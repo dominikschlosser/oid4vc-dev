@@ -1,0 +1,52 @@
+// Copyright 2025 Dominik Schlosser
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package cmd
+
+import (
+	"fmt"
+
+	"github.com/dominikschlosser/ssi-debugger/internal/format"
+	"github.com/dominikschlosser/ssi-debugger/internal/web"
+	"github.com/spf13/cobra"
+)
+
+var port int
+
+var serveCmd = &cobra.Command{
+	Use:   "serve [credential]",
+	Short: "Start a local web UI for decoding credentials",
+	Long:  "Starts a local HTTP server serving a web UI for pasting and decoding SSI credentials (SD-JWT, JWT, mDOC). Optionally pass a credential to pre-fill the input.",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runServe,
+}
+
+func init() {
+	serveCmd.Flags().IntVar(&port, "port", 8080, "Port to listen on")
+	rootCmd.AddCommand(serveCmd)
+}
+
+func runServe(cmd *cobra.Command, args []string) error {
+	var credential string
+	if len(args) > 0 {
+		raw, err := format.ReadInput(args[0])
+		if err != nil {
+			return err
+		}
+		credential = raw
+	}
+
+	fmt.Printf("Starting SSI Debugger Web UI at http://localhost:%d\n", port)
+	return web.ListenAndServe(port, credential)
+}

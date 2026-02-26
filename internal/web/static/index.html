@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSI Debugger</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <h1>SSI Debugger</h1>
+      <span class="subtitle">Decode SD-JWT, JWT &amp; mDOC credentials</span>
+    </div>
+    <div class="header-right">
+      <button id="clear-btn" class="btn" title="Clear">Clear</button>
+      <button id="theme-btn" class="btn" title="Toggle theme"></button>
+    </div>
+  </header>
+  <main>
+    <div class="pane input-pane">
+      <div class="pane-header">
+        <span>Input</span>
+        <span id="format-badge" class="badge hidden"></span>
+      </div>
+      <textarea id="input" placeholder="Paste an SD-JWT, JWT, or mDOC credential here..." spellcheck="false" autocomplete="off"></textarea>
+    </div>
+    <div class="pane output-pane">
+      <div class="pane-header"><span>Decoded</span></div>
+      <div id="output" class="output-content">
+        <div class="placeholder">Paste a credential to see decoded output</div>
+      </div>
+    </div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

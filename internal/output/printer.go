@@ -77,26 +77,31 @@ func formatDuration(d time.Duration) string {
 	}
 }
 
+// BuildSDJWTJSON returns the JSON-serializable map for an SD-JWT token.
+func BuildSDJWTJSON(token *sdjwt.Token) map[string]any {
+	out := map[string]any{
+		"format":         "dc+sd-jwt",
+		"header":         token.Header,
+		"payload":        token.Payload,
+		"disclosures":    formatDisclosuresJSON(token.Disclosures),
+		"resolvedClaims": token.ResolvedClaims,
+	}
+	if len(token.Warnings) > 0 {
+		out["warnings"] = token.Warnings
+	}
+	if token.KeyBindingJWT != nil {
+		out["keyBindingJWT"] = map[string]any{
+			"header":  token.KeyBindingJWT.Header,
+			"payload": token.KeyBindingJWT.Payload,
+		}
+	}
+	return out
+}
+
 // PrintSDJWT prints a decoded SD-JWT to the terminal.
 func PrintSDJWT(token *sdjwt.Token, opts Options) {
 	if opts.JSON {
-		out := map[string]any{
-			"format":         "dc+sd-jwt",
-			"header":         token.Header,
-			"payload":        token.Payload,
-			"disclosures":    formatDisclosuresJSON(token.Disclosures),
-			"resolvedClaims": token.ResolvedClaims,
-		}
-		if len(token.Warnings) > 0 {
-			out["warnings"] = token.Warnings
-		}
-		if token.KeyBindingJWT != nil {
-			out["keyBindingJWT"] = map[string]any{
-				"header":  token.KeyBindingJWT.Header,
-				"payload": token.KeyBindingJWT.Payload,
-			}
-		}
-		PrintJSON(out)
+		PrintJSON(BuildSDJWTJSON(token))
 		return
 	}
 
@@ -153,15 +158,19 @@ func PrintSDJWT(token *sdjwt.Token, opts Options) {
 	fmt.Println()
 }
 
+// BuildJWTJSON returns the JSON-serializable map for a plain JWT token.
+func BuildJWTJSON(token *sdjwt.Token) map[string]any {
+	return map[string]any{
+		"format":  "jwt",
+		"header":  token.Header,
+		"payload": token.Payload,
+	}
+}
+
 // PrintJWT prints a decoded plain JWT to the terminal.
 func PrintJWT(token *sdjwt.Token, opts Options) {
 	if opts.JSON {
-		out := map[string]any{
-			"format":  "jwt",
-			"header":  token.Header,
-			"payload": token.Payload,
-		}
-		PrintJSON(out)
+		PrintJSON(BuildJWTJSON(token))
 		return
 	}
 
@@ -179,46 +188,51 @@ func PrintJWT(token *sdjwt.Token, opts Options) {
 	fmt.Println()
 }
 
+// BuildMDOCJSON returns the JSON-serializable map for an mDOC document.
+func BuildMDOCJSON(doc *mdoc.Document) map[string]any {
+	out := map[string]any{
+		"format":  "mso_mdoc",
+		"docType": doc.DocType,
+		"claims":  formatMDOCClaimsJSON(doc),
+	}
+	if doc.IssuerAuth != nil && doc.IssuerAuth.MSO != nil {
+		mso := doc.IssuerAuth.MSO
+		msoOut := map[string]any{
+			"version":         mso.Version,
+			"digestAlgorithm": mso.DigestAlgorithm,
+			"docType":         mso.DocType,
+		}
+		if mso.ValidityInfo != nil {
+			vi := map[string]any{}
+			if mso.ValidityInfo.Signed != nil {
+				vi["signed"] = mso.ValidityInfo.Signed.Format(time.RFC3339)
+			}
+			if mso.ValidityInfo.ValidFrom != nil {
+				vi["validFrom"] = mso.ValidityInfo.ValidFrom.Format(time.RFC3339)
+			}
+			if mso.ValidityInfo.ValidUntil != nil {
+				vi["validUntil"] = mso.ValidityInfo.ValidUntil.Format(time.RFC3339)
+			}
+			msoOut["validityInfo"] = vi
+		}
+		if mso.Status != nil {
+			msoOut["status"] = mso.Status
+		}
+		if mso.DeviceKeyInfo != nil {
+			msoOut["deviceKeyInfo"] = mso.DeviceKeyInfo
+		}
+		out["mso"] = msoOut
+	}
+	if doc.DeviceSigned != nil && doc.DeviceSigned.DeviceAuth != nil {
+		out["deviceAuth"] = doc.DeviceSigned.DeviceAuth
+	}
+	return out
+}
+
 // PrintMDOC prints a decoded mDOC to the terminal.
 func PrintMDOC(doc *mdoc.Document, opts Options) {
 	if opts.JSON {
-		out := map[string]any{
-			"format":  "mso_mdoc",
-			"docType": doc.DocType,
-			"claims":  formatMDOCClaimsJSON(doc),
-		}
-		if doc.IssuerAuth != nil && doc.IssuerAuth.MSO != nil {
-			mso := doc.IssuerAuth.MSO
-			msoOut := map[string]any{
-				"version":         mso.Version,
-				"digestAlgorithm": mso.DigestAlgorithm,
-				"docType":         mso.DocType,
-			}
-			if mso.ValidityInfo != nil {
-				vi := map[string]any{}
-				if mso.ValidityInfo.Signed != nil {
-					vi["signed"] = mso.ValidityInfo.Signed.Format(time.RFC3339)
-				}
-				if mso.ValidityInfo.ValidFrom != nil {
-					vi["validFrom"] = mso.ValidityInfo.ValidFrom.Format(time.RFC3339)
-				}
-				if mso.ValidityInfo.ValidUntil != nil {
-					vi["validUntil"] = mso.ValidityInfo.ValidUntil.Format(time.RFC3339)
-				}
-				msoOut["validityInfo"] = vi
-			}
-			if mso.Status != nil {
-				msoOut["status"] = mso.Status
-			}
-			if mso.DeviceKeyInfo != nil {
-				msoOut["deviceKeyInfo"] = mso.DeviceKeyInfo
-			}
-			out["mso"] = msoOut
-		}
-		if doc.DeviceSigned != nil && doc.DeviceSigned.DeviceAuth != nil {
-			out["deviceAuth"] = doc.DeviceSigned.DeviceAuth
-		}
-		PrintJSON(out)
+		PrintJSON(BuildMDOCJSON(doc))
 		return
 	}
 

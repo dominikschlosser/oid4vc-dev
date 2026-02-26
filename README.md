@@ -44,6 +44,7 @@ Input can be a **file path**, **URL**, **raw credential string**, or piped via *
 | `status`   | Check revocation via status list (network call)             |
 | `trust`    | Inspect an ETSI TS 119 602 trust list JWT                   |
 | `dcql`     | Generate a DCQL query from a credential's claims            |
+| `serve`    | Start a local web UI for decoding credentials               |
 | `version`  | Print version                                               |
 
 ### Decode
@@ -161,6 +162,21 @@ Inspect an ETSI TS 119 602 trust list JWT. Accepts a file path or URL.
 ssi-debugger trust trust-list.jwt
 ssi-debugger trust https://example.com/trust-list.jwt
 ```
+
+### Serve
+
+Start a local web UI for pasting and decoding credentials in the browser.
+
+```bash
+ssi-debugger serve
+ssi-debugger serve --port 3000
+ssi-debugger serve credential.txt
+ssi-debugger serve "eyJhbGci..."
+```
+
+Opens a split-pane interface at `http://localhost:8080` (default) where you can paste SD-JWT, JWT, or mDOC credentials and instantly see decoded output. Features include auto-decode on paste, format detection badges, collapsible sections, JSON syntax highlighting, and dark/light theme toggle.
+
+Pass a credential as an argument (file path, URL, or raw string) to pre-fill the input on load. You can also use the `?credential=` query parameter on the URL, e.g. `http://localhost:8080/?credential=eyJhbGci...`.
 
 ### DCQL
 
