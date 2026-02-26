@@ -1,5 +1,8 @@
 # ssi-debugger
 
+[![CI](https://github.com/dominikschlosser/ssi-debugger/actions/workflows/ci.yml/badge.svg)](https://github.com/dominikschlosser/ssi-debugger/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/dominikschlosser/ssi-debugger)](https://github.com/dominikschlosser/ssi-debugger/releases/latest)
+
 A local-first CLI tool for decoding, validating, and inspecting SSI credentials — SD-JWT and mDOC (mso_mdoc).
 
 No network calls by default. Decode and verify credentials entirely offline.
@@ -53,6 +56,75 @@ ssi-debugger decode -v credential.txt
 cat credential.txt | ssi-debugger decode
 ```
 
+**SD-JWT example:**
+
+```
+SD-JWT Credential
+──────────────────────────────────────────────────
+
+┌ Header
+  alg: ES256
+  typ: dc+sd-jwt
+
+┌ Payload (signed claims)
+  _sd: ["77ofip...", "EyNwlR...", "X3X1zI..."]
+  _sd_alg: sha-256
+  exp: 1742592000
+  iat: 1740000000
+  iss: https://issuer.example
+  vct: urn:eudi:pid:1
+
+┌ Disclosed Claims (3)
+  [1] given_name: Erika
+  [2] family_name: Mustermann
+  [3] birth_date: 1984-08-12
+```
+
+**mDOC example:**
+
+```
+mDOC Credential
+──────────────────────────────────────────────────
+  (parsed from DeviceResponse)
+
+┌ Document Info
+  DocType: eu.europa.ec.eudi.pid.1
+  MSO Version: 1.0
+  Digest Algorithm: SHA-256
+  Signed: 2026-02-25T00:00:00Z
+  Valid From: 2026-02-25T00:00:00Z
+  Valid Until: 2026-03-11T00:00:00Z
+
+┌ Namespace: eu.europa.ec.eudi.pid.1 (7 claims)
+  birth_date: 1984-08-12
+  family_name: MUSTERMANN
+  given_name: ERIKA
+  resident_city: KÖLN
+  resident_country: DE
+  resident_postal_code: 51147
+  resident_street: HEIDESTRAẞE 17
+```
+
+With `-v`, each claim also shows its `digestID`. With `--json`, output is machine-readable:
+
+```json
+{
+  "format": "dc+sd-jwt",
+  "header": { "alg": "ES256", "typ": "dc+sd-jwt" },
+  "payload": { "iss": "https://issuer.example", "vct": "urn:eudi:pid:1", ... },
+  "resolvedClaims": {
+    "given_name": "Erika",
+    "family_name": "Mustermann",
+    "birth_date": "1984-08-12",
+    ...
+  },
+  "disclosures": [
+    { "name": "given_name", "value": "Erika", "salt": "...", "digest": "..." },
+    ...
+  ]
+}
+```
+
 ### Validate
 
 Requires `--key` or `--trust-list` (or both).
@@ -70,6 +142,8 @@ ssi-debugger validate --key key.pem --allow-expired credential.txt
 | `--trust-list`    | ETSI trust list JWT (file path or URL)             |
 | `--status-list`   | Check revocation via status list (network call)    |
 | `--allow-expired` | Don't fail on expired credentials                  |
+
+When a trust list is provided and the credential contains an x5c (SD-JWT) or x5chain (mDOC) certificate chain, the chain is validated against the trust list before verifying the signature.
 
 ### Status
 
@@ -94,6 +168,44 @@ Generate a DCQL (Digital Credentials Query Language) query from a credential's c
 
 ```bash
 ssi-debugger dcql credential.txt
+```
+
+**Example output (SD-JWT):**
+
+```json
+{
+  "credentials": [
+    {
+      "id": "urn_eudi_pid_1",
+      "format": "dc+sd-jwt",
+      "meta": { "vct_values": ["urn:eudi:pid:1"] },
+      "claims": [
+        { "path": ["birth_date"] },
+        { "path": ["family_name"] },
+        { "path": ["given_name"] }
+      ]
+    }
+  ]
+}
+```
+
+**Example output (mDOC):**
+
+```json
+{
+  "credentials": [
+    {
+      "id": "eu_europa_ec_eudi_pid_1",
+      "format": "mso_mdoc",
+      "meta": { "doctype_value": "eu.europa.ec.eudi.pid.1" },
+      "claims": [
+        { "path": ["eu.europa.ec.eudi.pid.1", "birth_date"] },
+        { "path": ["eu.europa.ec.eudi.pid.1", "family_name"] },
+        ...
+      ]
+    }
+  ]
+}
 ```
 
 ## Supported Formats
