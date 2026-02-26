@@ -78,19 +78,47 @@ Wallet  <-->  Proxy (:9090)  <-->  Verifier/Issuer (:8080)
 
 Traffic is automatically classified into protocol steps:
 
-| Badge               | Detected when                                       |
-|---------------------|-----------------------------------------------------|
-| VP Auth Request     | `client_id` + `response_type=vp_token` in query     |
-| VP Request Object   | Response body is a JWT (request object fetch)        |
-| VP Auth Response    | POST body contains `vp_token`                        |
-| VCI Credential Offer| `credential_offer` / `credential_offer_uri` in query |
-| VCI Metadata        | Path contains `.well-known/openid-credential-issuer` |
-| VCI Token Request   | POST to path ending `/token`                         |
-| VCI Credential Req  | POST to path ending `/credential`                    |
+| Badge               | Detected when                                                     |
+|---------------------|-------------------------------------------------------------------|
+| VP Auth Request     | `client_id` + `response_type=vp_token` in query                  |
+| VP Request Object   | Response body is a JWT (request object fetch)                     |
+| VP Auth Response    | POST body contains `vp_token`, `presentation_submission`, `id_token`, or `response` (JARM) |
+| VCI Credential Offer| `credential_offer` / `credential_offer_uri` in query              |
+| VCI Metadata        | Path contains `.well-known/openid-credential-issuer`              |
+| VCI Token Request   | POST to path ending `/token`                                      |
+| VCI Credential Req  | POST to path ending `/credential`                                 |
 
-Decoded payloads are shown inline — JWT headers/payloads, credential offer JSON, vp_token contents (SD-JWT, JWT, mDOC), token responses, and more.
+By default, only OID4VP/VCI traffic is shown. Non-matching requests (favicon, health checks, etc.) are still proxied but hidden from the output. Pass `--all-traffic` or toggle the "All traffic" checkbox in the dashboard to see everything.
+
+#### Smart decoding
+
+Decoded payloads are shown inline — the proxy understands the structure of each protocol step:
+
+- **VP Auth Request**: `client_id`, `response_mode`, `nonce`, `state`, `request_uri`, `response_uri`, plus `dcql_query` and `presentation_definition` parsed as JSON
+- **VP Request Object**: JWT header and payload, including the verifier's `jwks` (ephemeral encryption key for JARM)
+- **VP Auth Response**: `vp_token` decoded as SD-JWT/JWT/mDOC, `presentation_submission` as JSON, `state`
+- **VCI flows**: credential offer JSON, issuer metadata, token request/response, credential request/response with inline credential decoding
+
+#### Encrypted responses (direct_post.jwt / JARM)
+
+When `response_mode=direct_post.jwt` is used, the wallet sends an encrypted JWE instead of plain form parameters. The proxy detects this and shows:
+
+- The JWE protected header (`alg`, `enc`, `kid`, `epk`, `apu`, `apv`)
+- A note that the payload is encrypted
+
+The **verifier's ephemeral public key** (used by the wallet for encryption) is extracted from the request object's `jwks` claim and shown in the VP Request Object entry, so you can correlate the two sides of the flow.
+
+> **Why can't the proxy decrypt JARM responses?** The verifier generates an **ephemeral key pair** for each authorization session. It sends the public key to the wallet (in the signed request object JWT), and the wallet encrypts the response to that key. The proxy can see the public key but never has access to the private key — it lives only inside the verifier. Modifying the request object to substitute the proxy's own key would break the verifier's signature, which the wallet verifies.
+>
+> **Workaround:** If your verifier has a debug mode that logs or exports ephemeral private keys, you can use those to decrypt the JWE offline. The proxy shows the `kid` to help you match the right key.
+
+#### Web dashboard
 
 The **web dashboard** at `http://localhost:9091` shows the same traffic with expandable cards, live SSE updates, and dark/light theme support. Open it alongside your terminal for full visibility.
+
+When the proxy captures a credential (vp_token, id_token, or issued credential), the expanded entry shows a **"View in Decoder"** button that opens the credential in the full decoder web UI (served at `/decode/` on the dashboard port). This gives you the same decode experience as `ssi-debugger serve` without running a separate command.
+
+#### Flags
 
 | Flag             | Default | Description                              |
 |------------------|---------|------------------------------------------|
@@ -98,18 +126,40 @@ The **web dashboard** at `http://localhost:9091` shows the same traffic with exp
 | `--port`         | `9090`  | Proxy listen port                        |
 | `--dashboard`    | `9091`  | Dashboard listen port                    |
 | `--no-dashboard` | `false` | Disable web dashboard                    |
+| `--all-traffic`  | `false` | Show all traffic, not just OID4VP/VCI    |
 
-Terminal output example:
+#### Terminal output example
 
 ```
 ━━━ [14:32:05] GET /authorize?client_id=...  ← 200 (45ms)  [VP Auth Request]
     ┌ client_id: did:web:verifier.example
-    ┌ response_mode: direct_post
+    ┌ response_mode: direct_post.jwt
     ┌ nonce: abc123
+    ┌ dcql_query:
+      {
+        "credentials": [
+          {
+            "id": "cred1",
+            "format": "dc+sd-jwt",
+            "meta": { "vct_values": ["urn:eudi:pid:1"] },
+            "claims": [
+              { "id": "claim1", "path": ["given_name"] },
+              { "id": "claim2", "path": ["family_name"] }
+            ]
+          }
+        ]
+      }
+
+━━━ [14:32:05] GET /request/abc123  ← 200 (12ms)  [VP Request Object]
+    ┌ header: {"alg":"ES256","typ":"oauth-authz-req+jwt"}
+    ┌ payload: { ... }
+    ┌ encryption_jwks: {"keys":[{"kty":"EC","crv":"P-256","x":"...","y":"..."}]}
 
 ━━━ [14:32:06] POST /response  ← 200 (89ms)  [VP Auth Response]
-    ┌ vp_token_preview: eyJhbGciOiJFUzI1NiIsInR5cCI6InZjK3NkLWp3dCJ9.eyJpc3MiOi...
-    ┌ state: xyz456
+    ┌ response_type: JWE (encrypted)
+    ┌ encryption_alg: ECDH-ES
+    ┌ encryption_enc: A256GCM
+    ┌ encryption_epk: {"kty":"EC","crv":"P-256","x":"...","y":"..."}
 ```
 
 ---

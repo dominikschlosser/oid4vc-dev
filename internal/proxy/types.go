@@ -52,6 +52,7 @@ type TrafficEntry struct {
 	Class           TrafficClass   `json:"class"`
 	ClassLabel      string         `json:"classLabel"`
 	Decoded         map[string]any `json:"decoded,omitempty"`
+	Credentials     []string       `json:"credentials,omitempty"` // raw credential strings found in this entry
 	Duration        time.Duration  `json:"duration"`
 	DurationMS      int64          `json:"durationMs"`
 }

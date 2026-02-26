@@ -241,6 +241,24 @@ header h1 {
   word-break: break-all;
 }
 
+.credential-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.credential-link {
+  display: inline-block;
+  text-decoration: none;
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.credential-link:hover {
+  background: rgba(122, 162, 247, 0.15);
+}
+
 .empty-state {
   display: flex;
   align-items: center;

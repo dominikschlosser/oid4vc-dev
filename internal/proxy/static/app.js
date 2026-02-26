@@ -96,6 +96,18 @@
     return lines.join("\n");
   }
 
+  function renderCredentialLinks(credentials) {
+    if (!credentials || credentials.length === 0) return "";
+    var html = '<div class="detail-section"><h3>Credentials</h3><div class="credential-links">';
+    for (var i = 0; i < credentials.length; i++) {
+      var label = credentials.length === 1 ? "View in Decoder" : "View Credential " + (i + 1) + " in Decoder";
+      var href = "/decode/?credential=" + encodeURIComponent(credentials[i]);
+      html += '<a class="btn credential-link" href="' + escapeHtml(href) + '" target="_blank">' + label + '</a>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+
   function renderEntry(entry) {
     const el = document.createElement("div");
     el.className = "entry";
@@ -113,6 +125,7 @@
         '<span class="entry-badge ' + badgeClass(entry.classLabel) + '">' + escapeHtml(entry.classLabel) + '</span>' +
       '</div>' +
       '<div class="entry-details">' +
+        renderCredentialLinks(entry.credentials) +
         (entry.decoded ? '<div class="detail-section"><h3>Decoded</h3>' + renderDecoded(entry.decoded) + '</div>' : '') +
         '<div class="detail-section"><h3>Request Headers</h3><pre>' + renderHeaders(entry.requestHeaders) + '</pre></div>' +
         (entry.requestBody ? '<div class="detail-section"><h3>Request Body</h3><pre>' + escapeHtml(entry.requestBody) + '</pre></div>' : '') +

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+
+	"github.com/dominikschlosser/ssi-debugger/internal/web"
 )
 
 // Dashboard serves the web dashboard for live traffic inspection.
@@ -24,6 +26,10 @@ func (d *Dashboard) ListenAndServe() error {
 
 	mux.HandleFunc("GET /api/entries", d.handleEntries)
 	mux.HandleFunc("GET /api/stream", d.handleStream)
+
+	// Mount the credential decoder web UI under /decode/
+	decodeMux := web.NewMux("")
+	mux.Handle("/decode/", http.StripPrefix("/decode", decodeMux))
 
 	sub, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("/", http.FileServer(http.FS(sub)))

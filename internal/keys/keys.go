@@ -38,6 +38,109 @@ func LoadPublicKey(path string) (crypto.PublicKey, error) {
 	return ParsePublicKey(data)
 }
 
+// LoadPrivateKey loads a private key from a PEM file or JWK JSON file.
+func LoadPrivateKey(path string) (crypto.PrivateKey, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading key file: %w", err)
+	}
+	return ParsePrivateKey(data)
+}
+
+// ParsePrivateKey parses a private key from PEM or JWK bytes.
+func ParsePrivateKey(data []byte) (crypto.PrivateKey, error) {
+	block, _ := pem.Decode(data)
+	if block != nil {
+		return parsePEMPrivateBlock(block)
+	}
+	return ParseJWKPrivate(data)
+}
+
+func parsePEMPrivateBlock(block *pem.Block) (crypto.PrivateKey, error) {
+	// Try PKCS#8 first (works for EC + RSA)
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	// Try EC
+	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	// Try RSA PKCS#1
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	return nil, fmt.Errorf("unable to parse PEM private key (tried PKCS#8, EC, PKCS#1)")
+}
+
+// ParseJWKPrivate parses a JWK JSON object containing a private key.
+func ParseJWKPrivate(data []byte) (crypto.PrivateKey, error) {
+	var jwk map[string]any
+	if err := json.Unmarshal(data, &jwk); err != nil {
+		return nil, fmt.Errorf("not a valid PEM or JWK: %w", err)
+	}
+
+	kty, _ := jwk["kty"].(string)
+	switch kty {
+	case "EC":
+		return parseECJWKPrivate(jwk)
+	case "RSA":
+		return parseRSAJWKPrivate(jwk)
+	default:
+		return nil, fmt.Errorf("unsupported JWK key type: %s", kty)
+	}
+}
+
+func parseECJWKPrivate(jwk map[string]any) (*ecdsa.PrivateKey, error) {
+	pub, err := parseECJWK(jwk)
+	if err != nil {
+		return nil, err
+	}
+	dB64, _ := jwk["d"].(string)
+	if dB64 == "" {
+		return nil, fmt.Errorf("EC JWK missing private key parameter 'd'")
+	}
+	dBytes, err := format.DecodeBase64URL(dB64)
+	if err != nil {
+		return nil, fmt.Errorf("decoding d: %w", err)
+	}
+	return &ecdsa.PrivateKey{
+		PublicKey: *pub,
+		D:        new(big.Int).SetBytes(dBytes),
+	}, nil
+}
+
+func parseRSAJWKPrivate(jwk map[string]any) (*rsa.PrivateKey, error) {
+	pub, err := parseRSAJWK(jwk)
+	if err != nil {
+		return nil, err
+	}
+	dB64, _ := jwk["d"].(string)
+	if dB64 == "" {
+		return nil, fmt.Errorf("RSA JWK missing private key parameter 'd'")
+	}
+	dBytes, err := format.DecodeBase64URL(dB64)
+	if err != nil {
+		return nil, fmt.Errorf("decoding d: %w", err)
+	}
+	key := &rsa.PrivateKey{
+		PublicKey: *pub,
+		D:        new(big.Int).SetBytes(dBytes),
+	}
+	// Parse optional CRT parameters
+	if pB64, ok := jwk["p"].(string); ok {
+		if pBytes, err := format.DecodeBase64URL(pB64); err == nil {
+			key.Primes = append(key.Primes, new(big.Int).SetBytes(pBytes))
+		}
+	}
+	if qB64, ok := jwk["q"].(string); ok {
+		if qBytes, err := format.DecodeBase64URL(qB64); err == nil {
+			key.Primes = append(key.Primes, new(big.Int).SetBytes(qBytes))
+		}
+	}
+	key.Precompute()
+	return key, nil
+}
+
 // ParsePublicKey parses a public key from PEM or JWK bytes.
 func ParsePublicKey(data []byte) (crypto.PublicKey, error) {
 	block, _ := pem.Decode(data)

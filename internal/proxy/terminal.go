@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -61,9 +62,14 @@ func printDecodedField(key string, val any, depth int) {
 		labelColor.Printf("%s: ", key)
 		valueColor.Println(truncate(v, 120))
 	default:
+		// Marshal slices, nested maps, etc. as indented JSON
 		labelColor.Printf("%s┌ ", prefix)
 		labelColor.Printf("%s: ", key)
-		valueColor.Println(fmt.Sprintf("%v", val))
+		if b, err := json.MarshalIndent(val, prefix+"  ", "  "); err == nil {
+			valueColor.Println(string(b))
+		} else {
+			valueColor.Println(fmt.Sprintf("%v", val))
+		}
 	}
 }
 
