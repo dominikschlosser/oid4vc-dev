@@ -88,6 +88,13 @@ func (s *Store) FlowEntries(flowID string) []*TrafficEntry {
 	return out
 }
 
+// SubscriberCount returns the number of active SSE subscribers.
+func (s *Store) SubscriberCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.subscribers)
+}
+
 // Subscribe returns a channel that receives new traffic entries and an unsubscribe function.
 func (s *Store) Subscribe() (<-chan *TrafficEntry, func()) {
 	ch := make(chan *TrafficEntry, 64)

@@ -111,7 +111,7 @@ func runIssueSDJWT(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("generating SD-JWT: %w", err)
 	}
 
-	fmt.Print(result)
+	fmt.Println(result)
 	return nil
 }
 
@@ -138,7 +138,7 @@ func runIssueMDOC(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("generating mDOC: %w", err)
 	}
 
-	fmt.Print(result)
+	fmt.Println(result)
 	return nil
 }
 

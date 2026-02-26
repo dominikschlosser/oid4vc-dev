@@ -159,6 +159,17 @@ func TestHandleStream(t *testing.T) {
 		t.Errorf("expected Content-Type text/event-stream, got %s", ct)
 	}
 
+	// Wait for the SSE handler to subscribe before adding the entry.
+	// Without this, store.Add can fire before Subscribe() runs in the handler,
+	// causing the notification to be dropped and the test to time out.
+	deadline := time.Now().Add(2 * time.Second)
+	for store.SubscriberCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if store.SubscriberCount() == 0 {
+		t.Fatal("SSE handler did not subscribe in time")
+	}
+
 	// Add an entry — it should arrive over SSE
 	store.Add(&TrafficEntry{Method: "GET", URL: "http://example.com/test", StatusCode: 200})
 
