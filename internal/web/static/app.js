@@ -20,9 +20,6 @@
   // Well-known timestamp fields in JWT/SD-JWT payloads
   const TIMESTAMP_FIELDS = new Set(["exp", "iat", "nbf", "auth_time", "updated_at"]);
 
-  // SD-JWT internal fields to dim
-  const SD_INTERNAL_FIELDS = new Set(["_sd", "_sd_alg"]);
-
   // Theme
   function getPreferredTheme() {
     const stored = localStorage.getItem("ssi-debugger-theme");
@@ -51,7 +48,7 @@
     history.replaceState(null, "", window.location.pathname);
     lastData = null;
     lastValidation = null;
-    showTextarea();
+    hideColorized();
     input.focus();
   });
 
@@ -69,27 +66,37 @@
     });
   }
 
-  // Colorized input view — shown automatically after decode, click to edit
-  rawView.addEventListener("click", () => showTextarea());
-
+  // Colorized input view — overlaid behind transparent textarea
   function showColorized() {
     if (colorized) return;
     colorized = true;
-    input.style.display = "none";
+    input.classList.add("colorized");
     rawView.style.display = "block";
     updateRawView();
   }
 
-  function showTextarea() {
+  function hideColorized() {
     if (!colorized) return;
     colorized = false;
-    input.style.display = "";
+    input.classList.remove("colorized");
     rawView.style.display = "none";
-    input.focus();
   }
+
+  // Sync scroll between textarea and colorized view
+  input.addEventListener("scroll", () => {
+    if (colorized) {
+      rawView.scrollTop = input.scrollTop;
+      rawView.scrollLeft = input.scrollLeft;
+    }
+  });
+
+  // Section offset map: built during updateRawView, maps character ranges
+  // to section IDs for cross-highlighting without pointer-events hacks.
+  let sectionRanges = []; // [{start, end, section}]
 
   function updateRawView() {
     const text = input.value.trim();
+    sectionRanges = [];
     if (!text) {
       rawView.innerHTML = '<span style="color:var(--text-dim);font-style:italic">No input</span>';
       return;
@@ -102,12 +109,30 @@
 
     if (jwtSegments.length >= 2) {
       let html = "";
+      let pos = 0;
+
+      // Header
+      sectionRanges.push({ start: pos, end: pos + jwtSegments[0].length, section: "header" });
       html += '<span class="jwt-header" data-section="header">' + escapeHtml(jwtSegments[0]) + "</span>";
+      pos += jwtSegments[0].length;
+
+      // .
       html += '<span class="jwt-separator">.</span>';
+      pos += 1;
+
+      // Payload
+      sectionRanges.push({ start: pos, end: pos + jwtSegments[1].length, section: "payload" });
       html += '<span class="jwt-payload" data-section="payload">' + escapeHtml(jwtSegments[1]) + "</span>";
+      pos += jwtSegments[1].length;
+
+      // Signature
       if (jwtSegments.length > 2) {
         html += '<span class="jwt-separator">.</span>';
-        html += '<span class="jwt-signature" data-section="signature">' + escapeHtml(jwtSegments.slice(2).join(".")) + "</span>";
+        pos += 1;
+        const sigText = jwtSegments.slice(2).join(".");
+        sectionRanges.push({ start: pos, end: pos + sigText.length, section: "signature" });
+        html += '<span class="jwt-signature" data-section="signature">' + escapeHtml(sigText) + "</span>";
+        pos += sigText.length;
       }
 
       // SD-JWT disclosures — each gets a unique color
@@ -125,10 +150,12 @@
       let discIdx = 0;
       for (let i = 1; i < parts.length; i++) {
         html += '<span class="jwt-separator">~</span>';
+        pos += 1; // ~
         if (parts[i]) {
           if (i === kbJwtIndex) {
             // KB-JWT — colorize its internal structure
             const kbSegs = parts[i].split(".");
+            sectionRanges.push({ start: pos, end: pos + parts[i].length, section: "kb-jwt" });
             html += '<span data-section="kb-jwt">';
             html += '<span class="jwt-header">' + escapeHtml(kbSegs[0]) + "</span>";
             if (kbSegs.length > 1) {
@@ -140,68 +167,101 @@
               html += '<span class="jwt-signature">' + escapeHtml(kbSegs.slice(2).join(".")) + "</span>";
             }
             html += "</span>";
+            pos += parts[i].length;
           } else {
             const colorIdx = discIdx % DISC_COLORS;
+            sectionRanges.push({ start: pos, end: pos + parts[i].length, section: "disc-" + discIdx });
             html += '<span class="jwt-disc-' + colorIdx + '" data-section="disc-' + discIdx + '">' + escapeHtml(parts[i]) + "</span>";
+            pos += parts[i].length;
             discIdx++;
           }
         }
       }
 
       rawView.innerHTML = html;
-      attachRawViewHover();
     } else {
       // Non-JWT (e.g. mDOC hex/base64)
       rawView.innerHTML = escapeHtml(text);
     }
   }
 
-  // Cross-highlight: hovering input parts highlights decoded sections
-  function attachRawViewHover() {
-    rawView.querySelectorAll("[data-section]").forEach((span) => {
-      span.addEventListener("mouseenter", () => {
-        const sec = span.getAttribute("data-section");
-        span.classList.add("highlight");
+  // Cross-highlight: use character position in textarea to find which
+  // section the cursor is over, based on the offset map built during colorization.
+  let lastHoveredSection = null;
 
-        // Individual disclosure → highlight specific disclosure item
-        if (sec.startsWith("disc-")) {
-          const idx = sec.replace("disc-", "");
-          const item = outputEl.querySelector('.disclosure-item[data-disc-index="' + idx + '"]');
-          if (item) {
-            item.classList.add("highlight");
-            item.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          }
-        } else {
-          // Header/payload/signature → highlight whole section
-          const target = outputEl.querySelector('.section[data-section="' + sec + '"]');
-          if (target) {
-            target.classList.add("highlight");
-            target.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          }
-        }
-      });
-      span.addEventListener("mouseleave", () => {
-        const sec = span.getAttribute("data-section");
-        span.classList.remove("highlight");
+  function clearHoverHighlight() {
+    if (!lastHoveredSection) return;
+    const sec = lastHoveredSection;
+    lastHoveredSection = null;
 
-        if (sec.startsWith("disc-")) {
-          const idx = sec.replace("disc-", "");
-          const item = outputEl.querySelector('.disclosure-item[data-disc-index="' + idx + '"]');
-          if (item) item.classList.remove("highlight");
-        } else {
-          const target = outputEl.querySelector('.section[data-section="' + sec + '"]');
-          if (target) target.classList.remove("highlight");
-        }
-      });
-    });
+    const span = rawView.querySelector('[data-section="' + sec + '"]');
+    if (span) span.classList.remove("highlight");
+
+    if (sec.startsWith("disc-")) {
+      const idx = sec.replace("disc-", "");
+      const item = outputEl.querySelector('.disclosure-item[data-disc-index="' + idx + '"]');
+      if (item) item.classList.remove("highlight");
+    } else {
+      const target = outputEl.querySelector('.section[data-section="' + sec + '"]');
+      if (target) target.classList.remove("highlight");
+    }
   }
+
+  function applyHoverHighlight(sec) {
+    if (sec === lastHoveredSection) return;
+    clearHoverHighlight();
+    lastHoveredSection = sec;
+
+    const span = rawView.querySelector('[data-section="' + sec + '"]');
+    if (span) span.classList.add("highlight");
+
+    if (sec.startsWith("disc-")) {
+      const idx = sec.replace("disc-", "");
+      const item = outputEl.querySelector('.disclosure-item[data-disc-index="' + idx + '"]');
+      if (item) {
+        item.classList.add("highlight");
+        item.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    } else {
+      const target = outputEl.querySelector('.section[data-section="' + sec + '"]');
+      if (target) {
+        target.classList.add("highlight");
+        target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }
+  }
+
+  // Hit-test the rawView spans to find which section the mouse is over.
+  // Briefly swaps pointer-events so elementFromPoint can reach the rawView layer.
+  function sectionFromPoint(e) {
+    input.style.pointerEvents = "none";
+    rawView.style.pointerEvents = "auto";
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    input.style.pointerEvents = "";
+    rawView.style.pointerEvents = "none";
+    const span = el && el.closest("[data-section]");
+    return span ? span.getAttribute("data-section") : null;
+  }
+
+  input.addEventListener("mousemove", (e) => {
+    // Skip cross-highlighting while user is dragging to select text
+    if (e.buttons !== 0) return;
+    if (!colorized) return;
+    const sec = sectionFromPoint(e);
+    if (sec) {
+      applyHoverHighlight(sec);
+    } else {
+      clearHoverHighlight();
+    }
+  });
+
+  input.addEventListener("mouseleave", clearHoverHighlight);
 
   // Keyboard shortcuts
   document.addEventListener("keydown", (e) => {
     // Ctrl+L or Ctrl+K — focus input
     if ((e.ctrlKey || e.metaKey) && (e.key === "l" || e.key === "k")) {
       e.preventDefault();
-      if (colorized) showTextarea();
       input.focus();
       input.select();
     }
@@ -233,6 +293,7 @@
       formatBadge.className = "badge hidden";
       lastData = null;
       lastValidation = null;
+      hideColorized();
       return;
     }
 
@@ -295,7 +356,11 @@
     debounceTimer = setTimeout(decode, 300);
   }
 
-  input.addEventListener("input", scheduleDecode);
+  input.addEventListener("input", () => {
+    // Update colorized view immediately so it stays in sync while typing
+    if (colorized) updateRawView();
+    scheduleDecode();
+  });
   input.addEventListener("paste", () => {
     clearTimeout(debounceTimer);
     setTimeout(decode, 10);
@@ -524,7 +589,7 @@
 
   function renderSDJWT(data) {
     appendSection("Header", renderJSONBlock(data.header), data.header, "header");
-    appendSection("Payload (signed claims)", renderJSONBlock(data.payload, { dimKeys: SD_INTERNAL_FIELDS, timestampKeys: TIMESTAMP_FIELDS }), data.payload, "payload");
+    appendSection("Payload (signed claims)", renderJSONBlock(data.payload, { timestampKeys: TIMESTAMP_FIELDS }), data.payload, "payload");
 
     if (data.disclosures && data.disclosures.length > 0) {
       const disc = document.createElement("div");
@@ -825,23 +890,16 @@
     });
   }
 
-  // Enhanced syntax highlighting with timestamp hover and field dimming
+  // Enhanced syntax highlighting with timestamp hover
   function syntaxHighlightFull(json, opts) {
     if (!json) return "";
-    const dimKeys = (opts && opts.dimKeys) || null;
     const tsKeys = (opts && opts.timestampKeys) || null;
 
     // Process line by line for context-aware highlighting
     const lines = json.split("\n");
     return lines.map((line) => {
-      // Extract key name from this line (before escaping)
       const keyMatch = line.match(/^\s*"([\w_]+)"\s*:/);
       const currentKey = keyMatch ? keyMatch[1] : null;
-
-      // Dim SD-JWT internal fields
-      if (dimKeys && currentKey && dimKeys.has(currentKey)) {
-        return '<span class="json-dimmed">' + syntaxHighlightLineWithTimestamps(line, null) + "</span>";
-      }
       return syntaxHighlightLineWithTimestamps(line, currentKey && tsKeys && tsKeys.has(currentKey) ? currentKey : null);
     }).join("\n");
   }

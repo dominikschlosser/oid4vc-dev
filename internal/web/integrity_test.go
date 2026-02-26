@@ -623,3 +623,185 @@ func TestValidate_SignatureSkippedNoKey(t *testing.T) {
 		t.Errorf("expected 'No key provided', got %q", result.Detail)
 	}
 }
+
+func TestHandleValidate_VerifyFormAlwaysPresent(t *testing.T) {
+	// After a successful validation (even with signature pass/fail),
+	// the banner should always include the verify form for re-verification.
+	// We test via the Validate function directly to check the response
+	// always includes 4 checks regardless of signature state.
+
+	// SD-JWT without key → signature skipped, verify form label = "Verify Signature"
+	jwt := makeSDJWT(
+		map[string]any{
+			"iss":     "https://issuer.example",
+			"_sd_alg": "sha-256",
+			"_sd":     nil,
+			"exp":     float64(4102444800),
+		},
+		[][]any{
+			{"salt1", "given_name", "Erika"},
+		},
+	)
+
+	body1, _ := json.Marshal(map[string]any{"input": jwt})
+	w1 := apiPostTo(t, "/api/validate", string(body1))
+	if w1.Code != 200 {
+		t.Fatalf("expected 200, got %d", w1.Code)
+	}
+
+	result1 := decodeResponse(t, w1)
+	val1 := result1["validation"].(map[string]any)
+	checks1 := val1["checks"].([]any)
+
+	if len(checks1) != 4 {
+		t.Errorf("expected 4 checks without key, got %d", len(checks1))
+	}
+
+	// With an invalid key → signature should fail, but response still has 4 checks
+	body2, _ := json.Marshal(map[string]any{
+		"input": jwt,
+		"key":   "not-a-valid-key",
+	})
+	w2 := apiPostTo(t, "/api/validate", string(body2))
+	if w2.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	result2 := decodeResponse(t, w2)
+	val2 := result2["validation"].(map[string]any)
+	checks2 := val2["checks"].([]any)
+
+	if len(checks2) != 4 {
+		t.Errorf("expected 4 checks with invalid key, got %d", len(checks2))
+	}
+
+	// Signature check should be "fail" with invalid key
+	for _, c := range checks2 {
+		cm := c.(map[string]any)
+		if cm["name"] == "signature" && cm["status"] != "fail" {
+			t.Errorf("signature check: got %s, want fail", cm["status"])
+		}
+	}
+}
+
+func TestHandleValidate_SDJWTValidExpiry(t *testing.T) {
+	jwt := makeSDJWT(
+		map[string]any{
+			"iss":     "https://issuer.example",
+			"_sd_alg": "sha-256",
+			"_sd":     nil,
+			"exp":     float64(4102444800), // far future
+		},
+		[][]any{
+			{"salt1", "given_name", "Erika"},
+		},
+	)
+
+	body, _ := json.Marshal(map[string]any{"input": jwt})
+	w := apiPostTo(t, "/api/validate", string(body))
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	result := decodeResponse(t, w)
+	val := result["validation"].(map[string]any)
+	checks := val["checks"].([]any)
+
+	for _, c := range checks {
+		cm := c.(map[string]any)
+		if cm["name"] == "expiry" {
+			if cm["status"] != "pass" {
+				t.Errorf("expiry: got %s, want pass", cm["status"])
+			}
+			detail := cm["detail"].(string)
+			if len(detail) == 0 {
+				t.Error("expiry detail should not be empty")
+			}
+		}
+	}
+}
+
+func TestValidate_MDOCStatusNilIssuerAuth(t *testing.T) {
+	doc := &mdoc.Document{}
+
+	result := checkMDOCStatus(doc, ValidateOpts{CheckStatus: true})
+	if result.Status != "skipped" {
+		t.Errorf("expected skipped when no issuerAuth, got %s", result.Status)
+	}
+}
+
+func TestValidate_MDOCExpiryNilIssuerAuth(t *testing.T) {
+	doc := &mdoc.Document{}
+
+	result := checkMDOCExpiry(doc)
+	if result.Status != "skipped" {
+		t.Errorf("expected skipped when no issuerAuth, got %s", result.Status)
+	}
+}
+
+func TestValidate_MDOCSignatureSkippedNoKey(t *testing.T) {
+	doc := &mdoc.Document{}
+
+	result := checkMDOCSignature(doc, ValidateOpts{})
+	if result.Status != "skipped" {
+		t.Errorf("expected skipped when no key, got %s", result.Status)
+	}
+	if result.Detail != "No key provided" {
+		t.Errorf("expected 'No key provided', got %q", result.Detail)
+	}
+}
+
+func TestValidate_SDJWTExpiryPass(t *testing.T) {
+	token := &sdjwt.Token{
+		Payload: map[string]any{
+			"exp": float64(4102444800), // far future
+		},
+	}
+
+	result := checkSDJWTExpiry(token)
+	if result.Status != "pass" {
+		t.Errorf("expected pass, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestValidate_SDJWTExpiryExpired(t *testing.T) {
+	token := &sdjwt.Token{
+		Payload: map[string]any{
+			"exp": float64(1000000000), // way in the past
+		},
+	}
+
+	result := checkSDJWTExpiry(token)
+	if result.Status != "fail" {
+		t.Errorf("expected fail, got %s: %s", result.Status, result.Detail)
+	}
+}
+
+func TestValidate_SDJWTStatusSkippedNotRequested(t *testing.T) {
+	token := &sdjwt.Token{
+		ResolvedClaims: map[string]any{"sub": "user"},
+	}
+
+	result := checkSDJWTStatus(token, ValidateOpts{CheckStatus: false})
+	if result.Status != "skipped" {
+		t.Errorf("expected skipped, got %s", result.Status)
+	}
+	if result.Detail != "Not requested" {
+		t.Errorf("expected 'Not requested', got %q", result.Detail)
+	}
+}
+
+func TestValidate_SDJWTStatusNoRef(t *testing.T) {
+	token := &sdjwt.Token{
+		ResolvedClaims: map[string]any{"sub": "user"},
+	}
+
+	result := checkSDJWTStatus(token, ValidateOpts{CheckStatus: true})
+	if result.Status != "skipped" {
+		t.Errorf("expected skipped when no status ref, got %s", result.Status)
+	}
+	if result.Detail != "No status list reference in credential" {
+		t.Errorf("expected 'No status list reference in credential', got %q", result.Detail)
+	}
+}

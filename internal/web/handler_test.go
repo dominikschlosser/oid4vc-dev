@@ -430,6 +430,7 @@ func TestStaticFiles_IndexContainsNewUIElements(t *testing.T) {
 		"Ctrl+L",
 		"Focus input",
 		"Copy share link",
+		"input-editor",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("index.html missing %q", want)
@@ -451,7 +452,6 @@ func TestStaticFiles_CSSContainsNewClasses(t *testing.T) {
 	for _, want := range []string{
 		".timestamp-hover",
 		".copy-btn",
-		".json-dimmed",
 		".digest-truncated",
 		".resolved-claims-list",
 		".resolved-group-label",
@@ -471,6 +471,9 @@ func TestStaticFiles_CSSContainsNewClasses(t *testing.T) {
 		".verify-label",
 		".verify-input",
 		".popover-pinned",
+		".input-editor",
+		"textarea.colorized",
+		"caret-color",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("style.css missing class %q", want)
@@ -491,15 +494,13 @@ func TestStaticFiles_JSContainsNewFeatures(t *testing.T) {
 	body := w.Body.String()
 	for _, want := range []string{
 		"TIMESTAMP_FIELDS",
-		"SD_INTERNAL_FIELDS",
 		"copyShareLink",
 		"showColorized",
-		"attachRawViewHover",
+		"sectionRanges",
 		"extractSummary",
 		"renderResolvedClaims",
 		"renderClaimCard",
 		"timestamp-hover",
-		"json-dimmed",
 		"digest-truncated",
 		"shortcut-hint",
 		"renderValidationBanner",
@@ -508,6 +509,9 @@ func TestStaticFiles_JSContainsNewFeatures(t *testing.T) {
 		"lastValidation",
 		"verifySignature",
 		"verify-inline",
+		"sectionFromPoint",
+		"hideColorized",
+		"Re-verify Signature",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("app.js missing reference %q", want)

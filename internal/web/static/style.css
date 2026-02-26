@@ -174,8 +174,20 @@ main {
   color: var(--purple);
 }
 
-textarea {
+/* Editor container: stacks textarea over colorized raw-view */
+.input-editor {
   flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+textarea {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
   background: var(--bg);
   color: var(--text);
   border: none;
@@ -185,11 +197,26 @@ textarea {
   line-height: 1.6;
   resize: none;
   outline: none;
-  overflow: auto;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  z-index: 2;
+  word-break: break-all;
+  overflow-wrap: normal;
+}
+
+/* When colorized view is active, make textarea text invisible but keep caret */
+textarea.colorized {
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
 }
 
 textarea::placeholder {
   color: var(--text-dim);
+}
+
+textarea.colorized::placeholder {
+  color: transparent;
 }
 
 .output-content {
@@ -423,11 +450,6 @@ textarea::placeholder {
   max-width: 300px;
 }
 
-/* Dimmed SD-JWT internal fields */
-.json-dimmed {
-  opacity: 0.4;
-}
-
 /* Digest truncation */
 .digest-truncated {
   cursor: help;
@@ -465,16 +487,24 @@ textarea::placeholder {
 }
 
 .raw-view {
-  flex: 1;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   background: var(--bg);
   padding: 16px;
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
-  overflow: auto;
+  overflow-y: scroll;
+  overflow-x: hidden;
   white-space: pre-wrap;
   word-break: break-all;
   display: none;
+  z-index: 1;
+  box-sizing: border-box;
+  pointer-events: none;
 }
 
 .raw-view .jwt-header { color: var(--red); }
@@ -494,7 +524,6 @@ textarea::placeholder {
 
 /* Hover cross-highlight */
 .raw-view [data-section] {
-  cursor: pointer;
   border-radius: 2px;
   transition: background 0.1s;
 }
@@ -711,18 +740,47 @@ textarea::placeholder {
 
 /* Responsive */
 @media (max-width: 768px) {
+  body {
+    overflow: auto;
+    height: auto;
+    min-height: 100vh;
+  }
+
   main {
     flex-direction: column;
+    overflow: visible;
+    flex: none;
+  }
+
+  .pane {
+    flex: none;
   }
 
   .input-pane {
     border-right: none;
     border-bottom: 1px solid var(--border);
-    max-height: 40vh;
+    height: 35vh;
+    min-height: 150px;
+  }
+
+  .input-editor {
+    min-height: 0;
+  }
+
+  .output-pane {
+    min-height: 50vh;
+  }
+
+  .output-content {
+    overflow: visible;
   }
 
   .header-left {
     flex-direction: column;
     gap: 2px;
+  }
+
+  .shortcut-hint {
+    display: none;
   }
 }
