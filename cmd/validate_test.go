@@ -27,6 +27,7 @@ import (
 
 	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
 	"github.com/dominikschlosser/ssi-debugger/internal/trustlist"
+	"github.com/dominikschlosser/ssi-debugger/internal/validate"
 )
 
 // generateCACert creates a self-signed CA certificate and key.
@@ -106,9 +107,9 @@ func TestExtractAndValidateX5C_TrustedChain(t *testing.T) {
 		{PublicKey: caCert.PublicKey, Raw: caDER},
 	}
 
-	key, err := extractAndValidateX5C(header, tlCerts)
+	key, err := validate.ExtractAndValidateX5C(header, tlCerts)
 	if err != nil {
-		t.Fatalf("extractAndValidateX5C() error: %v", err)
+		t.Fatalf("validate.ExtractAndValidateX5C() error: %v", err)
 	}
 	if key == nil {
 		t.Fatal("expected non-nil key")
@@ -138,7 +139,7 @@ func TestExtractAndValidateX5C_UntrustedChain(t *testing.T) {
 		{PublicKey: otherCACert.PublicKey, Raw: otherCADER},
 	}
 
-	_, err := extractAndValidateX5C(header, tlCerts)
+	_, err := validate.ExtractAndValidateX5C(header, tlCerts)
 	if err == nil {
 		t.Error("expected error for untrusted chain")
 	}
@@ -153,7 +154,7 @@ func TestExtractAndValidateX5C_NoX5CHeader(t *testing.T) {
 		{PublicKey: nil, Raw: []byte("dummy")},
 	}
 
-	key, err := extractAndValidateX5C(header, tlCerts)
+	key, err := validate.ExtractAndValidateX5C(header, tlCerts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestExtractAndValidateX5C_NoTrustListCerts(t *testing.T) {
 		"x5c": []any{"some-cert"},
 	}
 
-	key, err := extractAndValidateX5C(header, nil)
+	key, err := validate.ExtractAndValidateX5C(header, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -215,9 +216,9 @@ func TestExtractAndValidateX5C_WithIntermediate(t *testing.T) {
 		{PublicKey: rootCert.PublicKey, Raw: rootDER},
 	}
 
-	key, err := extractAndValidateX5C(header, tlCerts)
+	key, err := validate.ExtractAndValidateX5C(header, tlCerts)
 	if err != nil {
-		t.Fatalf("extractAndValidateX5C() error: %v", err)
+		t.Fatalf("validate.ExtractAndValidateX5C() error: %v", err)
 	}
 	if key == nil {
 		t.Fatal("expected non-nil key")
@@ -240,9 +241,9 @@ func TestExtractAndValidateMDOCX5Chain_TrustedSingleCert(t *testing.T) {
 		{PublicKey: caCert.PublicKey, Raw: caDER},
 	}
 
-	key, err := extractAndValidateMDOCX5Chain(doc, tlCerts)
+	key, err := validate.ExtractAndValidateMDOCX5Chain(doc, tlCerts)
 	if err != nil {
-		t.Fatalf("extractAndValidateMDOCX5Chain() error: %v", err)
+		t.Fatalf("validate.ExtractAndValidateMDOCX5Chain() error: %v", err)
 	}
 	if key == nil {
 		t.Fatal("expected non-nil key")
@@ -265,9 +266,9 @@ func TestExtractAndValidateMDOCX5Chain_TrustedCertArray(t *testing.T) {
 		{PublicKey: caCert.PublicKey, Raw: caDER},
 	}
 
-	key, err := extractAndValidateMDOCX5Chain(doc, tlCerts)
+	key, err := validate.ExtractAndValidateMDOCX5Chain(doc, tlCerts)
 	if err != nil {
-		t.Fatalf("extractAndValidateMDOCX5Chain() error: %v", err)
+		t.Fatalf("validate.ExtractAndValidateMDOCX5Chain() error: %v", err)
 	}
 	if key == nil {
 		t.Fatal("expected non-nil key")
@@ -292,7 +293,7 @@ func TestExtractAndValidateMDOCX5Chain_UntrustedChain(t *testing.T) {
 		{PublicKey: otherCACert.PublicKey, Raw: otherCADER},
 	}
 
-	_, err := extractAndValidateMDOCX5Chain(doc, tlCerts)
+	_, err := validate.ExtractAndValidateMDOCX5Chain(doc, tlCerts)
 	if err == nil {
 		t.Error("expected error for untrusted chain")
 	}
@@ -309,7 +310,7 @@ func TestExtractAndValidateMDOCX5Chain_NoX5Chain(t *testing.T) {
 		{Raw: []byte("dummy")},
 	}
 
-	key, err := extractAndValidateMDOCX5Chain(doc, tlCerts)
+	key, err := validate.ExtractAndValidateMDOCX5Chain(doc, tlCerts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -321,7 +322,7 @@ func TestExtractAndValidateMDOCX5Chain_NoX5Chain(t *testing.T) {
 func TestExtractAndValidateMDOCX5Chain_NoIssuerAuth(t *testing.T) {
 	doc := &mdoc.Document{}
 
-	key, err := extractAndValidateMDOCX5Chain(doc, []trustlist.CertInfo{{Raw: []byte("x")}})
+	key, err := validate.ExtractAndValidateMDOCX5Chain(doc, []trustlist.CertInfo{{Raw: []byte("x")}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -347,9 +348,9 @@ func TestExtractAndValidateMDOCX5Chain_Uint64Label(t *testing.T) {
 		{PublicKey: caCert.PublicKey, Raw: caDER},
 	}
 
-	key, err := extractAndValidateMDOCX5Chain(doc, tlCerts)
+	key, err := validate.ExtractAndValidateMDOCX5Chain(doc, tlCerts)
 	if err != nil {
-		t.Fatalf("extractAndValidateMDOCX5Chain() error: %v", err)
+		t.Fatalf("validate.ExtractAndValidateMDOCX5Chain() error: %v", err)
 	}
 	if key == nil {
 		t.Fatal("expected non-nil key")
@@ -365,7 +366,7 @@ func TestExtractAndValidateX5C_InvalidCertData(t *testing.T) {
 		{Raw: []byte("dummy")},
 	}
 
-	_, err := extractAndValidateX5C(header, tlCerts)
+	_, err := validate.ExtractAndValidateX5C(header, tlCerts)
 	if err == nil {
 		t.Error("expected error for invalid certificate data")
 	}
@@ -380,7 +381,7 @@ func TestExtractAndValidateX5C_ValidBase64ButInvalidDER(t *testing.T) {
 		{Raw: []byte("dummy")},
 	}
 
-	_, err := extractAndValidateX5C(header, tlCerts)
+	_, err := validate.ExtractAndValidateX5C(header, tlCerts)
 	if err == nil {
 		t.Error("expected error for invalid DER data")
 	}

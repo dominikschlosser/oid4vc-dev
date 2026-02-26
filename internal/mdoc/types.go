@@ -39,6 +39,9 @@ type IssuerSignedItem struct {
 	Random            []byte
 	ElementIdentifier string
 	ElementValue      any
+	// RawCBOR holds the original CBOR-encoded bytes (before Tag-24 unwrapping)
+	// used for digest verification against MSO ValueDigests.
+	RawCBOR []byte
 }
 
 // IssuerAuth represents the COSE_Sign1 issuer authentication.

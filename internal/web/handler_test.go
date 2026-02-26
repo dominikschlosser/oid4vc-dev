@@ -27,7 +27,13 @@ import (
 // apiPost is a test helper that posts JSON to /api/decode and returns the recorder.
 func apiPost(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/decode", strings.NewReader(body))
+	return apiPostTo(t, "/api/decode", body)
+}
+
+// apiPostTo is a test helper that posts JSON to a given path.
+func apiPostTo(t *testing.T, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	NewMux("").ServeHTTP(w, req)
@@ -354,8 +360,8 @@ func TestStaticFiles_JS(t *testing.T) {
 		t.Fatalf("expected 200 for app.js, got %d", w.Code)
 	}
 
-	if !strings.Contains(w.Body.String(), "/api/decode") {
-		t.Error("expected app.js to reference /api/decode endpoint")
+	if !strings.Contains(w.Body.String(), "/api/validate") {
+		t.Error("expected app.js to reference /api/validate endpoint")
 	}
 }
 
@@ -455,6 +461,16 @@ func TestStaticFiles_CSSContainsNewClasses(t *testing.T) {
 		".jwt-disc-1",
 		".issuer-summary",
 		".shortcut-hint",
+		".validity-checks",
+		".check-pass",
+		".check-fail",
+		".check-skipped",
+		".validity-banner.unverified",
+		".verify-inline",
+		".verify-btn",
+		".verify-label",
+		".verify-input",
+		".popover-pinned",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("style.css missing class %q", want)
@@ -486,6 +502,12 @@ func TestStaticFiles_JSContainsNewFeatures(t *testing.T) {
 		"json-dimmed",
 		"digest-truncated",
 		"shortcut-hint",
+		"renderValidationBanner",
+		"/api/validate",
+		"validity-checks",
+		"lastValidation",
+		"verifySignature",
+		"verify-inline",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("app.js missing reference %q", want)

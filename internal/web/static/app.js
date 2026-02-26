@@ -11,6 +11,7 @@
 
   let debounceTimer = null;
   let lastData = null;
+  let lastValidation = null;
   let colorized = false; // true when showing colorized view instead of textarea
 
   // Disclosure color palette size
@@ -49,6 +50,7 @@
     formatBadge.className = "badge hidden";
     history.replaceState(null, "", window.location.pathname);
     lastData = null;
+    lastValidation = null;
     showTextarea();
     input.focus();
   });
@@ -222,20 +224,22 @@
     setTimeout(() => toast.classList.remove("show"), 2000);
   }
 
-  // Decode
+  // Decode — calls /api/validate to get both decode result and validation checks
+  // (integrity, expiry, status run automatically; signature is skipped without key)
   function decode() {
     const text = input.value.trim();
     if (!text) {
       outputEl.innerHTML = '<div class="placeholder">Paste a credential to see decoded output</div>';
       formatBadge.className = "badge hidden";
       lastData = null;
+      lastValidation = null;
       return;
     }
 
-    fetch("/api/decode", {
+    fetch("/api/validate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input: text }),
+      body: JSON.stringify({ input: text, checkStatus: true }),
     })
       .then((res) => res.json())
       .then((data) => {
@@ -243,14 +247,46 @@
           showError(data.error);
           formatBadge.className = "badge hidden";
           lastData = null;
+          lastValidation = null;
           return;
         }
         lastData = data;
+        lastValidation = data.validation || null;
         showResult(data);
         showColorized();
       })
       .catch((err) => {
         showError("Request failed: " + err.message);
+      });
+  }
+
+  // Re-validate with a public key or trust list for signature verification
+  function verifySignature(keyText, trustListURL) {
+    const text = input.value.trim();
+    if (!text) return;
+
+    const body = { input: text, checkStatus: true };
+    if (keyText) body.key = keyText;
+    if (trustListURL) body.trustListURL = trustListURL;
+
+    fetch("/api/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          showToast("Verification error: " + data.error);
+          return;
+        }
+        lastData = data;
+        lastValidation = data.validation || null;
+        showResult(data);
+        showColorized();
+      })
+      .catch((err) => {
+        showToast("Verification failed: " + err.message);
       });
   }
 
@@ -280,9 +316,9 @@
       outputEl.appendChild(renderSummaryLine(summary));
     }
 
-    const validity = extractValidity(data);
-    if (validity) {
-      outputEl.appendChild(renderValidityBanner(validity));
+    // Validation banner (always from server checks now)
+    if (data.validation && data.validation.checks) {
+      outputEl.appendChild(renderValidationBanner(data.validation.checks));
     }
 
     const fmt = data.format;
@@ -354,84 +390,111 @@
     }
   }
 
-  // Validity extraction and rendering
-  function extractValidity(data) {
-    const now = Date.now() / 1000;
-    const result = {};
-
-    if (data.format === "mso_mdoc" && data.mso && data.mso.validityInfo) {
-      const vi = data.mso.validityInfo;
-      if (vi.validFrom) {
-        result.validFrom = new Date(vi.validFrom);
-        result.validFromEpoch = result.validFrom.getTime() / 1000;
-      }
-      if (vi.validUntil) {
-        result.expiresAt = new Date(vi.validUntil);
-        result.expiresAtEpoch = result.expiresAt.getTime() / 1000;
-      }
-      if (vi.signed) {
-        result.issuedAt = new Date(vi.signed);
-      }
-    } else if (data.payload) {
-      const p = data.payload;
-      if (typeof p.exp === "number") {
-        result.expiresAt = new Date(p.exp * 1000);
-        result.expiresAtEpoch = p.exp;
-      }
-      if (typeof p.iat === "number") {
-        result.issuedAt = new Date(p.iat * 1000);
-      }
-      if (typeof p.nbf === "number") {
-        result.validFrom = new Date(p.nbf * 1000);
-        result.validFromEpoch = p.nbf;
-      }
-    }
-
-    if (!result.expiresAt && !result.validFrom && !result.issuedAt) return null;
-
-    if (result.validFromEpoch && result.validFromEpoch > now) {
-      result.status = "not-yet-valid";
-    } else if (result.expiresAtEpoch && result.expiresAtEpoch < now) {
-      result.status = "expired";
-    } else if (result.expiresAtEpoch && result.expiresAtEpoch < now + 7 * 86400) {
-      result.status = "expiring";
-    } else {
-      result.status = "valid";
-    }
-
-    return result;
-  }
-
-  function renderValidityBanner(v) {
+  // Validation banner with hover checklist + clickable signature verify popover
+  function renderValidationBanner(checks) {
     const banner = document.createElement("div");
-    banner.className = "validity-banner " + v.status;
+    banner.className = "validity-banner";
 
-    let icon, label;
-    if (v.status === "expired") {
+    const hasFailure = checks.some((c) => c.status === "fail");
+    const sigCheck = checks.find((c) => c.name === "signature");
+    const sigSkipped = sigCheck && sigCheck.status === "skipped";
+    const nonSkipped = checks.filter((c) => c.status !== "skipped");
+    const allNonSkippedPass = nonSkipped.length > 0 && nonSkipped.every((c) => c.status === "pass");
+
+    let icon, label, cls;
+    if (hasFailure) {
       icon = "\u2717";
-      label = "Expired";
-    } else if (v.status === "expiring") {
+      label = "Invalid";
+      cls = "expired"; // red
+    } else if (sigSkipped) {
       icon = "\u26A0";
-      label = "Expiring soon";
-    } else if (v.status === "not-yet-valid") {
-      icon = "\u26A0";
-      label = "Not yet valid";
-    } else {
+      label = "Unverified";
+      cls = "unverified"; // yellow
+    } else if (allNonSkippedPass) {
       icon = "\u2713";
       label = "Valid";
+      cls = "valid"; // green
+    } else {
+      icon = "\u26A0";
+      label = "Unverified";
+      cls = "unverified";
     }
 
-    let details = [];
-    if (v.issuedAt) details.push("issued " + relativeTime(v.issuedAt));
-    if (v.validFrom && v.status === "not-yet-valid") {
-      details.push("valid from " + v.validFrom.toISOString().replace(/\.\d+Z$/, "Z"));
-    }
-    if (v.expiresAt) {
-      details.push((v.status === "expired" ? "expired " : "expires ") + relativeTime(v.expiresAt));
+    banner.classList.add(cls);
+
+    // Build summary detail from first relevant check
+    let detail = "";
+    const expiryCheck = checks.find((c) => c.name === "expiry");
+    if (expiryCheck && expiryCheck.status !== "skipped") {
+      detail = expiryCheck.detail;
     }
 
-    banner.innerHTML = icon + " " + label +
-      (details.length ? '<span class="validity-detail">' + escapeHtml(" \u2014 " + details.join(", ")) + "</span>" : "");
+    let html = '<span class="validity-banner-text">' + icon + " " + label;
+    if (detail) {
+      html += '<span class="validity-detail"> \u2014 ' + escapeHtml(detail) + "</span>";
+    }
+    html += "</span>";
+
+    // Hover checklist
+    html += '<div class="validity-checks">';
+    checks.forEach((c) => {
+      let cIcon, cCls;
+      if (c.status === "pass") { cIcon = "\u2713"; cCls = "check-pass"; }
+      else if (c.status === "fail") { cIcon = "\u2717"; cCls = "check-fail"; }
+      else { cIcon = "\u2014"; cCls = "check-skipped"; }
+
+      html += '<div class="validity-check-item ' + cCls + '">';
+      html += '<span class="check-icon">' + cIcon + "</span>";
+      html += '<span class="check-name">' + escapeHtml(c.name) + "</span>";
+      html += '<span class="check-detail">' + escapeHtml(c.detail) + "</span>";
+      html += "</div>";
+    });
+
+    // Always show the inline verify form so users can (re-)verify with different keys
+    const verifyLabel = sigSkipped ? "Verify Signature" : "Re-verify Signature";
+    html += '<div class="verify-inline-sep"></div>';
+    html += '<div class="verify-inline">';
+    html += '<label class="verify-label">Public Key (PEM or JWK)</label>';
+    html += '<textarea class="verify-input verify-inline-key" rows="3" placeholder="Paste PEM or JWK..." spellcheck="false"></textarea>';
+    html += '<label class="verify-label">Trust List URL</label>';
+    html += '<input class="verify-input verify-inline-tl" type="text" placeholder="https://...">';
+    html += '<button class="btn verify-btn verify-inline-btn">' + verifyLabel + '</button>';
+    html += "</div>";
+
+    html += "</div>";
+
+    banner.innerHTML = html;
+
+    // Wire up the inline verify button
+    {
+      const verifyInlineBtn = banner.querySelector(".verify-inline-btn");
+      const keyInput = banner.querySelector(".verify-inline-key");
+      const tlInput = banner.querySelector(".verify-inline-tl");
+
+      // Prevent clicks on the form from closing the popover
+      banner.querySelector(".validity-checks").addEventListener("click", (e) => {
+        e.stopPropagation();
+      });
+
+      verifyInlineBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const keyText = keyInput.value.trim();
+        const tlUrl = tlInput.value.trim();
+        if (!keyText && !tlUrl) {
+          showToast("Provide a public key or trust list URL");
+          return;
+        }
+        verifyInlineBtn.disabled = true;
+        verifyInlineBtn.textContent = "Verifying...";
+        verifySignature(keyText, tlUrl);
+      });
+    }
+
+    // Click banner to toggle the popover open (for non-hover devices / to pin it)
+    banner.addEventListener("click", () => {
+      banner.classList.toggle("popover-pinned");
+    });
+
     return banner;
   }
 

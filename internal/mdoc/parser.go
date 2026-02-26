@@ -156,8 +156,12 @@ func parseIssuerSigned(data []byte) (*Document, error) {
 }
 
 func parseIssuerSignedItem(raw any) (*IssuerSignedItem, error) {
-	// Items are Tag-24 wrapped CBOR bstr
+	// Items are Tag-24 wrapped CBOR bstr.
+	// itemBytes: inner CBOR for decoding fields.
+	// rawTag24: full Tag-24 encoded bytes for digest verification (MSO ValueDigests
+	// hash the complete #6.24(bstr) encoding, not just the inner bytes).
 	var itemBytes []byte
+	var rawTag24 []byte
 
 	switch v := raw.(type) {
 	case []byte:
@@ -166,6 +170,10 @@ func parseIssuerSignedItem(raw any) (*IssuerSignedItem, error) {
 		if v.Number == 24 {
 			if b, ok := v.Content.([]byte); ok {
 				itemBytes = b
+				// Re-encode the full Tag-24 for digest verification
+				if encoded, err := cbor.Marshal(v); err == nil {
+					rawTag24 = encoded
+				}
 			} else {
 				return nil, fmt.Errorf("tag 24 content is not bstr")
 			}
@@ -178,6 +186,7 @@ func parseIssuerSignedItem(raw any) (*IssuerSignedItem, error) {
 		if err != nil {
 			return nil, fmt.Errorf("cannot handle item type %T", raw)
 		}
+		rawTag24 = b // full encoding including tag
 		inner, err := unmarshalTag24(b)
 		if err != nil {
 			return nil, err
@@ -190,7 +199,15 @@ func parseIssuerSignedItem(raw any) (*IssuerSignedItem, error) {
 		return nil, fmt.Errorf("decoding IssuerSignedItem: %w", err)
 	}
 
-	isi := &IssuerSignedItem{}
+	// Use Tag-24 encoded bytes for RawCBOR (digest verification), fall back to inner bytes
+	rawForDigest := rawTag24
+	if rawForDigest == nil {
+		rawForDigest = itemBytes
+	}
+
+	isi := &IssuerSignedItem{
+		RawCBOR: rawForDigest,
+	}
 
 	if did, ok := itemMap["digestID"]; ok {
 		switch v := did.(type) {

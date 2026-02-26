@@ -36,6 +36,7 @@ func NewMux(credential string) http.Handler {
 
 	// API endpoints
 	mux.HandleFunc("POST /api/decode", handleDecode)
+	mux.HandleFunc("POST /api/validate", handleValidate)
 	mux.HandleFunc("GET /api/prefill", handlePrefill(credential))
 
 	// Static files
@@ -71,6 +72,45 @@ func handleDecode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := Decode(req.Input)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	enc.Encode(result)
+}
+
+type validateRequest struct {
+	Input        string `json:"input"`
+	Key          string `json:"key"`
+	TrustListURL string `json:"trustListURL"`
+	TrustListRaw string `json:"trustListRaw"`
+	CheckStatus  bool   `json:"checkStatus"`
+}
+
+func handleValidate(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+
+	var req validateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Input == "" {
+		writeError(w, http.StatusBadRequest, "input is required")
+		return
+	}
+
+	result, err := Validate(req.Input, ValidateOpts{
+		Key:          req.Key,
+		TrustListURL: req.TrustListURL,
+		TrustListRaw: req.TrustListRaw,
+		CheckStatus:  req.CheckStatus,
+	})
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return

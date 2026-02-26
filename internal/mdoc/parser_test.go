@@ -166,6 +166,55 @@ func TestParseIssuerAuth_BytesInput(t *testing.T) {
 	}
 }
 
+func TestParseIssuerSignedItem_RawCBORContainsTag24(t *testing.T) {
+	// Verify that after parsing, RawCBOR contains the full Tag-24 encoding
+	// (not just the inner bytes), since MSO ValueDigests hash the complete
+	// #6.24(bstr .cbor IssuerSignedItem) encoding.
+	item := map[string]any{
+		"digestID":          uint64(0),
+		"random":            []byte("random-salt"),
+		"elementIdentifier": "family_name",
+		"elementValue":      "Mustermann",
+	}
+
+	innerBytes, err := cbor.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Parse via buildIssuerSignedCBOR which wraps items in Tag-24
+	data := buildIssuerSignedCBOR(t, "ns1", []map[string]any{item})
+	doc, err := parseIssuerSigned(data)
+	if err != nil {
+		t.Fatalf("parseIssuerSigned() error: %v", err)
+	}
+
+	ns := doc.NameSpaces["ns1"]
+	if len(ns) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(ns))
+	}
+
+	// RawCBOR should be the full Tag-24 encoding, not just innerBytes
+	if len(ns[0].RawCBOR) <= len(innerBytes) {
+		t.Errorf("RawCBOR length %d should be larger than inner bytes length %d (should include Tag-24 wrapper)",
+			len(ns[0].RawCBOR), len(innerBytes))
+	}
+
+	// Verify it starts with Tag-24 CBOR prefix (0xd8 0x18 = tag 24)
+	if len(ns[0].RawCBOR) < 2 || ns[0].RawCBOR[0] != 0xd8 || ns[0].RawCBOR[1] != 0x18 {
+		t.Errorf("RawCBOR should start with Tag-24 CBOR prefix (0xd8 0x18), got %x", ns[0].RawCBOR[:2])
+	}
+
+	// Verify the inner content can be decoded back to the original item
+	var decoded cbor.Tag
+	if err := cbor.Unmarshal(ns[0].RawCBOR, &decoded); err != nil {
+		t.Fatalf("failed to unmarshal RawCBOR as Tag: %v", err)
+	}
+	if decoded.Number != 24 {
+		t.Errorf("expected tag number 24, got %d", decoded.Number)
+	}
+}
+
 func TestParseIssuerAuth_ExtractsUnprotectedHeader(t *testing.T) {
 	coseArr := []any{
 		[]byte{0xa1, 0x01, 0x26},                        // protected

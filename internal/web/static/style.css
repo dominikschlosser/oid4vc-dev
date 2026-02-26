@@ -568,6 +568,147 @@ textarea::placeholder {
   opacity: 1;
 }
 
+/* Validity banner — unverified state */
+.validity-banner.unverified {
+  background: rgba(224, 175, 104, 0.12);
+  color: var(--yellow);
+  cursor: pointer;
+  position: relative;
+}
+
+/* Make all banners support popover */
+.validity-banner {
+  position: relative;
+  cursor: pointer;
+}
+
+/* Validity checks popover */
+.validity-banner .validity-checks {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  /* padding-top includes bridge area so hover doesn't break when moving to popover */
+  margin-top: 0;
+  padding-top: 12px;
+  font-size: 12px;
+  font-weight: 400;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* Invisible bridge so mouse can travel from banner to popover without gap */
+.validity-banner .validity-checks::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 0;
+  right: 0;
+  height: 8px;
+}
+
+.validity-banner:hover .validity-checks,
+.validity-banner.popover-pinned .validity-checks {
+  display: block;
+}
+
+/* Inline verify form inside the popover */
+.verify-inline-sep {
+  border-top: 1px solid var(--border);
+  margin: 6px 0;
+}
+
+.verify-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.verify-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.verify-input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  resize: vertical;
+  outline: none;
+}
+
+.verify-input:focus {
+  border-color: var(--accent);
+}
+
+.verify-btn {
+  align-self: flex-start;
+  background: var(--accent);
+  color: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.verify-btn:hover {
+  opacity: 0.9;
+}
+
+.verify-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.validity-check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  color: var(--text);
+}
+
+.check-icon {
+  font-size: 13px;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.check-pass .check-icon {
+  color: var(--green);
+}
+
+.check-fail .check-icon {
+  color: var(--red);
+}
+
+.check-skipped .check-icon {
+  color: var(--text-dim);
+}
+
+.check-name {
+  font-weight: 600;
+  min-width: 70px;
+}
+
+.check-detail {
+  color: var(--text-dim);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   main {
