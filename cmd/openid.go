@@ -22,7 +22,13 @@ import (
 
 	"github.com/dominikschlosser/ssi-debugger/internal/openid4"
 	"github.com/dominikschlosser/ssi-debugger/internal/output"
+	"github.com/dominikschlosser/ssi-debugger/internal/qr"
 	"github.com/spf13/cobra"
+)
+
+var (
+	qrSource  string
+	qrScreen  bool
 )
 
 var openidCmd = &cobra.Command{
@@ -38,6 +44,7 @@ Accepts:
   - Raw JSON
   - File paths
   - Stdin (pipe or use -)
+  - QR code from image file (--qr) or screen capture (--screen)
 
 Auto-detects VCI vs VP based on content.`,
 	Args: cobra.MaximumNArgs(1),
@@ -45,16 +52,33 @@ Auto-detects VCI vs VP based on content.`,
 }
 
 func init() {
+	openidCmd.Flags().StringVar(&qrSource, "qr", "", "scan QR code from image file")
+	openidCmd.Flags().BoolVar(&qrScreen, "screen", false, "scan QR code from screen capture")
 	rootCmd.AddCommand(openidCmd)
 }
 
 func runOpenID(cmd *cobra.Command, args []string) error {
-	input := ""
-	if len(args) > 0 {
-		input = args[0]
+	if qrSource != "" && qrScreen {
+		return fmt.Errorf("cannot use --qr and --screen together")
+	}
+	if (qrSource != "" || qrScreen) && len(args) > 0 {
+		return fmt.Errorf("cannot use --qr/--screen together with a positional argument")
 	}
 
-	raw, err := readOID4Input(input)
+	var raw string
+	var err error
+
+	if qrScreen {
+		raw, err = qr.ScanScreen()
+	} else if qrSource != "" {
+		raw, err = qr.ScanFile(qrSource)
+	} else {
+		input := ""
+		if len(args) > 0 {
+			input = args[0]
+		}
+		raw, err = readOID4Input(input)
+	}
 	if err != nil {
 		return err
 	}
@@ -122,3 +146,4 @@ func readOID4Input(input string) (string, error) {
 
 	return input, nil
 }
+

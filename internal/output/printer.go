@@ -633,11 +633,13 @@ func BuildAuthorizationRequestJSON(req *openid4.AuthorizationRequest) map[string
 			"payload": req.RequestObject.Payload,
 		}
 	}
-	if req.PresentationDefinition != nil {
-		out["presentation_definition"] = req.PresentationDefinition
-	}
-	if req.DCQLQuery != nil {
-		out["dcql_query"] = req.DCQLQuery
+	if req.RequestObject == nil {
+		if req.PresentationDefinition != nil {
+			out["presentation_definition"] = req.PresentationDefinition
+		}
+		if req.DCQLQuery != nil {
+			out["dcql_query"] = req.DCQLQuery
+		}
 	}
 	return out
 }
@@ -690,16 +692,20 @@ func PrintAuthorizationRequest(req *openid4.AuthorizationRequest, opts Options) 
 		printMap(req.RequestObject.Payload, 2)
 	}
 
-	if req.PresentationDefinition != nil {
-		printSection("Presentation Definition")
-		b, _ := json.MarshalIndent(req.PresentationDefinition, "  ", "  ")
-		fmt.Printf("  %s\n", string(b))
-	}
+	// Only print these as separate sections when there's no request object,
+	// since the request object payload already contains them.
+	if req.RequestObject == nil {
+		if req.PresentationDefinition != nil {
+			printSection("Presentation Definition")
+			b, _ := json.MarshalIndent(req.PresentationDefinition, "  ", "  ")
+			fmt.Printf("  %s\n", string(b))
+		}
 
-	if req.DCQLQuery != nil {
-		printSection("DCQL Query")
-		b, _ := json.MarshalIndent(req.DCQLQuery, "  ", "  ")
-		fmt.Printf("  %s\n", string(b))
+		if req.DCQLQuery != nil {
+			printSection("DCQL Query")
+			b, _ := json.MarshalIndent(req.DCQLQuery, "  ", "  ")
+			fmt.Printf("  %s\n", string(b))
+		}
 	}
 
 	if opts.Verbose && len(req.FullParams) > 0 {

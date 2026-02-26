@@ -27,6 +27,7 @@ cd ssi-debugger
 go build -o ssi-debugger .
 ```
 
+
 ## Usage
 
 ```
@@ -44,6 +45,7 @@ Input can be a **file path**, **URL**, **raw credential string**, or piped via *
 | `status`   | Check revocation via status list (network call)             |
 | `trust`    | Inspect an ETSI TS 119 602 trust list JWT                   |
 | `dcql`     | Generate a DCQL query from a credential's claims            |
+| `openid`   | Decode OID4VCI credential offers or OID4VP auth requests     |
 | `serve`    | Start a local web UI for decoding credentials               |
 | `version`  | Print version                                               |
 
@@ -227,6 +229,39 @@ ssi-debugger dcql credential.txt
   ]
 }
 ```
+
+### OpenID
+
+Decode OID4VCI credential offers and OID4VP authorization requests.
+
+```bash
+ssi-debugger openid 'openid-credential-offer://?credential_offer_uri=...'
+ssi-debugger openid 'openid4vp://authorize?...'
+ssi-debugger openid request.jwt
+cat offer.json | ssi-debugger openid
+```
+
+Accepts URI schemes (`openid-credential-offer://`, `openid4vp://`, `haip://`, `eudi-openid4vp://`), HTTPS URLs, JWT request objects, raw JSON, file paths, and stdin.
+
+#### QR Code Scanning
+
+Scan a QR code directly from an image file or a screen capture:
+
+```bash
+ssi-debugger openid --qr screenshot.png
+ssi-debugger openid --screen
+```
+
+| Flag       | Description                                                  |
+|------------|--------------------------------------------------------------|
+| `--qr`     | Decode QR from a PNG or JPEG image file                      |
+| `--screen` | Open interactive screen region selector and decode a QR code from the selection (macOS only) |
+
+`--qr`, `--screen`, and positional input arguments are mutually exclusive.
+
+`--screen` uses the native macOS `screencapture` tool in interactive selection mode — a crosshair appears to let you select the region containing the QR code. On other platforms, take a screenshot and use `--qr screenshot.png` instead.
+
+> **Note:** Screen capture permission on macOS is granted to the **terminal app** (Terminal.app, iTerm2, etc.), not to `ssi-debugger` itself. If permission is missing, System Settings will be opened automatically to the Screen Recording pane — enable access for your terminal app there, then re-run the command.
 
 ## Supported Formats
 
