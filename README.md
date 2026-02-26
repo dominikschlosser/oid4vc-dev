@@ -93,7 +93,7 @@ mDOC Credential
   Digest Algorithm: SHA-256
   Signed: 2026-02-25T00:00:00Z
   Valid From: 2026-02-25T00:00:00Z
-  Valid Until: 2026-03-11T00:00:00Z
+  Valid Until: 2026-03-11T00:00:00Z (in 13 days)
 
 ┌ Namespace: eu.europa.ec.eudi.pid.1 (7 claims)
   birth_date: 1984-08-12

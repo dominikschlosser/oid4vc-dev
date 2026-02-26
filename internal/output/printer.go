@@ -35,7 +35,47 @@ var (
 	successColor = color.New(color.FgGreen)
 	errorColor   = color.New(color.FgRed)
 	warnColor    = color.New(color.FgYellow)
+
+	// timeNow is the function used to get the current time. Override in tests.
+	timeNow = time.Now
 )
+
+// relativeTime returns a human-readable relative duration string for t.
+// Future times return "in X units", past times return "X units ago".
+func relativeTime(t time.Time) string {
+	now := timeNow()
+	d := t.Sub(now)
+	if d < 0 {
+		d = -d
+		return formatDuration(d) + " ago"
+	}
+	return "in " + formatDuration(d)
+}
+
+func formatDuration(d time.Duration) string {
+	const day = 24 * time.Hour
+	switch {
+	case d >= 60*day:
+		months := int(d / (30 * day))
+		if months == 1 {
+			return "1 month"
+		}
+		return fmt.Sprintf("%d months", months)
+	case d >= 2*day:
+		days := int(d / day)
+		return fmt.Sprintf("%d days", days)
+	case d >= day:
+		return "1 day"
+	case d >= 2*time.Hour:
+		return fmt.Sprintf("%d hours", int(d.Hours()))
+	case d >= time.Hour:
+		return "1 hour"
+	case d >= 2*time.Minute:
+		return fmt.Sprintf("%d minutes", int(d.Minutes()))
+	default:
+		return "1 minute"
+	}
+}
 
 // PrintSDJWT prints a decoded SD-JWT to the terminal.
 func PrintSDJWT(token *sdjwt.Token, opts Options) {
@@ -206,7 +246,7 @@ func PrintMDOC(doc *mdoc.Document, opts Options) {
 				printKV("Valid From", mso.ValidityInfo.ValidFrom.Format(time.RFC3339), 1)
 			}
 			if mso.ValidityInfo.ValidUntil != nil {
-				printKV("Valid Until", mso.ValidityInfo.ValidUntil.Format(time.RFC3339), 1)
+				printKV("Valid Until", mso.ValidityInfo.ValidUntil.Format(time.RFC3339)+dimColor.Sprintf(" (%s)", relativeTime(*mso.ValidityInfo.ValidUntil)), 1)
 			}
 		}
 
@@ -312,11 +352,12 @@ func printTimeValidity(expires *time.Time, validFrom *time.Time, expired, notYet
 	}
 	if expires != nil {
 		label := "Expires"
+		rel := dimColor.Sprintf(" (%s)", relativeTime(*expires))
 		if expired {
 			label = "Expired"
-			warnColor.Printf("  ⚠ %s: %s\n", label, expires.Format(time.RFC3339))
+			warnColor.Printf("  ⚠ %s: %s%s\n", label, expires.Format(time.RFC3339), rel)
 		} else {
-			printKV(label, expires.Format(time.RFC3339), 1)
+			printKV(label, expires.Format(time.RFC3339)+rel, 1)
 		}
 	}
 	if notYetValid {
