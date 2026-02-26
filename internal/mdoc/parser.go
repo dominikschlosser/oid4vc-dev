@@ -202,16 +202,26 @@ func parseIssuerSignedItem(raw any) (*IssuerSignedItem, error) {
 
 func parseIssuerAuth(raw any) (*IssuerAuth, error) {
 	// COSE_Sign1 = [protected, unprotected, payload, signature]
+	// coseBytes: the untagged array for internal parsing
+	// rawCOSE: the tagged bytes (Tag 18) for go-cose verification
 	var coseBytes []byte
+	var rawCOSE []byte
 
 	switch v := raw.(type) {
 	case []byte:
 		coseBytes = v
+		rawCOSE = v
 	case cbor.Tag:
+		// Preserve the full tagged encoding for go-cose
+		tagged, err := cbor.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+		rawCOSE = tagged
+
 		if b, ok := v.Content.([]byte); ok {
 			coseBytes = b
 		} else {
-			// Tag 18 (COSE_Sign1) wrapping an array
 			b, err := cbor.Marshal(v.Content)
 			if err != nil {
 				return nil, err
@@ -219,11 +229,17 @@ func parseIssuerAuth(raw any) (*IssuerAuth, error) {
 			coseBytes = b
 		}
 	default:
+		// Typically []any from a DeviceResponse roundtrip (tag stripped).
+		// Marshal as untagged for internal parsing, and wrap with Tag 18 for go-cose.
 		b, err := cbor.Marshal(raw)
 		if err != nil {
 			return nil, fmt.Errorf("cannot handle issuerAuth type %T", raw)
 		}
 		coseBytes = b
+		rawCOSE, err = cbor.Marshal(cbor.Tag{Number: 18, Content: raw})
+		if err != nil {
+			rawCOSE = b
+		}
 	}
 
 	var coseArr []cbor.RawMessage
@@ -235,7 +251,7 @@ func parseIssuerAuth(raw any) (*IssuerAuth, error) {
 		return nil, fmt.Errorf("COSE_Sign1 expected 4 elements, got %d", len(coseArr))
 	}
 
-	ia := &IssuerAuth{RawCOSE: coseBytes}
+	ia := &IssuerAuth{RawCOSE: rawCOSE}
 
 	// Protected header (bstr containing CBOR map)
 	var protectedBytes []byte

@@ -1,0 +1,378 @@
+package cmd
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
+	"math/big"
+	"testing"
+	"time"
+
+	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
+	"github.com/dominikschlosser/ssi-debugger/internal/trustlist"
+)
+
+// generateCACert creates a self-signed CA certificate and key.
+func generateCACert(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey, []byte) {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Test CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return caCert, caKey, caDER
+}
+
+// generateLeafCert creates a leaf certificate signed by the given CA.
+func generateLeafCert(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.PrivateKey) (*x509.Certificate, *ecdsa.PrivateKey, []byte) {
+	t.Helper()
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "Test Leaf"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	}
+
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	leafCert, err := x509.ParseCertificate(leafDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return leafCert, leafKey, leafDER
+}
+
+func TestExtractAndValidateX5C_TrustedChain(t *testing.T) {
+	caCert, caKey, caDER := generateCACert(t)
+	_, _, leafDER := generateLeafCert(t, caCert, caKey)
+
+	// base64 standard encoding (as x5c uses)
+	leafB64 := encodeBase64Std(leafDER)
+
+	header := map[string]any{
+		"alg": "ES256",
+		"x5c": []any{leafB64},
+	}
+
+	tlCerts := []trustlist.CertInfo{
+		{PublicKey: caCert.PublicKey, Raw: caDER},
+	}
+
+	key, err := extractAndValidateX5C(header, tlCerts)
+	if err != nil {
+		t.Fatalf("extractAndValidateX5C() error: %v", err)
+	}
+	if key == nil {
+		t.Fatal("expected non-nil key")
+	}
+
+	ecKey, ok := key.(*ecdsa.PublicKey)
+	if !ok {
+		t.Fatalf("expected *ecdsa.PublicKey, got %T", key)
+	}
+	if ecKey.Curve != elliptic.P256() {
+		t.Error("expected P-256 curve")
+	}
+}
+
+func TestExtractAndValidateX5C_UntrustedChain(t *testing.T) {
+	caCert, caKey, _ := generateCACert(t)
+	_, _, leafDER := generateLeafCert(t, caCert, caKey)
+
+	// Trust list has a different CA
+	otherCACert, _, otherCADER := generateCACert(t)
+
+	header := map[string]any{
+		"x5c": []any{encodeBase64Std(leafDER)},
+	}
+
+	tlCerts := []trustlist.CertInfo{
+		{PublicKey: otherCACert.PublicKey, Raw: otherCADER},
+	}
+
+	_, err := extractAndValidateX5C(header, tlCerts)
+	if err == nil {
+		t.Error("expected error for untrusted chain")
+	}
+}
+
+func TestExtractAndValidateX5C_NoX5CHeader(t *testing.T) {
+	header := map[string]any{
+		"alg": "ES256",
+	}
+
+	tlCerts := []trustlist.CertInfo{
+		{PublicKey: nil, Raw: []byte("dummy")},
+	}
+
+	key, err := extractAndValidateX5C(header, tlCerts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != nil {
+		t.Error("expected nil key when no x5c header")
+	}
+}
+
+func TestExtractAndValidateX5C_NoTrustListCerts(t *testing.T) {
+	header := map[string]any{
+		"x5c": []any{"some-cert"},
+	}
+
+	key, err := extractAndValidateX5C(header, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != nil {
+		t.Error("expected nil key when no trust list certs")
+	}
+}
+
+func TestExtractAndValidateX5C_WithIntermediate(t *testing.T) {
+	// Root CA
+	rootCert, rootKey, rootDER := generateCACert(t)
+
+	// Intermediate CA signed by root
+	intKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(10),
+		Subject:               pkix.Name{CommonName: "Test Intermediate CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	intDER, err := x509.CreateCertificate(rand.Reader, intTemplate, rootCert, &intKey.PublicKey, rootKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intCert, _ := x509.ParseCertificate(intDER)
+
+	// Leaf signed by intermediate
+	_, _, leafDER := generateLeafCert(t, intCert, intKey)
+
+	header := map[string]any{
+		"x5c": []any{
+			encodeBase64Std(leafDER),
+			encodeBase64Std(intDER),
+		},
+	}
+
+	// Trust list only has root
+	tlCerts := []trustlist.CertInfo{
+		{PublicKey: rootCert.PublicKey, Raw: rootDER},
+	}
+
+	key, err := extractAndValidateX5C(header, tlCerts)
+	if err != nil {
+		t.Fatalf("extractAndValidateX5C() error: %v", err)
+	}
+	if key == nil {
+		t.Fatal("expected non-nil key")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_TrustedSingleCert(t *testing.T) {
+	caCert, caKey, caDER := generateCACert(t)
+	_, _, leafDER := generateLeafCert(t, caCert, caKey)
+
+	doc := &mdoc.Document{
+		IssuerAuth: &mdoc.IssuerAuth{
+			UnprotectedHeader: map[any]any{
+				int64(33): leafDER, // single cert as []byte
+			},
+		},
+	}
+
+	tlCerts := []trustlist.CertInfo{
+		{PublicKey: caCert.PublicKey, Raw: caDER},
+	}
+
+	key, err := extractAndValidateMDOCX5Chain(doc, tlCerts)
+	if err != nil {
+		t.Fatalf("extractAndValidateMDOCX5Chain() error: %v", err)
+	}
+	if key == nil {
+		t.Fatal("expected non-nil key")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_TrustedCertArray(t *testing.T) {
+	caCert, caKey, caDER := generateCACert(t)
+	_, _, leafDER := generateLeafCert(t, caCert, caKey)
+
+	doc := &mdoc.Document{
+		IssuerAuth: &mdoc.IssuerAuth{
+			UnprotectedHeader: map[any]any{
+				int64(33): []any{leafDER}, // array of certs
+			},
+		},
+	}
+
+	tlCerts := []trustlist.CertInfo{
+		{PublicKey: caCert.PublicKey, Raw: caDER},
+	}
+
+	key, err := extractAndValidateMDOCX5Chain(doc, tlCerts)
+	if err != nil {
+		t.Fatalf("extractAndValidateMDOCX5Chain() error: %v", err)
+	}
+	if key == nil {
+		t.Fatal("expected non-nil key")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_UntrustedChain(t *testing.T) {
+	caCert, caKey, _ := generateCACert(t)
+	_, _, leafDER := generateLeafCert(t, caCert, caKey)
+
+	otherCACert, _, otherCADER := generateCACert(t)
+
+	doc := &mdoc.Document{
+		IssuerAuth: &mdoc.IssuerAuth{
+			UnprotectedHeader: map[any]any{
+				int64(33): leafDER,
+			},
+		},
+	}
+
+	tlCerts := []trustlist.CertInfo{
+		{PublicKey: otherCACert.PublicKey, Raw: otherCADER},
+	}
+
+	_, err := extractAndValidateMDOCX5Chain(doc, tlCerts)
+	if err == nil {
+		t.Error("expected error for untrusted chain")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_NoX5Chain(t *testing.T) {
+	doc := &mdoc.Document{
+		IssuerAuth: &mdoc.IssuerAuth{
+			UnprotectedHeader: map[any]any{},
+		},
+	}
+
+	tlCerts := []trustlist.CertInfo{
+		{Raw: []byte("dummy")},
+	}
+
+	key, err := extractAndValidateMDOCX5Chain(doc, tlCerts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != nil {
+		t.Error("expected nil key when no x5chain")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_NoIssuerAuth(t *testing.T) {
+	doc := &mdoc.Document{}
+
+	key, err := extractAndValidateMDOCX5Chain(doc, []trustlist.CertInfo{{Raw: []byte("x")}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != nil {
+		t.Error("expected nil key when no issuerAuth")
+	}
+}
+
+func TestExtractAndValidateMDOCX5Chain_Uint64Label(t *testing.T) {
+	caCert, caKey, caDER := generateCACert(t)
+	_, _, leafDER := generateLeafCert(t, caCert, caKey)
+
+	// Some CBOR decoders may use uint64 for the label
+	doc := &mdoc.Document{
+		IssuerAuth: &mdoc.IssuerAuth{
+			UnprotectedHeader: map[any]any{
+				uint64(33): leafDER,
+			},
+		},
+	}
+
+	tlCerts := []trustlist.CertInfo{
+		{PublicKey: caCert.PublicKey, Raw: caDER},
+	}
+
+	key, err := extractAndValidateMDOCX5Chain(doc, tlCerts)
+	if err != nil {
+		t.Fatalf("extractAndValidateMDOCX5Chain() error: %v", err)
+	}
+	if key == nil {
+		t.Fatal("expected non-nil key")
+	}
+}
+
+func TestExtractAndValidateX5C_InvalidCertData(t *testing.T) {
+	header := map[string]any{
+		"x5c": []any{"not-valid-base64-cert-data!!!"},
+	}
+
+	tlCerts := []trustlist.CertInfo{
+		{Raw: []byte("dummy")},
+	}
+
+	_, err := extractAndValidateX5C(header, tlCerts)
+	if err == nil {
+		t.Error("expected error for invalid certificate data")
+	}
+}
+
+func TestExtractAndValidateX5C_ValidBase64ButInvalidDER(t *testing.T) {
+	header := map[string]any{
+		"x5c": []any{encodeBase64Std([]byte("not a certificate"))},
+	}
+
+	tlCerts := []trustlist.CertInfo{
+		{Raw: []byte("dummy")},
+	}
+
+	_, err := extractAndValidateX5C(header, tlCerts)
+	if err == nil {
+		t.Error("expected error for invalid DER data")
+	}
+}
+
+// encodeBase64Std is a test helper for standard base64 encoding.
+func encodeBase64Std(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
+}
