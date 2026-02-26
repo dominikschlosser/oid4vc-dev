@@ -18,6 +18,7 @@ type Config struct {
 	ProxyPort     int
 	DashboardPort int
 	NoDashboard   bool
+	AllTraffic    bool // show all traffic including non-OID4VP/VCI requests
 }
 
 // Server is the OID4VP/VCI debugging reverse proxy.
@@ -59,6 +60,11 @@ func (s *Server) Store() *Store {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
+	// Capture original URL before the Director rewrites it to the target.
+	// Reconstruct from the incoming request or honour existing forwarding headers
+	// (e.g. when behind another reverse proxy).
+	origURL := originalURL(r)
+
 	// Capture request body
 	var reqBody string
 	if r.Body != nil {
@@ -72,8 +78,31 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Store request info in context via header (cleaned up in modifyResponse)
 	r.Header.Set("X-Proxy-Start", fmt.Sprintf("%d", start.UnixNano()))
 	r.Header.Set("X-Proxy-ReqBody", reqBody)
+	r.Header.Set("X-Proxy-OrigURL", origURL)
 
 	s.proxy.ServeHTTP(w, r)
+}
+
+// originalURL reconstructs the URL the client originally requested.
+// It honours X-Forwarded-Host / X-Forwarded-Proto if present (i.e. when
+// the proxy itself sits behind another reverse proxy), otherwise it falls
+// back to the incoming Host header and request URI.
+func originalURL(r *http.Request) string {
+	scheme := r.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+
+	return scheme + "://" + host + r.RequestURI
 }
 
 func (s *Server) modifyResponse(resp *http.Response) error {
@@ -84,10 +113,12 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 		start = time.Unix(0, ns)
 	}
 	reqBody := resp.Request.Header.Get("X-Proxy-ReqBody")
+	origURL := resp.Request.Header.Get("X-Proxy-OrigURL")
 
 	// Clean up internal headers
 	resp.Request.Header.Del("X-Proxy-Start")
 	resp.Request.Header.Del("X-Proxy-ReqBody")
+	resp.Request.Header.Del("X-Proxy-OrigURL")
 
 	// Read response body
 	var respBody string
@@ -125,10 +156,16 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 
 	duration := time.Since(start)
 
+	// Use the original URL (before Director rewrite) for display
+	displayURL := origURL
+	if displayURL == "" {
+		displayURL = resp.Request.URL.String()
+	}
+
 	entry := &TrafficEntry{
 		Timestamp:       start,
 		Method:          resp.Request.Method,
-		URL:             resp.Request.URL.String(),
+		URL:             displayURL,
 		RequestHeaders:  resp.Request.Header.Clone(),
 		RequestBody:     reqBody,
 		StatusCode:      resp.StatusCode,
@@ -139,10 +176,10 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 	}
 
 	Classify(entry)
+	s.store.Add(entry)
 
-	// Only log OID4VP/VCI-related traffic, skip unrelated requests
-	if entry.Class != ClassUnknown {
-		s.store.Add(entry)
+	// Only print OID4VP/VCI-related traffic unless --all-traffic is set
+	if entry.Class != ClassUnknown || s.config.AllTraffic {
 		PrintEntry(entry)
 	}
 

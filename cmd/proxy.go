@@ -15,6 +15,7 @@ var (
 	proxyPort      int
 	dashboardPort  int
 	noDashboard    bool
+	allTraffic     bool
 )
 
 var proxyCmd = &cobra.Command{
@@ -29,6 +30,7 @@ func init() {
 	proxyCmd.Flags().IntVar(&proxyPort, "port", 9090, "Proxy listen port")
 	proxyCmd.Flags().IntVar(&dashboardPort, "dashboard", 9091, "Dashboard listen port")
 	proxyCmd.Flags().BoolVar(&noDashboard, "no-dashboard", false, "Disable web dashboard")
+	proxyCmd.Flags().BoolVar(&allTraffic, "all-traffic", false, "Show all traffic, not just OID4VP/VCI requests")
 	_ = proxyCmd.MarkFlagRequired("target")
 	rootCmd.AddCommand(proxyCmd)
 }
@@ -50,6 +52,7 @@ func runProxy(cmd *cobra.Command, args []string) error {
 		ProxyPort:     proxyPort,
 		DashboardPort: dashboardPort,
 		NoDashboard:   noDashboard,
+		AllTraffic:    allTraffic,
 	}
 
 	srv := proxy.NewServer(cfg)

@@ -6,8 +6,10 @@
   const statusEl = document.getElementById("status");
   const clearBtn = document.getElementById("clear-btn");
   const themeToggle = document.getElementById("theme-toggle");
+  const showAllCheckbox = document.getElementById("show-all");
 
   let entries = [];
+  let showAll = false;
 
   // Theme toggle
   const savedTheme = localStorage.getItem("proxy-theme") || "dark";
@@ -24,11 +26,25 @@
     }
   });
 
+  // Show all toggle
+  showAllCheckbox.checked = localStorage.getItem("proxy-show-all") === "true";
+  showAll = showAllCheckbox.checked;
+
+  showAllCheckbox.addEventListener("change", function () {
+    showAll = showAllCheckbox.checked;
+    localStorage.setItem("proxy-show-all", showAll);
+    renderEntries();
+  });
+
   // Clear
   clearBtn.addEventListener("click", function () {
     entries = [];
     renderEntries();
   });
+
+  function isVisible(entry) {
+    return showAll || entry.classLabel !== "Unknown";
+  }
 
   function badgeClass(classLabel) {
     if (classLabel.startsWith("VP")) return "badge-vp";
@@ -113,13 +129,14 @@
 
   function renderEntries() {
     entriesEl.innerHTML = "";
-    if (entries.length === 0) {
+    var visible = entries.filter(isVisible);
+    if (visible.length === 0) {
       entriesEl.appendChild(emptyEl);
       emptyEl.style.display = "";
       return;
     }
     emptyEl.style.display = "none";
-    for (const entry of entries) {
+    for (const entry of visible) {
       entriesEl.appendChild(renderEntry(entry));
     }
     entriesEl.scrollTop = entriesEl.scrollHeight;
@@ -127,7 +144,9 @@
 
   function addEntry(entry) {
     entries.push(entry);
-    if (entries.length === 1) {
+    if (!isVisible(entry)) return;
+
+    if (emptyEl.style.display !== "none") {
       emptyEl.style.display = "none";
       entriesEl.innerHTML = "";
     }

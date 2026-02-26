@@ -78,6 +78,21 @@ header h1 {
   color: var(--red);
 }
 
+.checkbox-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+}
+
+.checkbox-label input {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
 .btn {
   font-family: var(--font-mono);
   font-size: 11px;
