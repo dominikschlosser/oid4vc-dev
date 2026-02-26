@@ -55,7 +55,14 @@ func runProxy(cmd *cobra.Command, args []string) error {
 		AllTraffic:    allTraffic,
 	}
 
-	srv := proxy.NewServer(cfg)
+	var writer proxy.EntryWriter
+	if jsonOutput {
+		writer = proxy.NewJSONWriter(allTraffic)
+	} else {
+		writer = &proxy.TerminalWriter{AllTraffic: allTraffic}
+	}
+
+	srv := proxy.NewServer(cfg, writer)
 
 	cyan := color.New(color.FgCyan, color.Bold)
 	dim := color.New(color.Faint)

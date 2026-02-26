@@ -1,0 +1,112 @@
+package proxy
+
+import (
+	"net/http"
+	"sort"
+)
+
+// GenerateHAR builds a HAR 1.2 archive from the given traffic entries.
+func GenerateHAR(entries []*TrafficEntry) map[string]any {
+	harEntries := make([]map[string]any, 0, len(entries))
+
+	for _, e := range entries {
+		harEntries = append(harEntries, harEntry(e))
+	}
+
+	return map[string]any{
+		"log": map[string]any{
+			"version": "1.2",
+			"creator": map[string]any{
+				"name":    "ssi-debugger",
+				"version": "1.0.0",
+			},
+			"entries": harEntries,
+		},
+	}
+}
+
+func harEntry(e *TrafficEntry) map[string]any {
+	entry := map[string]any{
+		"startedDateTime": e.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"),
+		"time":            e.DurationMS,
+		"request":         harRequest(e),
+		"response":        harResponse(e),
+		"cache":           map[string]any{},
+		"timings": map[string]any{
+			"send":    -1,
+			"wait":    e.DurationMS,
+			"receive": -1,
+		},
+	}
+	return entry
+}
+
+func harRequest(e *TrafficEntry) map[string]any {
+	req := map[string]any{
+		"method":      e.Method,
+		"url":         e.URL,
+		"httpVersion": "HTTP/1.1",
+		"cookies":     []any{},
+		"headers":     harHeaders(e.RequestHeaders),
+		"queryString": []any{},
+		"headersSize": -1,
+		"bodySize":    len(e.RequestBody),
+	}
+
+	if e.RequestBody != "" {
+		contentType := ""
+		if e.RequestHeaders != nil {
+			contentType = e.RequestHeaders.Get("Content-Type")
+		}
+		req["postData"] = map[string]any{
+			"mimeType": contentType,
+			"text":     e.RequestBody,
+		}
+	}
+
+	return req
+}
+
+func harResponse(e *TrafficEntry) map[string]any {
+	contentType := ""
+	if e.ResponseHeaders != nil {
+		contentType = e.ResponseHeaders.Get("Content-Type")
+	}
+
+	return map[string]any{
+		"status":      e.StatusCode,
+		"statusText":  http.StatusText(e.StatusCode),
+		"httpVersion": "HTTP/1.1",
+		"cookies":     []any{},
+		"headers":     harHeaders(e.ResponseHeaders),
+		"content": map[string]any{
+			"size":     len(e.ResponseBody),
+			"mimeType": contentType,
+			"text":     e.ResponseBody,
+		},
+		"redirectURL": "",
+		"headersSize": -1,
+		"bodySize":    len(e.ResponseBody),
+	}
+}
+
+func harHeaders(h http.Header) []map[string]string {
+	if h == nil {
+		return []map[string]string{}
+	}
+
+	// Sort header names for deterministic output
+	names := make([]string, 0, len(h))
+	for name := range h {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var out []map[string]string
+	for _, name := range names {
+		for _, val := range h[name] {
+			out = append(out, map[string]string{"name": name, "value": val})
+		}
+	}
+	return out
+}

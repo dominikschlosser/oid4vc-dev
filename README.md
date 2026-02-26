@@ -90,6 +90,20 @@ Traffic is automatically classified into protocol steps:
 
 By default, only OID4VP/VCI traffic is shown. Non-matching requests (favicon, health checks, etc.) are still proxied but hidden from the output. Pass `--all-traffic` or toggle the "All traffic" checkbox in the dashboard to see everything.
 
+#### NDJSON output
+
+Use `--json` to get machine-readable output (one JSON object per line), suitable for piping to `jq` or logging:
+
+```bash
+ssi-debugger proxy --target http://localhost:8080 --json
+ssi-debugger proxy --target http://localhost:8080 --json 2>/dev/null | jq .classLabel
+ssi-debugger proxy --target http://localhost:8080 --json --all-traffic >> traffic.jsonl
+```
+
+#### Flow correlation
+
+Related protocol steps (e.g., VP Auth Request → Request Object → Auth Response) are automatically grouped into flows using shared `state` or `nonce` values. Each entry includes a `flowId` field when correlated. In the dashboard, click **"Timeline"** to switch from a flat list to a grouped flow view with collapsible sections.
+
 #### Smart decoding
 
 Decoded payloads are shown inline — the proxy understands the structure of each protocol step:
@@ -118,6 +132,14 @@ The **web dashboard** at `http://localhost:9091` shows the same traffic with exp
 
 When the proxy captures a credential (vp_token, id_token, or issued credential), the expanded entry shows a **"View in Decoder"** button that opens the credential in the full decoder web UI (served at `/decode/` on the dashboard port). This gives you the same decode experience as `ssi-debugger serve` without running a separate command.
 
+#### HAR export
+
+Click **"Export HAR"** in the dashboard header to download all captured traffic as a HAR 1.2 file. The file can be imported into Chrome DevTools, Firefox, or any HAR viewer for offline analysis.
+
+#### cURL copy
+
+Expand any entry in the dashboard and click **"Copy cURL"** to copy a `curl` command that reproduces the request. Paste it in a terminal to replay requests during debugging.
+
 #### Flags
 
 | Flag             | Default | Description                              |
@@ -127,6 +149,7 @@ When the proxy captures a credential (vp_token, id_token, or issued credential),
 | `--dashboard`    | `9091`  | Dashboard listen port                    |
 | `--no-dashboard` | `false` | Disable web dashboard                    |
 | `--all-traffic`  | `false` | Show all traffic, not just OID4VP/VCI    |
+| `--json`         | `false` | NDJSON output to stdout (global flag)    |
 
 #### Terminal output example
 

@@ -1,0 +1,208 @@
+package proxy
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+)
+
+func TestOriginalURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		setup  func() *http.Request
+		want   string
+	}{
+		{
+			name: "plain HTTP request",
+			setup: func() *http.Request {
+				r := httptest.NewRequest("GET", "http://localhost:9090/authorize?foo=bar", nil)
+				r.RequestURI = "/authorize?foo=bar"
+				return r
+			},
+			want: "http://localhost:9090/authorize?foo=bar",
+		},
+		{
+			name: "X-Forwarded headers",
+			setup: func() *http.Request {
+				r := httptest.NewRequest("GET", "http://localhost:9090/path", nil)
+				r.RequestURI = "/path"
+				r.Header.Set("X-Forwarded-Proto", "https")
+				r.Header.Set("X-Forwarded-Host", "external.example.com")
+				return r
+			},
+			want: "https://external.example.com/path",
+		},
+		{
+			name: "X-Forwarded-Proto only",
+			setup: func() *http.Request {
+				r := httptest.NewRequest("GET", "http://myhost:8080/test", nil)
+				r.RequestURI = "/test"
+				r.Header.Set("X-Forwarded-Proto", "https")
+				return r
+			},
+			want: "https://myhost:8080/test",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := originalURL(tt.setup())
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewServerStore(t *testing.T) {
+	target, _ := url.Parse("http://localhost:8080")
+	cfg := Config{TargetURL: target, ProxyPort: 9090}
+	srv := NewServer(cfg, nil)
+
+	if srv.Store() == nil {
+		t.Fatal("expected non-nil store")
+	}
+}
+
+func TestServerEndToEnd(t *testing.T) {
+	// Create a target backend
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer backend.Close()
+
+	targetURL, _ := url.Parse(backend.URL)
+
+	// Collect entries via a test writer
+	var captured []*TrafficEntry
+	writer := &testWriter{entries: &captured}
+
+	cfg := Config{
+		TargetURL:  targetURL,
+		ProxyPort:  0,
+		AllTraffic: true,
+	}
+	srv := NewServer(cfg, writer)
+
+	// Make a request through the proxy
+	proxy := httptest.NewServer(srv)
+	defer proxy.Close()
+
+	resp, err := http.Get(proxy.URL + "/test")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if string(body) != `{"ok":true}` {
+		t.Errorf("unexpected body: %s", string(body))
+	}
+
+	if len(captured) != 1 {
+		t.Fatalf("expected 1 captured entry, got %d", len(captured))
+	}
+	if captured[0].Method != "GET" {
+		t.Errorf("expected GET, got %s", captured[0].Method)
+	}
+	if captured[0].StatusCode != 200 {
+		t.Errorf("expected 200, got %d", captured[0].StatusCode)
+	}
+}
+
+func TestServerCapturesRequestBody(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Write(body)
+	}))
+	defer backend.Close()
+
+	targetURL, _ := url.Parse(backend.URL)
+	var captured []*TrafficEntry
+	writer := &testWriter{entries: &captured}
+
+	srv := NewServer(Config{TargetURL: targetURL, AllTraffic: true}, writer)
+	proxy := httptest.NewServer(srv)
+	defer proxy.Close()
+
+	resp, err := http.Post(proxy.URL+"/submit", "application/x-www-form-urlencoded", strings.NewReader("state=abc&vp_token=test"))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if len(captured) != 1 {
+		t.Fatalf("expected 1 captured entry, got %d", len(captured))
+	}
+	if captured[0].RequestBody != "state=abc&vp_token=test" {
+		t.Errorf("unexpected request body: %q", captured[0].RequestBody)
+	}
+}
+
+func TestServerNilWriter(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(204)
+	}))
+	defer backend.Close()
+
+	targetURL, _ := url.Parse(backend.URL)
+	srv := NewServer(Config{TargetURL: targetURL}, nil)
+	proxy := httptest.NewServer(srv)
+	defer proxy.Close()
+
+	// Should not panic with nil writer
+	resp, err := http.Get(proxy.URL + "/test")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != 204 {
+		t.Errorf("expected 204, got %d", resp.StatusCode)
+	}
+}
+
+func TestServerClassifiesVPAuthRequest(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer backend.Close()
+
+	targetURL, _ := url.Parse(backend.URL)
+	var captured []*TrafficEntry
+	writer := &testWriter{entries: &captured}
+
+	srv := NewServer(Config{TargetURL: targetURL}, writer)
+	proxy := httptest.NewServer(srv)
+	defer proxy.Close()
+
+	resp, err := http.Get(proxy.URL + "/authorize?client_id=test&response_type=vp_token&state=s1")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if len(captured) != 1 {
+		t.Fatalf("expected 1 captured entry, got %d", len(captured))
+	}
+	if captured[0].Class != ClassVPAuthRequest {
+		t.Errorf("expected ClassVPAuthRequest, got %d (%s)", captured[0].Class, captured[0].ClassLabel)
+	}
+}
+
+// testWriter is a simple EntryWriter that records all entries.
+type testWriter struct {
+	entries *[]*TrafficEntry
+}
+
+func (tw *testWriter) WriteEntry(entry *TrafficEntry) {
+	*tw.entries = append(*tw.entries, entry)
+}

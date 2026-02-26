@@ -27,13 +27,15 @@ type Server struct {
 	store    *Store
 	rewriter *Rewriter
 	proxy    *httputil.ReverseProxy
+	writer   EntryWriter
 }
 
 // NewServer creates a new debugging reverse proxy server.
-func NewServer(cfg Config) *Server {
+func NewServer(cfg Config, writer EntryWriter) *Server {
 	s := &Server{
 		config: cfg,
 		store:  NewStore(1000),
+		writer: writer,
 	}
 
 	proxyHost := fmt.Sprintf("localhost:%d", cfg.ProxyPort)
@@ -178,9 +180,8 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 	Classify(entry)
 	s.store.Add(entry)
 
-	// Only print OID4VP/VCI-related traffic unless --all-traffic is set
-	if entry.Class != ClassUnknown || s.config.AllTraffic {
-		PrintEntry(entry)
+	if s.writer != nil {
+		s.writer.WriteEntry(entry)
 	}
 
 	return nil

@@ -259,6 +259,83 @@ header h1 {
   background: rgba(122, 162, 247, 0.15);
 }
 
+.detail-actions {
+  margin-bottom: 10px;
+}
+
+.btn-copy-curl {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-copy-curl:hover {
+  background: rgba(122, 162, 247, 0.15);
+}
+
+.flow-group {
+  border-left: 3px solid var(--accent);
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.flow-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+.flow-header:hover {
+  background: var(--bg-hover);
+}
+
+.flow-type {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.flow-time {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.flow-count {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.flow-toggle {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.flow-entries {
+  padding: 4px 4px 4px 8px;
+}
+
+.flow-group.collapsed .flow-entries {
+  display: none;
+}
+
+.flow-group.collapsed .flow-header {
+  border-bottom: none;
+}
+
 .empty-state {
   display: flex;
   align-items: center;

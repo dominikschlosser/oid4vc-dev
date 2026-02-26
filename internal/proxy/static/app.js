@@ -7,9 +7,12 @@
   const clearBtn = document.getElementById("clear-btn");
   const themeToggle = document.getElementById("theme-toggle");
   const showAllCheckbox = document.getElementById("show-all");
+  const harExportBtn = document.getElementById("har-export");
+  const timelineToggle = document.getElementById("timeline-toggle");
 
   let entries = [];
   let showAll = false;
+  let timelineView = localStorage.getItem("proxy-timeline") === "true";
 
   // Theme toggle
   const savedTheme = localStorage.getItem("proxy-theme") || "dark";
@@ -42,6 +45,38 @@
     renderEntries();
   });
 
+  // HAR export
+  harExportBtn.addEventListener("click", function () {
+    fetch("/api/har")
+      .then(function (r) { return r.blob(); })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "ssi-debugger.har";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      })
+      .catch(function (err) {
+        console.error("Failed to export HAR:", err);
+      });
+  });
+
+  // Timeline toggle
+  updateTimelineButton();
+  timelineToggle.addEventListener("click", function () {
+    timelineView = !timelineView;
+    localStorage.setItem("proxy-timeline", timelineView);
+    updateTimelineButton();
+    renderEntries();
+  });
+
+  function updateTimelineButton() {
+    timelineToggle.textContent = timelineView ? "List" : "Timeline";
+  }
+
   function isVisible(entry) {
     return showAll || entry.classLabel !== "Unknown";
   }
@@ -68,6 +103,23 @@
     const div = document.createElement("div");
     div.textContent = s;
     return div.innerHTML;
+  }
+
+  function generateCurl(entry) {
+    var parts = ["curl -X " + entry.method + " '" + entry.url + "'"];
+    if (entry.requestHeaders) {
+      for (var key in entry.requestHeaders) {
+        if (key.toLowerCase().startsWith("x-proxy-")) continue;
+        var vals = entry.requestHeaders[key];
+        for (var i = 0; i < vals.length; i++) {
+          parts.push("-H '" + key + ": " + vals[i] + "'");
+        }
+      }
+    }
+    if (entry.requestBody) {
+      parts.push("--data-raw '" + entry.requestBody.replace(/'/g, "'\\''") + "'");
+    }
+    return parts.join(" \\\n  ");
   }
 
   function renderDecoded(decoded) {
@@ -125,6 +177,7 @@
         '<span class="entry-badge ' + badgeClass(entry.classLabel) + '">' + escapeHtml(entry.classLabel) + '</span>' +
       '</div>' +
       '<div class="entry-details">' +
+        '<div class="detail-actions"><button class="btn btn-copy-curl">Copy cURL</button></div>' +
         renderCredentialLinks(entry.credentials) +
         (entry.decoded ? '<div class="detail-section"><h3>Decoded</h3>' + renderDecoded(entry.decoded) + '</div>' : '') +
         '<div class="detail-section"><h3>Request Headers</h3><pre>' + renderHeaders(entry.requestHeaders) + '</pre></div>' +
@@ -137,7 +190,87 @@
       el.classList.toggle("expanded");
     });
 
+    el.querySelector(".btn-copy-curl").addEventListener("click", function (e) {
+      e.stopPropagation();
+      var curl = generateCurl(entry);
+      navigator.clipboard.writeText(curl).then(function () {
+        var btn = e.target;
+        btn.textContent = "Copied!";
+        setTimeout(function () { btn.textContent = "Copy cURL"; }, 1500);
+      });
+    });
+
     return el;
+  }
+
+  function renderFlowTimeline(visible) {
+    var flowGroups = {};
+    var flowOrder = [];
+    var standalone = [];
+
+    for (var i = 0; i < visible.length; i++) {
+      var entry = visible[i];
+      if (entry.flowId) {
+        if (!flowGroups[entry.flowId]) {
+          flowGroups[entry.flowId] = [];
+          flowOrder.push(entry.flowId);
+        }
+        flowGroups[entry.flowId].push(entry);
+      } else {
+        standalone.push(entry);
+      }
+    }
+
+    var frag = document.createDocumentFragment();
+
+    for (var f = 0; f < flowOrder.length; f++) {
+      var flowId = flowOrder[f];
+      var flowEntries = flowGroups[flowId];
+      var group = document.createElement("div");
+      group.className = "flow-group";
+
+      // Determine flow type from first classified entry
+      var flowType = "Flow";
+      for (var j = 0; j < flowEntries.length; j++) {
+        if (flowEntries[j].classLabel.startsWith("VP")) { flowType = "VP Flow"; break; }
+        if (flowEntries[j].classLabel.startsWith("VCI")) { flowType = "VCI Flow"; break; }
+      }
+
+      var firstTime = formatTime(flowEntries[0].timestamp);
+      var lastTime = formatTime(flowEntries[flowEntries.length - 1].timestamp);
+      var timeRange = firstTime === lastTime ? firstTime : firstTime + " – " + lastTime;
+
+      var header = document.createElement("div");
+      header.className = "flow-header";
+      header.innerHTML =
+        '<span class="flow-type">' + escapeHtml(flowType) + '</span>' +
+        '<span class="flow-time">' + escapeHtml(timeRange) + '</span>' +
+        '<span class="flow-count">' + flowEntries.length + ' requests</span>' +
+        '<span class="flow-toggle">▼</span>';
+
+      var entriesContainer = document.createElement("div");
+      entriesContainer.className = "flow-entries";
+      for (var k = 0; k < flowEntries.length; k++) {
+        entriesContainer.appendChild(renderEntry(flowEntries[k]));
+      }
+
+      header.addEventListener("click", function () {
+        var g = this.parentElement;
+        g.classList.toggle("collapsed");
+        var toggle = this.querySelector(".flow-toggle");
+        toggle.textContent = g.classList.contains("collapsed") ? "▶" : "▼";
+      });
+
+      group.appendChild(header);
+      group.appendChild(entriesContainer);
+      frag.appendChild(group);
+    }
+
+    for (var s = 0; s < standalone.length; s++) {
+      frag.appendChild(renderEntry(standalone[s]));
+    }
+
+    return frag;
   }
 
   function renderEntries() {
@@ -149,8 +282,13 @@
       return;
     }
     emptyEl.style.display = "none";
-    for (const entry of visible) {
-      entriesEl.appendChild(renderEntry(entry));
+
+    if (timelineView) {
+      entriesEl.appendChild(renderFlowTimeline(visible));
+    } else {
+      for (const entry of visible) {
+        entriesEl.appendChild(renderEntry(entry));
+      }
     }
     entriesEl.scrollTop = entriesEl.scrollHeight;
   }
@@ -158,6 +296,12 @@
   function addEntry(entry) {
     entries.push(entry);
     if (!isVisible(entry)) return;
+
+    if (timelineView) {
+      // Re-render to properly group
+      renderEntries();
+      return;
+    }
 
     if (emptyEl.style.display !== "none") {
       emptyEl.style.display = "none";

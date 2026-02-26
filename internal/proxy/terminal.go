@@ -18,6 +18,18 @@ var (
 	classColor   = color.New(color.FgMagenta, color.Bold)
 )
 
+// TerminalWriter writes traffic entries to the terminal with color formatting.
+type TerminalWriter struct {
+	AllTraffic bool
+}
+
+func (tw *TerminalWriter) WriteEntry(entry *TrafficEntry) {
+	if entry.Class == ClassUnknown && !tw.AllTraffic {
+		return
+	}
+	PrintEntry(entry)
+}
+
 // PrintEntry prints a traffic entry to the terminal with color formatting.
 func PrintEntry(entry *TrafficEntry) {
 	ts := entry.Timestamp.Format("15:04:05")

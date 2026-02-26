@@ -25,6 +25,7 @@ func (d *Dashboard) ListenAndServe() error {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/entries", d.handleEntries)
+	mux.HandleFunc("GET /api/har", d.handleHAR)
 	mux.HandleFunc("GET /api/stream", d.handleStream)
 
 	// Mount the credential decoder web UI under /decode/
@@ -43,6 +44,16 @@ func (d *Dashboard) handleEntries(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	enc.Encode(entries)
+}
+
+func (d *Dashboard) handleHAR(w http.ResponseWriter, r *http.Request) {
+	entries := d.store.Entries()
+	har := GenerateHAR(entries)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"ssi-debugger.har\"")
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	enc.Encode(har)
 }
 
 func (d *Dashboard) handleStream(w http.ResponseWriter, r *http.Request) {

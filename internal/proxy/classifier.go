@@ -325,6 +325,76 @@ func parseFormOrJSON(body string) map[string]string {
 	return result
 }
 
+// ExtractCorrelationKey returns a state or nonce value that can be used
+// to group related protocol entries into a flow. Returns "" if no key found.
+func ExtractCorrelationKey(entry *TrafficEntry) string {
+	u, _ := url.Parse(entry.URL)
+
+	switch entry.Class {
+	case ClassVPAuthRequest:
+		if u != nil {
+			if v := u.Query().Get("state"); v != "" {
+				return v
+			}
+			if v := u.Query().Get("nonce"); v != "" {
+				return v
+			}
+		}
+
+	case ClassVPRequestObject:
+		// Look for state/nonce in the decoded JWT payload
+		if entry.Decoded != nil {
+			if payload, ok := entry.Decoded["payload"].(map[string]any); ok {
+				if v, ok := payload["state"].(string); ok && v != "" {
+					return v
+				}
+				if v, ok := payload["nonce"].(string); ok && v != "" {
+					return v
+				}
+			}
+		}
+
+	case ClassVPAuthResponse:
+		fields := parseFormOrJSON(entry.RequestBody)
+		if v, ok := fields["state"]; ok && v != "" {
+			return v
+		}
+
+	case ClassVCITokenRequest:
+		fields := parseFormOrJSON(entry.RequestBody)
+		if v, ok := fields["pre-authorized_code"]; ok && v != "" {
+			return v
+		}
+		if v, ok := fields["code"]; ok && v != "" {
+			return v
+		}
+
+	case ClassVCICredentialRequest:
+		// Correlate via access token (Authorization header)
+		if auth := entry.RequestHeaders.Get("Authorization"); auth != "" {
+			return auth
+		}
+
+	case ClassVCICredentialOffer:
+		if u != nil {
+			if offer := u.Query().Get("credential_offer"); offer != "" {
+				var m map[string]any
+				if err := json.Unmarshal([]byte(offer), &m); err == nil {
+					if grants, ok := m["grants"].(map[string]any); ok {
+						if preAuth, ok := grants["urn:ietf:params:oauth:grant-type:pre-authorized_code"].(map[string]any); ok {
+							if code, ok := preAuth["pre-authorized_code"].(string); ok && code != "" {
+								return code
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s

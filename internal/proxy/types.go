@@ -55,4 +55,10 @@ type TrafficEntry struct {
 	Credentials     []string       `json:"credentials,omitempty"` // raw credential strings found in this entry
 	Duration        time.Duration  `json:"duration"`
 	DurationMS      int64          `json:"durationMs"`
+	FlowID          string         `json:"flowId,omitempty"`
+}
+
+// EntryWriter is called for each intercepted traffic entry.
+type EntryWriter interface {
+	WriteEntry(entry *TrafficEntry)
 }
