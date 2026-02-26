@@ -13,6 +13,7 @@
       <span class="subtitle">Decode SD-JWT, JWT &amp; mDOC credentials</span>
     </div>
     <div class="header-right">
+      <button id="share-btn" class="btn" title="Copy shareable link">Share</button>
       <button id="clear-btn" class="btn" title="Clear">Clear</button>
       <button id="theme-btn" class="btn" title="Toggle theme"></button>
     </div>
@@ -24,6 +25,7 @@
         <span id="format-badge" class="badge hidden"></span>
       </div>
       <textarea id="input" placeholder="Paste an SD-JWT, JWT, or mDOC credential here..." spellcheck="false" autocomplete="off"></textarea>
+      <div id="raw-view" class="raw-view"></div>
     </div>
     <div class="pane output-pane">
       <div class="pane-header"><span>Decoded</span></div>
@@ -32,6 +34,9 @@
       </div>
     </div>
   </main>
+  <footer class="shortcut-hint">
+    <kbd>Ctrl+L</kbd> Focus input &nbsp;&middot;&nbsp; <kbd>Ctrl+Shift+C</kbd> Copy share link &nbsp;&middot;&nbsp; Hover timestamps for human-readable dates
+  </footer>
   <script src="app.js"></script>
 </body>
 </html>

@@ -407,6 +407,202 @@ func TestPrefill_Empty(t *testing.T) {
 	}
 }
 
+func TestStaticFiles_IndexContainsNewUIElements(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	NewMux("").ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	for _, want := range []string{
+		"raw-view",
+		"shortcut-hint",
+		"Ctrl+L",
+		"Focus input",
+		"Copy share link",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing %q", want)
+		}
+	}
+}
+
+func TestStaticFiles_CSSContainsNewClasses(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/style.css", nil)
+	w := httptest.NewRecorder()
+
+	NewMux("").ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	for _, want := range []string{
+		".timestamp-hover",
+		".copy-btn",
+		".json-dimmed",
+		".digest-truncated",
+		".resolved-claims-list",
+		".resolved-group-label",
+		".claim-disclosed",
+		".raw-view",
+		".jwt-disc-0",
+		".jwt-disc-1",
+		".issuer-summary",
+		".shortcut-hint",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("style.css missing class %q", want)
+		}
+	}
+}
+
+func TestStaticFiles_JSContainsNewFeatures(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	w := httptest.NewRecorder()
+
+	NewMux("").ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	for _, want := range []string{
+		"TIMESTAMP_FIELDS",
+		"SD_INTERNAL_FIELDS",
+		"copyShareLink",
+		"showColorized",
+		"attachRawViewHover",
+		"extractSummary",
+		"renderResolvedClaims",
+		"renderClaimCard",
+		"timestamp-hover",
+		"json-dimmed",
+		"digest-truncated",
+		"shortcut-hint",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("app.js missing reference %q", want)
+		}
+	}
+}
+
+func TestHandleDecode_JWTWithTimestamps(t *testing.T) {
+	jwt := makeJWT(
+		map[string]any{"alg": "none"},
+		map[string]any{
+			"sub": "user",
+			"iss": "https://auth.example",
+			"iat": 1700000000,
+			"exp": 1742592000,
+			"nbf": 1700000000,
+		},
+	)
+
+	w := apiPost(t, `{"input":"`+jwt+`"}`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	result := decodeResponse(t, w)
+	p := result["payload"].(map[string]any)
+
+	// Timestamps should be preserved as numbers for frontend hover rendering
+	if _, ok := p["iat"]; !ok {
+		t.Error("payload should contain iat")
+	}
+	if _, ok := p["exp"]; !ok {
+		t.Error("payload should contain exp")
+	}
+	if _, ok := p["nbf"]; !ok {
+		t.Error("payload should contain nbf")
+	}
+}
+
+func TestHandleDecode_SDJWTResolvedClaims(t *testing.T) {
+	sdjwt := makeSDJWT(
+		map[string]any{
+			"iss":     "https://issuer.example",
+			"_sd_alg": "sha-256",
+			"_sd":     nil,
+		},
+		[][]any{
+			{"salt1", "given_name", "Erika"},
+			{"salt2", "family_name", "Mustermann"},
+		},
+	)
+
+	w := apiPost(t, `{"input":"`+sdjwt+`"}`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decodeResponse(t, w)
+
+	// resolvedClaims should contain disclosed values
+	resolved, ok := result["resolvedClaims"].(map[string]any)
+	if !ok {
+		t.Fatalf("resolvedClaims should be a map, got %T", result["resolvedClaims"])
+	}
+	if resolved["given_name"] != "Erika" {
+		t.Errorf("resolvedClaims.given_name = %v, want Erika", resolved["given_name"])
+	}
+	if resolved["family_name"] != "Mustermann" {
+		t.Errorf("resolvedClaims.family_name = %v, want Mustermann", resolved["family_name"])
+	}
+
+	// Disclosures should have digest field (used for truncation in UI)
+	discs := result["disclosures"].([]any)
+	for i, d := range discs {
+		disc := d.(map[string]any)
+		if _, ok := disc["digest"]; !ok {
+			t.Errorf("disclosures[%d] missing digest field", i)
+		}
+		if _, ok := disc["salt"]; !ok {
+			t.Errorf("disclosures[%d] missing salt field", i)
+		}
+	}
+}
+
+func TestHandleDecode_JWTIssuerSubjectInPayload(t *testing.T) {
+	// Frontend uses payload.iss and payload.sub for summary line
+	jwt := makeJWT(
+		map[string]any{"alg": "RS256"},
+		map[string]any{
+			"iss": "https://auth.example.com",
+			"sub": "user@example.com",
+			"vct": "urn:eudi:pid:1",
+		},
+	)
+
+	w := apiPost(t, `{"input":"`+jwt+`"}`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	result := decodeResponse(t, w)
+	p := result["payload"].(map[string]any)
+
+	if p["iss"] != "https://auth.example.com" {
+		t.Errorf("payload.iss = %v, want https://auth.example.com", p["iss"])
+	}
+	if p["sub"] != "user@example.com" {
+		t.Errorf("payload.sub = %v, want user@example.com", p["sub"])
+	}
+	if p["vct"] != "urn:eudi:pid:1" {
+		t.Errorf("payload.vct = %v, want urn:eudi:pid:1", p["vct"])
+	}
+}
+
 func TestPrefill_ContentType(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/prefill", nil)
 	w := httptest.NewRecorder()
