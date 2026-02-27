@@ -27,24 +27,37 @@ var httpClient = &http.Client{
 	Timeout: 15 * time.Second,
 }
 
+// readStdin reads all input from stdin, returning an error if stdin is a terminal.
+func readStdin() (string, error) {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return "", fmt.Errorf("cannot read stdin: %w", err)
+	}
+	if (stat.Mode() & os.ModeCharDevice) != 0 {
+		return "", fmt.Errorf("no input provided (use a file path, URL, raw string, or pipe to stdin)")
+	}
+	b, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", fmt.Errorf("reading stdin: %w", err)
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// readFile reads a file and returns its trimmed contents.
+func readFile(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading file %s: %w", path, err)
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
 // ReadInput reads credential input from: URL, file path, "-" for stdin, or raw string.
 func ReadInput(input string) (string, error) {
 	input = strings.TrimSpace(input)
 
 	if input == "-" || input == "" {
-		// Read from stdin
-		stat, err := os.Stdin.Stat()
-		if err != nil {
-			return "", fmt.Errorf("cannot read stdin: %w", err)
-		}
-		if (stat.Mode() & os.ModeCharDevice) != 0 {
-			return "", fmt.Errorf("no input provided (use a file path, URL, raw string, or pipe to stdin)")
-		}
-		b, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return "", fmt.Errorf("reading stdin: %w", err)
-		}
-		return strings.TrimSpace(string(b)), nil
+		return readStdin()
 	}
 
 	// Try as URL
@@ -54,11 +67,7 @@ func ReadInput(input string) (string, error) {
 
 	// Try as file path
 	if _, err := os.Stat(input); err == nil {
-		b, err := os.ReadFile(input)
-		if err != nil {
-			return "", fmt.Errorf("reading file %s: %w", input, err)
-		}
-		return strings.TrimSpace(string(b)), nil
+		return readFile(input)
 	}
 
 	// Treat as raw credential string
@@ -72,18 +81,7 @@ func ReadInputRaw(input string) (string, error) {
 	input = strings.TrimSpace(input)
 
 	if input == "-" || input == "" {
-		stat, err := os.Stdin.Stat()
-		if err != nil {
-			return "", fmt.Errorf("cannot read stdin: %w", err)
-		}
-		if (stat.Mode() & os.ModeCharDevice) != 0 {
-			return "", fmt.Errorf("no input provided (use a file path, URL, raw string, or pipe to stdin)")
-		}
-		b, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return "", fmt.Errorf("reading stdin: %w", err)
-		}
-		return strings.TrimSpace(string(b)), nil
+		return readStdin()
 	}
 
 	// Skip URLs and URI schemes — return as-is for format detection
@@ -94,11 +92,7 @@ func ReadInputRaw(input string) (string, error) {
 	// Try as file path (but not if it looks like a JWT or JSON)
 	if !strings.HasPrefix(input, "{") {
 		if _, err := os.Stat(input); err == nil {
-			b, err := os.ReadFile(input)
-			if err != nil {
-				return "", fmt.Errorf("reading file %s: %w", input, err)
-			}
-			return strings.TrimSpace(string(b)), nil
+			return readFile(input)
 		}
 	}
 

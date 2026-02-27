@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package statuslist checks credential revocation status using Token Status Lists (RFC 9596).
 package statuslist
 
 // StatusRef is a reference to a status list entry in a credential.

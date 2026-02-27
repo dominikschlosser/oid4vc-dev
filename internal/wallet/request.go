@@ -5,23 +5,23 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 )
 
 // ParseAuthorizationRequest parses an OID4VP authorization request from a URI or query params.
-func ParseAuthorizationRequest(raw string) (*openid4.AuthorizationRequest, error) {
+func ParseAuthorizationRequest(raw string) (*oid4vc.AuthorizationRequest, error) {
 	raw = strings.TrimSpace(raw)
 
-	reqType, result, err := openid4.Parse(raw)
+	reqType, result, err := oid4vc.Parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("parsing authorization request: %w", err)
 	}
 
-	if reqType != openid4.TypeVP {
+	if reqType != oid4vc.TypeVP {
 		return nil, fmt.Errorf("expected VP authorization request, got VCI")
 	}
 
-	authReq, ok := result.(*openid4.AuthorizationRequest)
+	authReq, ok := result.(*oid4vc.AuthorizationRequest)
 	if !ok {
 		return nil, fmt.Errorf("unexpected result type")
 	}
@@ -30,8 +30,8 @@ func ParseAuthorizationRequest(raw string) (*openid4.AuthorizationRequest, error
 }
 
 // ParseAuthorizationRequestFromParams parses an authorization request from URL query parameters.
-func ParseAuthorizationRequestFromParams(params url.Values) (*openid4.AuthorizationRequest, error) {
-	// Build a synthetic URI for the openid4 parser
+func ParseAuthorizationRequestFromParams(params url.Values) (*oid4vc.AuthorizationRequest, error) {
+	// Build a synthetic URI for the oid4vc parser
 	u := url.URL{
 		Scheme:   "openid4vp",
 		Host:     "authorize",
@@ -41,7 +41,7 @@ func ParseAuthorizationRequestFromParams(params url.Values) (*openid4.Authorizat
 }
 
 // GetResponseURI returns the URI where the VP response should be posted.
-func GetResponseURI(authReq *openid4.AuthorizationRequest) string {
+func GetResponseURI(authReq *oid4vc.AuthorizationRequest) string {
 	if authReq.ResponseURI != "" {
 		return authReq.ResponseURI
 	}
@@ -49,7 +49,7 @@ func GetResponseURI(authReq *openid4.AuthorizationRequest) string {
 }
 
 // GetResponseMode returns the response mode from the auth request.
-func GetResponseMode(authReq *openid4.AuthorizationRequest) string {
+func GetResponseMode(authReq *oid4vc.AuthorizationRequest) string {
 	if authReq.ResponseMode != "" {
 		return authReq.ResponseMode
 	}

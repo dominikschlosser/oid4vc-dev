@@ -1,3 +1,4 @@
+// Package proxy provides a debugging reverse proxy that intercepts and classifies OID4VP/VCI traffic.
 package proxy
 
 import (

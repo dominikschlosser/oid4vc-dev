@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
-	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/veraison/go-cose"
@@ -23,7 +23,7 @@ type PresentationParams struct {
 	ClientID      string
 	ResponseURI   string
 	ResponseMode  string                    // e.g. "direct_post.jwt"
-	RequestObject *openid4.RequestObjectJWT // optional, used to extract JWK thumbprint for mDoc
+	RequestObject *oid4vc.RequestObjectJWT // optional, used to extract JWK thumbprint for mDoc
 }
 
 // VPTokenResult holds the result of VP token creation.
@@ -425,7 +425,7 @@ func (w *Wallet) CreateVPTokenMap(matches []CredentialMatch, params Presentation
 // extractJWKThumbprint extracts the encryption JWK from the request object's
 // client_metadata.jwks.keys[0] and computes its RFC 7638 thumbprint (SHA-256).
 // Returns nil if no encryption key is found.
-func extractJWKThumbprint(reqObj *openid4.RequestObjectJWT) []byte {
+func extractJWKThumbprint(reqObj *oid4vc.RequestObjectJWT) []byte {
 	if reqObj == nil {
 		return nil
 	}
@@ -497,7 +497,7 @@ func computeJWKThumbprint(jwk map[string]any) []byte {
 
 // extractEncryptionKey extracts the EC public key and kid from the request object's
 // client_metadata.jwks.keys[0].
-func extractEncryptionKey(reqObj *openid4.RequestObjectJWT) (*ecdsa.PublicKey, string, error) {
+func extractEncryptionKey(reqObj *oid4vc.RequestObjectJWT) (*ecdsa.PublicKey, string, error) {
 	if reqObj == nil || reqObj.Payload == nil {
 		return nil, "", fmt.Errorf("no request object")
 	}
@@ -539,7 +539,7 @@ func extractEncryptionKey(reqObj *openid4.RequestObjectJWT) (*ecdsa.PublicKey, s
 }
 
 // HasEncryptionKey checks if the request object contains an encryption JWK.
-func HasEncryptionKey(reqObj *openid4.RequestObjectJWT) bool {
+func HasEncryptionKey(reqObj *oid4vc.RequestObjectJWT) bool {
 	_, _, err := extractEncryptionKey(reqObj)
 	return err == nil
 }

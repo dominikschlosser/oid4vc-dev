@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package dcql generates Digital Credentials Query Language (DCQL) queries from existing credentials.
 package dcql
 
 // Query is a DCQL query.

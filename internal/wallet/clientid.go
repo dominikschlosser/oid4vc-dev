@@ -6,13 +6,13 @@ import (
 	"strings"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
-	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 )
 
 // VerifyClientID checks if client_id with x509_san_dns: or x509_san_uri: prefix
 // matches the leaf certificate SAN from the request object's x5c header.
 // Returns a warning string if there's a mismatch, or "" if OK / not applicable.
-func VerifyClientID(clientID string, reqObj *openid4.RequestObjectJWT) string {
+func VerifyClientID(clientID string, reqObj *oid4vc.RequestObjectJWT) string {
 	var scheme, expected string
 	switch {
 	case strings.HasPrefix(clientID, "x509_san_dns:"):

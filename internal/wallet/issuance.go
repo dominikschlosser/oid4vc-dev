@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
-	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 )
 
 // IssuanceResult captures the result of an OID4VCI flow.
@@ -26,15 +26,15 @@ type IssuanceResult struct {
 // ProcessCredentialOffer processes an OID4VCI credential offer URI.
 func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error) {
 	// Parse the credential offer
-	reqType, result, err := openid4.Parse(offerURI)
+	reqType, result, err := oid4vc.Parse(offerURI)
 	if err != nil {
 		return nil, fmt.Errorf("parsing credential offer: %w", err)
 	}
-	if reqType != openid4.TypeVCI {
+	if reqType != oid4vc.TypeVCI {
 		return nil, fmt.Errorf("expected VCI credential offer, got VP")
 	}
 
-	offer, ok := result.(*openid4.CredentialOffer)
+	offer, ok := result.(*oid4vc.CredentialOffer)
 	if !ok {
 		return nil, fmt.Errorf("unexpected result type")
 	}
@@ -268,7 +268,7 @@ func resolveCredentialFormat(metadata map[string]any, configID string) string {
 }
 
 // exchangeToken performs the pre-authorized code token exchange.
-func exchangeToken(tokenEndpoint string, offer *openid4.CredentialOffer) (map[string]any, error) {
+func exchangeToken(tokenEndpoint string, offer *oid4vc.CredentialOffer) (map[string]any, error) {
 	form := url.Values{}
 	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:pre-authorized_code")
 	form.Set("pre-authorized_code", offer.Grants.PreAuthorizedCode)

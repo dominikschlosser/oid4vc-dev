@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/fatih/color"
 	"github.com/google/uuid"
 )
@@ -642,7 +642,7 @@ type AuthorizationRequestParams struct {
 	RedirectURI   string
 	ResponseURI   string
 	DCQLQuery     map[string]any
-	RequestObject *openid4.RequestObjectJWT
+	RequestObject *oid4vc.RequestObjectJWT
 }
 
 // parseAuthParams extracts authorization request params from URL values.

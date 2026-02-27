@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package output formats and prints decoded credentials and verification results to the terminal or as JSON.
 package output
 
 // Options controls output formatting.

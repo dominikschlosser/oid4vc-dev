@@ -1,3 +1,4 @@
+// Package qr scans QR codes from image files and screen captures.
 package qr
 
 import (

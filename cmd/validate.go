@@ -119,22 +119,11 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		output.PrintSDJWT(token, opts)
 
 		if verifySig {
-			// If the token has an x5c header and we have a trust list, extract the
-			// leaf certificate's public key and validate the chain against the trust list.
-			var bestResult *sdjwt.VerifyResult
-			if x5cKey, err := validate.ExtractAndValidateX5C(token.Header, tlCerts); err == nil && x5cKey != nil {
-				bestResult = sdjwt.Verify(token, x5cKey)
-			} else {
-				// Fall back to trying each key directly
-				for _, key := range pubKeys {
-					result := sdjwt.Verify(token, key)
-					if result.SignatureValid {
-						bestResult = result
-						break
-					}
-					bestResult = result
-				}
-			}
+			x5cKey, _ := validate.ExtractAndValidateX5C(token.Header, tlCerts)
+			bestResult := verifyWithBestKey(pubKeys, x5cKey, func(key crypto.PublicKey) (*sdjwt.VerifyResult, bool) {
+				r := sdjwt.Verify(token, key)
+				return r, r.SignatureValid
+			})
 			output.PrintVerifyResultSDJWT(bestResult, opts)
 
 			if !bestResult.SignatureValid {
@@ -175,19 +164,11 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		output.PrintMDOC(doc, opts)
 
 		if verifySig {
-			var bestResult *mdoc.VerifyResult
-			if x5cKey, err := validate.ExtractAndValidateMDOCX5Chain(doc, tlCerts); err == nil && x5cKey != nil {
-				bestResult = mdoc.Verify(doc, x5cKey)
-			} else {
-				for _, key := range pubKeys {
-					result := mdoc.Verify(doc, key)
-					if result.SignatureValid {
-						bestResult = result
-						break
-					}
-					bestResult = result
-				}
-			}
+			x5cKey, _ := validate.ExtractAndValidateMDOCX5Chain(doc, tlCerts)
+			bestResult := verifyWithBestKey(pubKeys, x5cKey, func(key crypto.PublicKey) (*mdoc.VerifyResult, bool) {
+				r := mdoc.Verify(doc, key)
+				return r, r.SignatureValid
+			})
 			output.PrintVerifyResultMDOC(bestResult, opts)
 
 			if !bestResult.SignatureValid {
@@ -224,6 +205,24 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// verifyWithBestKey tries verifying with x5cKey first (if available), then
+// falls back to iterating through pubKeys. Returns the best result found.
+func verifyWithBestKey[T any](pubKeys []crypto.PublicKey, x5cKey crypto.PublicKey, verify func(crypto.PublicKey) (T, bool)) T {
+	if x5cKey != nil {
+		result, _ := verify(x5cKey)
+		return result
+	}
+	var best T
+	for _, key := range pubKeys {
+		result, valid := verify(key)
+		best = result
+		if valid {
+			break
+		}
+	}
+	return best
 }
 
 func checkStatus(claims map[string]any, opts output.Options) {

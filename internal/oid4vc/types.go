@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package openid4
+// Package oid4vc parses OID4VCI credential offers and OID4VP authorization requests.
+package oid4vc
 
 // RequestType identifies whether a request is VCI or VP.
 type RequestType int

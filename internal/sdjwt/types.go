@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package sdjwt parses and verifies SD-JWT (Selective Disclosure JWT) credentials.
 package sdjwt
 
 // Token represents a parsed SD-JWT.

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package mdoc parses and verifies ISO 18013-5 mDOC/mso_mdoc credentials encoded as CBOR/COSE.
 package mdoc
 
 import "time"

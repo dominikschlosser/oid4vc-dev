@@ -1,3 +1,4 @@
+// Package wallet implements a stateful testing wallet for OID4VP presentations and OID4VCI issuance flows.
 package wallet
 
 import (
@@ -13,7 +14,7 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/keys"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
-	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/google/uuid"
 )
@@ -71,7 +72,7 @@ type StoredCredential struct {
 type ConsentRequest struct {
 	ID            string            `json:"id"`
 	Type          string            `json:"type"` // "presentation" or "issuance"
-	AuthRequest   *openid4.AuthorizationRequest `json:"-"`
+	AuthRequest   *oid4vc.AuthorizationRequest `json:"-"`
 	MatchedCreds  []CredentialMatch `json:"matched_credentials"`
 	Status        string            `json:"status"` // "pending", "approved", "denied"
 	ResultCh      chan ConsentResult    `json:"-"`

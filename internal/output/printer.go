@@ -24,7 +24,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
-	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
 )
@@ -511,7 +511,7 @@ func sortedKeys[V any](m map[string]V) []string {
 }
 
 // BuildCredentialOfferJSON returns the JSON-serializable map for a credential offer.
-func BuildCredentialOfferJSON(offer *openid4.CredentialOffer) map[string]any {
+func BuildCredentialOfferJSON(offer *oid4vc.CredentialOffer) map[string]any {
 	out := map[string]any{
 		"type":                         "OID4VCI Credential Offer",
 		"credential_issuer":            offer.CredentialIssuer,
@@ -544,7 +544,7 @@ func BuildCredentialOfferJSON(offer *openid4.CredentialOffer) map[string]any {
 }
 
 // PrintCredentialOffer prints a decoded OID4VCI credential offer to the terminal.
-func PrintCredentialOffer(offer *openid4.CredentialOffer, opts Options) {
+func PrintCredentialOffer(offer *oid4vc.CredentialOffer, opts Options) {
 	if opts.JSON {
 		PrintJSON(BuildCredentialOfferJSON(offer))
 		return
@@ -600,7 +600,7 @@ func PrintCredentialOffer(offer *openid4.CredentialOffer, opts Options) {
 }
 
 // BuildAuthorizationRequestJSON returns the JSON-serializable map for an authorization request.
-func BuildAuthorizationRequestJSON(req *openid4.AuthorizationRequest) map[string]any {
+func BuildAuthorizationRequestJSON(req *oid4vc.AuthorizationRequest) map[string]any {
 	out := map[string]any{
 		"type": "OID4VP Authorization Request",
 	}
@@ -646,7 +646,7 @@ func BuildAuthorizationRequestJSON(req *openid4.AuthorizationRequest) map[string
 }
 
 // PrintAuthorizationRequest prints a decoded OID4VP authorization request to the terminal.
-func PrintAuthorizationRequest(req *openid4.AuthorizationRequest, opts Options) {
+func PrintAuthorizationRequest(req *oid4vc.AuthorizationRequest, opts Options) {
 	if opts.JSON {
 		PrintJSON(BuildAuthorizationRequestJSON(req))
 		return

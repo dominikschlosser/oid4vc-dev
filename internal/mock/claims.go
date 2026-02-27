@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package mock generates test credentials (SD-JWT and mDOC) with default EUDI PID claims.
 package mock
 
 // DefaultPIDVCT is the default Verifiable Credential Type for German EUDI PIDs.

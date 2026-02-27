@@ -13,6 +13,7 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/keys"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/qr"
 	"github.com/dominikschlosser/oid4vc-dev/internal/wallet"
 	"github.com/fatih/color"
@@ -202,11 +203,7 @@ so the wallet automatically receives incoming protocol requests.`,
 
 			if len(w.GetCredentials()) > 0 {
 				for _, c := range w.GetCredentials() {
-					label := c.VCT
-					if label == "" {
-						label = c.DocType
-					}
-					fmt.Printf("  [%s] %s (%d claims)\n", c.Format, label, len(c.Claims))
+					fmt.Printf("  [%s] %s (%d claims)\n", c.Format, credLabel(c), len(c.Claims))
 				}
 				fmt.Println()
 			}
@@ -284,11 +281,7 @@ func walletListCmd() *cobra.Command {
 			tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(tw, "ID\tFORMAT\tTYPE\tCLAIMS")
 			for _, c := range creds {
-				typeLabel := c.VCT
-				if typeLabel == "" {
-					typeLabel = c.DocType
-				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%d\n", c.ID, c.Format, typeLabel, len(c.Claims))
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%d\n", c.ID, c.Format, credLabel(c), len(c.Claims))
 			}
 			tw.Flush()
 			return nil
@@ -413,7 +406,10 @@ func walletGeneratePIDCmd() *cobra.Command {
 	return cmd
 }
 
+// --- presentation flow ---
 
+// runPresent handles an OID4VP authorization request: evaluates credentials,
+// optionally shows a consent UI, creates VP tokens, and submits the response.
 func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port int) error {
 	parsed, err := wallet.ParseAuthorizationRequest(uri)
 	if err != nil {
@@ -443,8 +439,6 @@ func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port in
 	}
 
 	dim := color.New(color.Faint)
-	yellow := color.New(color.FgYellow)
-	green := color.New(color.FgGreen)
 
 	// Start server so the trust list is available during verification
 	srv := wallet.NewServer(w, port, nil)
@@ -455,67 +449,85 @@ func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port in
 	defer srv.Shutdown()
 
 	dim.Println("───────────────────────────────────────")
+	yellow := color.New(color.FgYellow)
 	yellow.Printf("  Verifier: %s\n", parsed.ClientID)
 	fmt.Printf("  Trust List:  %s/api/trustlist\n", addr)
 	dim.Printf("               http://host.docker.internal:%d/api/trustlist\n", port)
 	for _, m := range matches {
-		typeLabel := m.VCT
-		if typeLabel == "" {
-			typeLabel = m.DocType
-		}
-		fmt.Printf("  Credential: %s (%s)\n", m.Format, typeLabel)
+		fmt.Printf("  Credential: %s (%s)\n", m.Format, typeLabel(m.VCT, m.DocType, m.Format))
 		fmt.Printf("  Disclosing: %v\n", m.SelectedKeys)
 	}
 
-	var submissionCh chan wallet.SubmissionResult
-
-	if !w.AutoAccept {
-		consentReq := &wallet.ConsentRequest{
-			ID:           uuid.New().String(),
-			Type:         "presentation",
-			MatchedCreds: matches,
-			Status:       "pending",
-			ResultCh:     make(chan wallet.ConsentResult, 1),
-			SubmissionCh: make(chan wallet.SubmissionResult, 1),
-			CreatedAt:    time.Now(),
-			ClientID:     parsed.ClientID,
-			Nonce:        parsed.Nonce,
-			ResponseURI:  responseURI,
-			DCQLQuery:    parsed.DCQLQuery,
-		}
-		submissionCh = consentReq.SubmissionCh
-
-		w.CreateConsentRequest(consentReq)
-
-		fmt.Printf("  Consent UI: %s\n", addr)
-		dim.Println("───────────────────────────────────────")
-		fmt.Println("Waiting for consent decision...")
-
-		openBrowser(addr)
-
-		// Wait for user consent
-		select {
-		case result := <-consentReq.ResultCh:
-			if !result.Approved {
-				fmt.Println("Presentation denied.")
-				return nil
-			}
-			if result.SelectedClaims != nil {
-				for i, m := range matches {
-					if selectedKeys, ok := result.SelectedClaims[m.CredentialID]; ok {
-						matches[i].SelectedKeys = selectedKeys
-					}
-				}
-			}
-		case <-time.After(5 * time.Minute):
-			fmt.Println("Consent timeout.")
-			return nil
-		}
+	// Wait for consent if not auto-accepting
+	matches, submissionCh, denied := waitForConsent(w, matches, parsed, responseURI, addr, dim)
+	if denied {
+		return nil
 	}
 
 	dim.Println("───────────────────────────────────────")
 
-	// Create VP tokens
+	// Create and submit VP tokens
+	err = submitPresentation(w, store, matches, parsed, responseURI, submissionCh, dim)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// waitForConsent shows a consent UI and waits for the user's decision.
+// Returns the (potentially updated) matches, a submission channel for UI feedback,
+// and whether the presentation was denied or timed out.
+func waitForConsent(w *wallet.Wallet, matches []wallet.CredentialMatch, parsed *oid4vc.AuthorizationRequest, responseURI, addr string, dim *color.Color) ([]wallet.CredentialMatch, chan wallet.SubmissionResult, bool) {
+	if w.AutoAccept {
+		return matches, nil, false
+	}
+
+	consentReq := &wallet.ConsentRequest{
+		ID:           uuid.New().String(),
+		Type:         "presentation",
+		MatchedCreds: matches,
+		Status:       "pending",
+		ResultCh:     make(chan wallet.ConsentResult, 1),
+		SubmissionCh: make(chan wallet.SubmissionResult, 1),
+		CreatedAt:    time.Now(),
+		ClientID:     parsed.ClientID,
+		Nonce:        parsed.Nonce,
+		ResponseURI:  responseURI,
+		DCQLQuery:    parsed.DCQLQuery,
+	}
+
+	w.CreateConsentRequest(consentReq)
+
+	fmt.Printf("  Consent UI: %s\n", addr)
+	dim.Println("───────────────────────────────────────")
+	fmt.Println("Waiting for consent decision...")
+
+	openBrowser(addr)
+
+	select {
+	case result := <-consentReq.ResultCh:
+		if !result.Approved {
+			fmt.Println("Presentation denied.")
+			return nil, nil, true
+		}
+		if result.SelectedClaims != nil {
+			for i, m := range matches {
+				if selectedKeys, ok := result.SelectedClaims[m.CredentialID]; ok {
+					matches[i].SelectedKeys = selectedKeys
+				}
+			}
+		}
+	case <-time.After(5 * time.Minute):
+		fmt.Println("Consent timeout.")
+		return nil, nil, true
+	}
+
+	return matches, consentReq.SubmissionCh, false
+}
+
+// submitPresentation creates VP tokens, submits them to the verifier, and prints the result.
+func submitPresentation(w *wallet.Wallet, store *wallet.WalletStore, matches []wallet.CredentialMatch, parsed *oid4vc.AuthorizationRequest, responseURI string, submissionCh chan wallet.SubmissionResult, dim *color.Color) error {
 	params := wallet.PresentationParams{
 		Nonce:         parsed.Nonce,
 		ClientID:      parsed.ClientID,
@@ -565,7 +577,7 @@ func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port in
 		return fmt.Errorf("submitting presentation: %w", err)
 	}
 
-	// Build submission result for UI
+	// Print result and notify UI
 	submission := wallet.SubmissionResult{
 		RedirectURI: result.RedirectURI,
 		StatusCode:  result.StatusCode,
@@ -578,12 +590,12 @@ func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port in
 		submission.Error = result.Body
 		w.AddLog("presentation", fmt.Sprintf("Verifier %s rejected: %s", parsed.ClientID, result.Body), false)
 	} else {
+		green := color.New(color.FgGreen)
 		green.Printf("  Submitted: %s\n", wallet.FormatDirectPostResult(result))
 		w.AddLog("presentation", fmt.Sprintf("Presented to %s: %s", parsed.ClientID, wallet.FormatDirectPostResult(result)), true)
 	}
 	dim.Println("───────────────────────────────────────")
 
-	// Notify the UI about the submission result
 	if submissionCh != nil {
 		submissionCh <- submission
 	}
@@ -591,6 +603,67 @@ func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port in
 	if err := store.Save(w); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: saving wallet: %v\n", err)
 	}
+
+	if jsonOutput {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+	}
+
+	return nil
+}
+
+// --- dispatch helpers ---
+
+// dispatchOID4Opts holds options for dispatching an OID4VP/VCI URI.
+type dispatchOID4Opts struct {
+	port              int
+	autoAccept        bool
+	sessionTranscript string
+}
+
+// dispatchURI detects the URI type and dispatches to the appropriate wallet flow.
+func dispatchURI(uri string, opts dispatchOID4Opts) error {
+	detected := format.Detect(uri)
+
+	switch detected {
+	case format.FormatOID4VP:
+		w, store, err := loadWallet()
+		if err != nil {
+			return err
+		}
+		if opts.autoAccept {
+			w.AutoAccept = true
+		}
+		if err := applySessionTranscriptMode(w, opts.sessionTranscript); err != nil {
+			return err
+		}
+		return runPresent(w, store, uri, opts.port)
+
+	case format.FormatOID4VCI:
+		return processCredentialOffer(uri)
+
+	default:
+		return fmt.Errorf("unable to detect URI type (expected openid4vp://, openid-credential-offer://, or similar): %s", truncate(uri, 80))
+	}
+}
+
+// processCredentialOffer fetches and stores a credential from an OID4VCI offer URI.
+func processCredentialOffer(uri string) error {
+	w, store, err := loadWallet()
+	if err != nil {
+		return err
+	}
+
+	result, err := w.ProcessCredentialOffer(uri)
+	if err != nil {
+		return fmt.Errorf("processing credential offer: %w", err)
+	}
+
+	if err := store.Save(w); err != nil {
+		return fmt.Errorf("saving wallet: %w", err)
+	}
+
+	fmt.Printf("Received %s credential from %s (ID: %s)\n", result.Format, result.Issuer, result.CredentialID)
 
 	if jsonOutput {
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -625,50 +698,11 @@ stores it locally. The --port, --auto-accept, and --session-transcript flags
 only apply to OID4VP flows.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			uri := args[0]
-			detected := format.Detect(uri)
-
-			switch detected {
-			case format.FormatOID4VP:
-				w, store, err := loadWallet()
-				if err != nil {
-					return err
-				}
-				if autoAccept {
-					w.AutoAccept = true
-				}
-				if err := applySessionTranscriptMode(w, sessionTranscript); err != nil {
-					return err
-				}
-				return runPresent(w, store, uri, port)
-
-			case format.FormatOID4VCI:
-				w, store, err := loadWallet()
-				if err != nil {
-					return err
-				}
-
-				result, err := w.ProcessCredentialOffer(uri)
-				if err != nil {
-					return fmt.Errorf("processing credential offer: %w", err)
-				}
-
-				if err := store.Save(w); err != nil {
-					return fmt.Errorf("saving wallet: %w", err)
-				}
-
-				fmt.Printf("Received %s credential from %s (ID: %s)\n", result.Format, result.Issuer, result.CredentialID)
-
-				if jsonOutput {
-					data, _ := json.MarshalIndent(result, "", "  ")
-					fmt.Println(string(data))
-				}
-
-				return nil
-
-			default:
-				return fmt.Errorf("unable to detect URI type (expected openid4vp://, openid-credential-offer://, or similar): %s", truncate(uri, 80))
-			}
+			return dispatchURI(args[0], dispatchOID4Opts{
+				port:              port,
+				autoAccept:        autoAccept,
+				sessionTranscript: sessionTranscript,
+			})
 		},
 	}
 
@@ -711,36 +745,9 @@ func walletScanCmd() *cobra.Command {
 			fmt.Printf("Scanned: %s\n\n", content)
 
 			detected := format.Detect(content)
-			switch detected {
-			case format.FormatOID4VP:
-				w, store, err := loadWallet()
-				if err != nil {
-					return err
-				}
-				if autoAccept {
-					w.AutoAccept = true
-				}
-				if err := applySessionTranscriptMode(w, sessionTranscript); err != nil {
-					return err
-				}
-				return runPresent(w, store, content, port)
 
-			case format.FormatOID4VCI:
-				w, store, err := loadWallet()
-				if err != nil {
-					return err
-				}
-				result, err := w.ProcessCredentialOffer(content)
-				if err != nil {
-					return fmt.Errorf("processing credential offer: %w", err)
-				}
-				if err := store.Save(w); err != nil {
-					return fmt.Errorf("saving wallet: %w", err)
-				}
-				fmt.Printf("Received %s credential from %s\n", result.Format, result.Issuer)
-				return nil
-
-			case format.FormatSDJWT, format.FormatMDOC:
+			// For credential formats, import directly
+			if detected == format.FormatSDJWT || detected == format.FormatMDOC {
 				w, store, err := loadWallet()
 				if err != nil {
 					return err
@@ -755,10 +762,14 @@ func walletScanCmd() *cobra.Command {
 				last := creds[len(creds)-1]
 				fmt.Printf("Imported %s credential (%s)\n", last.Format, credLabel(last))
 				return nil
-
-			default:
-				return fmt.Errorf("unable to detect content type from QR code: %s", detected)
 			}
+
+			// For OID4 URIs, use the shared dispatch
+			return dispatchURI(content, dispatchOID4Opts{
+				port:              port,
+				autoAccept:        autoAccept,
+				sessionTranscript: sessionTranscript,
+			})
 		},
 	}
 
@@ -847,14 +858,20 @@ Use --url to print only the trust list URL for a running wallet server instead.`
 
 // --- helpers ---
 
+// typeLabel returns the best human-readable type label from a VCT or DocType,
+// falling back to the format string if both are empty.
+func typeLabel(vct, docType, fmt_ string) string {
+	if vct != "" {
+		return vct
+	}
+	if docType != "" {
+		return docType
+	}
+	return fmt_
+}
+
 func credLabel(c wallet.StoredCredential) string {
-	if c.VCT != "" {
-		return c.VCT
-	}
-	if c.DocType != "" {
-		return c.DocType
-	}
-	return c.Format
+	return typeLabel(c.VCT, c.DocType, c.Format)
 }
 
 func parseClaimsOverrides(flag string) (map[string]any, error) {

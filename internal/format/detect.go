@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package format auto-detects credential formats and handles input reading, encoding, and URL fetching.
 package format
 
 import (

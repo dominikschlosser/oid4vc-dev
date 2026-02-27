@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
-	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 )
 
 func TestSubscribeErrors(t *testing.T) {
@@ -223,14 +223,14 @@ func TestHasEncryptionKey_NoRequestObject(t *testing.T) {
 }
 
 func TestHasEncryptionKey_NoPayload(t *testing.T) {
-	reqObj := &openid4.RequestObjectJWT{}
+	reqObj := &oid4vc.RequestObjectJWT{}
 	if HasEncryptionKey(reqObj) {
 		t.Error("expected false for nil payload")
 	}
 }
 
 func TestHasEncryptionKey_NoClientMetadata(t *testing.T) {
-	reqObj := &openid4.RequestObjectJWT{
+	reqObj := &oid4vc.RequestObjectJWT{
 		Payload: map[string]any{},
 	}
 	if HasEncryptionKey(reqObj) {
@@ -247,7 +247,7 @@ func TestHasEncryptionKey_WithKey(t *testing.T) {
 		t.Fatalf("parsing JWK: %v", err)
 	}
 
-	reqObj := &openid4.RequestObjectJWT{
+	reqObj := &oid4vc.RequestObjectJWT{
 		Payload: map[string]any{
 			"client_metadata": map[string]any{
 				"jwks": map[string]any{

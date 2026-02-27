@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package web provides a browser-based UI for decoding and validating SSI credentials.
 package web
 
 import "embed"

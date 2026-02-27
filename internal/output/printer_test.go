@@ -10,7 +10,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
-	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 )
 
@@ -454,7 +454,7 @@ func TestBuildMDOCJSON_MultipleNamespaces(t *testing.T) {
 }
 
 func TestBuildCredentialOfferJSON_Basic(t *testing.T) {
-	offer := &openid4.CredentialOffer{
+	offer := &oid4vc.CredentialOffer{
 		CredentialIssuer:           "https://issuer.example",
 		CredentialConfigurationIDs: []string{"pid", "mdl"},
 	}
@@ -473,10 +473,10 @@ func TestBuildCredentialOfferJSON_Basic(t *testing.T) {
 }
 
 func TestBuildCredentialOfferJSON_WithGrants(t *testing.T) {
-	offer := &openid4.CredentialOffer{
+	offer := &oid4vc.CredentialOffer{
 		CredentialIssuer:           "https://issuer.example",
 		CredentialConfigurationIDs: []string{"pid"},
-		Grants: openid4.OfferGrants{
+		Grants: oid4vc.OfferGrants{
 			PreAuthorizedCode: "code123",
 			TxCode:            map[string]any{"input_mode": "numeric", "length": float64(6)},
 			IssuerState:       "state456",
@@ -503,7 +503,7 @@ func TestBuildCredentialOfferJSON_WithGrants(t *testing.T) {
 }
 
 func TestBuildCredentialOfferJSON_NoGrants(t *testing.T) {
-	offer := &openid4.CredentialOffer{
+	offer := &oid4vc.CredentialOffer{
 		CredentialIssuer:           "https://issuer.example",
 		CredentialConfigurationIDs: []string{"pid"},
 	}
@@ -515,7 +515,7 @@ func TestBuildCredentialOfferJSON_NoGrants(t *testing.T) {
 }
 
 func TestBuildAuthorizationRequestJSON_Basic(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ClientID:     "https://verifier.example",
 		ResponseType: "vp_token",
 		ResponseMode: "direct_post",
@@ -549,7 +549,7 @@ func TestBuildAuthorizationRequestJSON_Basic(t *testing.T) {
 }
 
 func TestBuildAuthorizationRequestJSON_EmptyFieldsOmitted(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ClientID:     "v",
 		ResponseType: "vp_token",
 	}
@@ -563,10 +563,10 @@ func TestBuildAuthorizationRequestJSON_EmptyFieldsOmitted(t *testing.T) {
 }
 
 func TestBuildAuthorizationRequestJSON_WithRequestObject(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ClientID:     "v",
 		ResponseType: "vp_token",
-		RequestObject: &openid4.RequestObjectJWT{
+		RequestObject: &oid4vc.RequestObjectJWT{
 			Header:  map[string]any{"alg": "ES256"},
 			Payload: map[string]any{"client_id": "v", "nonce": "n"},
 		},
@@ -584,7 +584,7 @@ func TestBuildAuthorizationRequestJSON_WithRequestObject(t *testing.T) {
 }
 
 func TestBuildAuthorizationRequestJSON_WithPD(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ClientID:     "v",
 		ResponseType: "vp_token",
 		PresentationDefinition: map[string]any{
@@ -601,7 +601,7 @@ func TestBuildAuthorizationRequestJSON_WithPD(t *testing.T) {
 }
 
 func TestBuildAuthorizationRequestJSON_WithDCQL(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ClientID:     "v",
 		ResponseType: "vp_token",
 		DCQLQuery:    map[string]any{"credentials": []any{}},
@@ -615,10 +615,10 @@ func TestBuildAuthorizationRequestJSON_WithDCQL(t *testing.T) {
 }
 
 func TestPrintCredentialOffer_Terminal(t *testing.T) {
-	offer := &openid4.CredentialOffer{
+	offer := &oid4vc.CredentialOffer{
 		CredentialIssuer:           "https://issuer.example",
 		CredentialConfigurationIDs: []string{"org.iso.18013.5.1.mDL", "eu.europa.ec.eudi.pid.1"},
-		Grants: openid4.OfferGrants{
+		Grants: oid4vc.OfferGrants{
 			PreAuthorizedCode: "code-abc",
 			TxCode:            map[string]any{"input_mode": "numeric", "length": float64(4)},
 		},
@@ -652,7 +652,7 @@ func TestPrintCredentialOffer_Terminal(t *testing.T) {
 }
 
 func TestPrintCredentialOffer_NoGrants(t *testing.T) {
-	offer := &openid4.CredentialOffer{
+	offer := &oid4vc.CredentialOffer{
 		CredentialIssuer:           "https://issuer.example",
 		CredentialConfigurationIDs: []string{"pid"},
 	}
@@ -667,7 +667,7 @@ func TestPrintCredentialOffer_NoGrants(t *testing.T) {
 }
 
 func TestPrintAuthorizationRequest_Terminal(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ClientID:     "https://verifier.example",
 		ResponseType: "vp_token",
 		ResponseMode: "direct_post",
@@ -701,10 +701,10 @@ func TestPrintAuthorizationRequest_Terminal(t *testing.T) {
 }
 
 func TestPrintAuthorizationRequest_WithRequestObject(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ClientID:     "v",
 		ResponseType: "vp_token",
-		RequestObject: &openid4.RequestObjectJWT{
+		RequestObject: &oid4vc.RequestObjectJWT{
 			Header:  map[string]any{"alg": "ES256", "kid": "key-1"},
 			Payload: map[string]any{"client_id": "v", "nonce": "n"},
 		},
@@ -726,7 +726,7 @@ func TestPrintAuthorizationRequest_WithRequestObject(t *testing.T) {
 }
 
 func TestPrintAuthorizationRequest_WithPD(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ClientID:     "v",
 		ResponseType: "vp_token",
 		PresentationDefinition: map[string]any{
@@ -748,7 +748,7 @@ func TestPrintAuthorizationRequest_WithPD(t *testing.T) {
 }
 
 func TestPrintAuthorizationRequest_WithDCQL(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ClientID:     "v",
 		ResponseType: "vp_token",
 		DCQLQuery:    map[string]any{"credentials": []any{}},
@@ -764,7 +764,7 @@ func TestPrintAuthorizationRequest_WithDCQL(t *testing.T) {
 }
 
 func TestPrintAuthorizationRequest_NoSessionWhenEmpty(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ClientID:     "v",
 		ResponseType: "vp_token",
 	}
@@ -779,7 +779,7 @@ func TestPrintAuthorizationRequest_NoSessionWhenEmpty(t *testing.T) {
 }
 
 func TestPrintCredentialOffer_JSON(t *testing.T) {
-	offer := &openid4.CredentialOffer{
+	offer := &oid4vc.CredentialOffer{
 		CredentialIssuer:           "https://issuer.example",
 		CredentialConfigurationIDs: []string{"pid"},
 	}
@@ -797,7 +797,7 @@ func TestPrintCredentialOffer_JSON(t *testing.T) {
 }
 
 func TestPrintAuthorizationRequest_JSON(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ClientID:     "v",
 		ResponseType: "vp_token",
 		Nonce:        "n1",

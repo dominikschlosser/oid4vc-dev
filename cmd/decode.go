@@ -20,7 +20,7 @@ import (
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
-	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/output"
 	"github.com/dominikschlosser/oid4vc-dev/internal/qr"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
@@ -171,20 +171,20 @@ func runDecode(cmd *cobra.Command, args []string) error {
 }
 
 func decodeOID4(raw string, opts output.Options) error {
-	reqType, result, err := openid4.Parse(raw)
+	reqType, result, err := oid4vc.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("parsing OpenID request: %w", err)
 	}
 
 	switch reqType {
-	case openid4.TypeVCI:
-		offer, ok := result.(*openid4.CredentialOffer)
+	case oid4vc.TypeVCI:
+		offer, ok := result.(*oid4vc.CredentialOffer)
 		if !ok {
 			return fmt.Errorf("unexpected result type for VCI: %T", result)
 		}
 		output.PrintCredentialOffer(offer, opts)
-	case openid4.TypeVP:
-		req, ok := result.(*openid4.AuthorizationRequest)
+	case oid4vc.TypeVP:
+		req, ok := result.(*oid4vc.AuthorizationRequest)
 		if !ok {
 			return fmt.Errorf("unexpected result type for VP: %T", result)
 		}

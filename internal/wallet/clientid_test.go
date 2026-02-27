@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 )
 
 func testCert(dnsNames []string, uris []*url.URL) string {
@@ -32,12 +32,12 @@ func testCert(dnsNames []string, uris []*url.URL) string {
 	return base64.StdEncoding.EncodeToString(der)
 }
 
-func reqObjWithX5C(certs ...string) *openid4.RequestObjectJWT {
+func reqObjWithX5C(certs ...string) *oid4vc.RequestObjectJWT {
 	x5c := make([]any, len(certs))
 	for i, c := range certs {
 		x5c[i] = c
 	}
-	return &openid4.RequestObjectJWT{
+	return &oid4vc.RequestObjectJWT{
 		Header: map[string]any{"x5c": x5c},
 	}
 }
@@ -49,7 +49,7 @@ func TestVerifyClientID(t *testing.T) {
 	tests := []struct {
 		name      string
 		clientID  string
-		reqObj    *openid4.RequestObjectJWT
+		reqObj    *oid4vc.RequestObjectJWT
 		wantEmpty bool // true = no warning expected
 	}{
 		{
@@ -88,12 +88,12 @@ func TestVerifyClientID(t *testing.T) {
 		{
 			name:     "no x5c header",
 			clientID: "x509_san_dns:example.com",
-			reqObj:   &openid4.RequestObjectJWT{Header: map[string]any{}},
+			reqObj:   &oid4vc.RequestObjectJWT{Header: map[string]any{}},
 		},
 		{
 			name:     "empty x5c array",
 			clientID: "x509_san_dns:example.com",
-			reqObj:   &openid4.RequestObjectJWT{Header: map[string]any{"x5c": []any{}}},
+			reqObj:   &oid4vc.RequestObjectJWT{Header: map[string]any{"x5c": []any{}}},
 		},
 	}
 

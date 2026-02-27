@@ -4,11 +4,11 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/dominikschlosser/oid4vc-dev/internal/openid4"
+	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 )
 
 func TestGetResponseURI_PreferResponseURI(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ResponseURI: "https://verifier.example/response",
 		RedirectURI: "https://verifier.example/redirect",
 	}
@@ -19,7 +19,7 @@ func TestGetResponseURI_PreferResponseURI(t *testing.T) {
 }
 
 func TestGetResponseURI_FallbackToRedirect(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		RedirectURI: "https://verifier.example/redirect",
 	}
 	got := GetResponseURI(req)
@@ -29,7 +29,7 @@ func TestGetResponseURI_FallbackToRedirect(t *testing.T) {
 }
 
 func TestGetResponseMode_Explicit(t *testing.T) {
-	req := &openid4.AuthorizationRequest{
+	req := &oid4vc.AuthorizationRequest{
 		ResponseMode: "direct_post.jwt",
 	}
 	got := GetResponseMode(req)
@@ -39,7 +39,7 @@ func TestGetResponseMode_Explicit(t *testing.T) {
 }
 
 func TestGetResponseMode_Default(t *testing.T) {
-	req := &openid4.AuthorizationRequest{}
+	req := &oid4vc.AuthorizationRequest{}
 	got := GetResponseMode(req)
 	if got != "direct_post" {
 		t.Errorf("expected default direct_post, got %s", got)
