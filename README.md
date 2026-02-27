@@ -3,7 +3,7 @@
 [![CI](https://github.com/dominikschlosser/ssi-debugger/actions/workflows/ci.yml/badge.svg)](https://github.com/dominikschlosser/ssi-debugger/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/dominikschlosser/ssi-debugger)](https://github.com/dominikschlosser/ssi-debugger/releases/latest)
 
-A local-first CLI tool for decoding, validating, and inspecting SSI credentials — SD-JWT and mDOC (mso_mdoc).
+A local-first CLI tool for decoding, validating, and inspecting SSI credentials and OpenID4VCI/VP requests.
 
 No network calls by default. Decode and verify credentials entirely offline.
 
@@ -11,7 +11,8 @@ No network calls by default. Decode and verify credentials entirely offline.
 
 - **Reverse Proxy** — intercept, classify, and decode OID4VP/VCI wallet traffic in real time ([proxy](#proxy))
 - **Web UI** — paste and decode credentials in a split-pane browser interface ([serve](#serve))
-- **QR Screen Capture** — scan a QR code straight from your screen to decode OID4VP/VCI requests ([openid --screen](#qr-code-scanning))
+- **Unified Decode** — a single `decode` command handles SD-JWT, JWT, mDOC, OID4VCI offers, and OID4VP requests
+- **QR Screen Capture** — scan a QR code straight from your screen to decode credentials or OpenID requests ([decode --screen](#qr-code-scanning))
 - **Offline Decode & Validate** — SD-JWT, mDOC, JWT with signature verification and trust list support
 - **DCQL Generation** — generate Digital Credentials Query Language queries from existing credentials
 
@@ -51,9 +52,8 @@ Input can be a **file path**, **URL**, **raw credential string**, or piped via *
 | `issue`    | Generate test SD-JWT or mDOC credentials                   |
 | `proxy`    | Debugging reverse proxy for OID4VP/VCI wallet traffic      |
 | `serve`    | Web UI for decoding credentials in the browser             |
-| `decode`   | Auto-detect & decode SD-JWT or mDOC, show all claims       |
+| `decode`   | Auto-detect & decode credentials and OpenID4VCI/VP requests |
 | `validate` | Decode + verify signatures, check status/trust              |
-| `openid`   | Decode OID4VCI credential offers or OID4VP auth requests    |
 | `dcql`     | Generate a DCQL query from a credential's claims            |
 | `status`   | Check revocation via status list (network call)             |
 | `trust`    | Inspect an ETSI TS 119 602 trust list JWT                   |
@@ -263,15 +263,75 @@ Pass a credential as an argument (file path, URL, or raw string) to pre-fill the
 
 ### Decode
 
+Auto-detect and decode credentials (SD-JWT, JWT, mDOC) and OpenID4VCI/VP requests. This is the unified entry point — it replaces the former separate `openid` command.
+
 ```bash
+# Credentials
 ssi-debugger decode credential.txt
 ssi-debugger decode "eyJhbGci..."
 ssi-debugger decode --json credential.txt
 ssi-debugger decode -v credential.txt
 cat credential.txt | ssi-debugger decode
+
+# OpenID4VCI credential offers
+ssi-debugger decode 'openid-credential-offer://?credential_offer_uri=...'
+ssi-debugger decode 'https://issuer.example/offer?credential_offer=...'
+
+# OpenID4VP authorization requests
+ssi-debugger decode 'openid4vp://authorize?...'
+ssi-debugger decode 'haip://authorize?...'
+ssi-debugger decode 'eudi-openid4vp://authorize?...'
+ssi-debugger decode request.jwt
+cat offer.json | ssi-debugger decode
 ```
 
-**SD-JWT example:**
+Auto-detection order:
+
+1. **OpenID URI schemes** — `openid-credential-offer://` (VCI), `openid4vp://` / `haip://` / `eudi-openid4vp://` (VP)
+2. **HTTP(S) URL with OID4 query params** — `credential_offer` / `credential_offer_uri` (VCI), `client_id` / `response_type` / `request_uri` (VP)
+3. **SD-JWT** — contains `~` separator
+4. **mDOC** — hex or base64url encoded CBOR
+5. **JSON** — inspected for OID4 marker keys (`credential_issuer` → VCI, `client_id` → VP)
+6. **JWT** — 3 dot-separated parts; payload inspected for OID4 markers
+
+#### Format override
+
+Use `--format` / `-f` to skip auto-detection when it gets it wrong (e.g. a credential JWT whose payload happens to contain `credential_issuer`):
+
+```bash
+ssi-debugger decode -f jwt "eyJhbGci..."
+ssi-debugger decode -f sdjwt credential.txt
+ssi-debugger decode -f mdoc credential.hex
+ssi-debugger decode -f vci 'openid-credential-offer://...'
+ssi-debugger decode -f vp request.jwt
+```
+
+Accepted values: `sdjwt` (or `sd-jwt`), `jwt`, `mdoc` (or `mso_mdoc`), `vci` (or `oid4vci`), `vp` (or `oid4vp`).
+
+#### QR Code Scanning
+
+Scan a QR code directly from an image file or a screen capture:
+
+```bash
+ssi-debugger decode --qr screenshot.png
+ssi-debugger decode --screen
+```
+
+`--screen` uses the native macOS `screencapture` tool in interactive selection mode — a crosshair appears to let you select the region containing the QR code. On other platforms, take a screenshot and use `--qr screenshot.png` instead.
+
+> **Note:** Screen capture permission on macOS is granted to the **terminal app** (Terminal.app, iTerm2, etc.), not to `ssi-debugger` itself. If permission is missing, System Settings will be opened automatically to the Screen Recording pane — enable access for your terminal app there, then re-run the command.
+
+#### Flags
+
+| Flag             | Description                                                  |
+|------------------|--------------------------------------------------------------|
+| `-f`, `--format` | Pin format: `sdjwt`, `jwt`, `mdoc`, `vci`, `vp`             |
+| `--qr`           | Decode QR from a PNG or JPEG image file                      |
+| `--screen`       | Open interactive screen region selector and decode a QR code from the selection (macOS only) |
+
+`--qr`, `--screen`, and positional input arguments are mutually exclusive.
+
+#### SD-JWT example
 
 ```
 SD-JWT Credential
@@ -295,7 +355,7 @@ SD-JWT Credential
   [3] birth_date: 1984-08-12
 ```
 
-**mDOC example:**
+#### mDOC example
 
 ```
 mDOC Credential
@@ -362,41 +422,6 @@ When a trust list is provided and the credential contains an x5c (SD-JWT) or x5c
 
 ---
 
-### OpenID
-
-Decode OID4VCI credential offers and OID4VP authorization requests.
-
-```bash
-ssi-debugger openid 'openid-credential-offer://?credential_offer_uri=...'
-ssi-debugger openid 'openid4vp://authorize?...'
-ssi-debugger openid request.jwt
-cat offer.json | ssi-debugger openid
-```
-
-Accepts URI schemes (`openid-credential-offer://`, `openid4vp://`, `haip://`, `eudi-openid4vp://`), HTTPS URLs, JWT request objects, raw JSON, file paths, and stdin.
-
-#### QR Code Scanning
-
-Scan a QR code directly from an image file or a screen capture:
-
-```bash
-ssi-debugger openid --qr screenshot.png
-ssi-debugger openid --screen
-```
-
-| Flag       | Description                                                  |
-|------------|--------------------------------------------------------------|
-| `--qr`     | Decode QR from a PNG or JPEG image file                      |
-| `--screen` | Open interactive screen region selector and decode a QR code from the selection (macOS only) |
-
-`--qr`, `--screen`, and positional input arguments are mutually exclusive.
-
-`--screen` uses the native macOS `screencapture` tool in interactive selection mode — a crosshair appears to let you select the region containing the QR code. On other platforms, take a screenshot and use `--qr screenshot.png` instead.
-
-> **Note:** Screen capture permission on macOS is granted to the **terminal app** (Terminal.app, iTerm2, etc.), not to `ssi-debugger` itself. If permission is missing, System Settings will be opened automatically to the Screen Recording pane — enable access for your terminal app there, then re-run the command.
-
----
-
 ### DCQL
 
 Generate a DCQL (Digital Credentials Query Language) query from a credential's claims. Always outputs JSON.
@@ -457,6 +482,13 @@ ssi-debugger trust https://example.com/trust-list.jwt
 - Decodes CBOR IssuerSigned and DeviceResponse (hex or base64url input)
 - Parses COSE_Sign1 issuerAuth and MSO (Mobile Security Object)
 - COSE signature verification via go-cose
+
+### OpenID4VCI / OpenID4VP
+
+- Decodes OID4VCI credential offers (inline JSON, `credential_offer_uri`)
+- Decodes OID4VP authorization requests (query params, `request_uri`, JWT request objects)
+- Supports URI schemes: `openid-credential-offer://`, `openid4vp://`, `haip://`, `eudi-openid4vp://`
+- Auto-detects VCI vs VP based on content
 
 ## Global Flags
 

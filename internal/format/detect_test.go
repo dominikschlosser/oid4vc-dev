@@ -65,6 +65,118 @@ func TestDetect_Unknown(t *testing.T) {
 	}
 }
 
+func TestDetect_OID4VCI_URIScheme(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"basic", "openid-credential-offer://?credential_offer=%7B%22credential_issuer%22%3A%22https%3A%2F%2Fissuer.example.com%22%7D"},
+		{"uppercase", "OpenID-Credential-Offer://?credential_offer=test"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Detect(tt.input)
+			if got != FormatOID4VCI {
+				t.Errorf("Detect(%q) = %q, want %q", tt.name, got, FormatOID4VCI)
+			}
+		})
+	}
+}
+
+func TestDetect_OID4VP_URIScheme(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"openid4vp", "openid4vp://?client_id=did:example:123&response_type=vp_token"},
+		{"haip", "haip://?client_id=did:example:123&response_type=vp_token"},
+		{"eudi", "eudi-openid4vp://?client_id=did:example:123"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Detect(tt.input)
+			if got != FormatOID4VP {
+				t.Errorf("Detect(%q) = %q, want %q", tt.name, got, FormatOID4VP)
+			}
+		})
+	}
+}
+
+func TestDetect_OID4_HTTPURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  CredentialFormat
+	}{
+		{"vci credential_offer", "https://issuer.example.com/offer?credential_offer=%7B%7D", FormatOID4VCI},
+		{"vci credential_offer_uri", "https://issuer.example.com/offer?credential_offer_uri=https://example.com/offer.json", FormatOID4VCI},
+		{"vp client_id", "https://verifier.example.com/auth?client_id=did:example:123&response_type=vp_token", FormatOID4VP},
+		{"vp request_uri", "https://verifier.example.com/auth?request_uri=https://example.com/req.jwt", FormatOID4VP},
+		{"plain url no params", "https://example.com/some/path", FormatUnknown},
+		{"url with unrelated params", "https://example.com/?foo=bar", FormatUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Detect(tt.input)
+			if got != tt.want {
+				t.Errorf("Detect(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetect_OID4_JWT(t *testing.T) {
+	// Build JWTs with specific payload keys
+	encHeader := EncodeBase64URL([]byte(`{"alg":"ES256"}`))
+
+	vciPayload := EncodeBase64URL([]byte(`{"credential_issuer":"https://issuer.example.com"}`))
+	vciJWT := encHeader + "." + vciPayload + ".sig"
+
+	vpPayload := EncodeBase64URL([]byte(`{"client_id":"did:example:123","response_type":"vp_token"}`))
+	vpJWT := encHeader + "." + vpPayload + ".sig"
+
+	plainPayload := EncodeBase64URL([]byte(`{"iss":"test","sub":"user"}`))
+	plainJWT := encHeader + "." + plainPayload + ".sig"
+
+	tests := []struct {
+		name  string
+		input string
+		want  CredentialFormat
+	}{
+		{"vci jwt", vciJWT, FormatOID4VCI},
+		{"vp jwt", vpJWT, FormatOID4VP},
+		{"plain jwt", plainJWT, FormatJWT},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Detect(tt.input)
+			if got != tt.want {
+				t.Errorf("Detect(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetect_OID4_JSON(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  CredentialFormat
+	}{
+		{"vci json", `{"credential_issuer":"https://issuer.example.com","credential_configuration_ids":["pid"]}`, FormatOID4VCI},
+		{"vp json", `{"client_id":"did:example:123","response_type":"vp_token"}`, FormatOID4VP},
+		{"plain json", `{"foo":"bar"}`, FormatUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Detect(tt.input)
+			if got != tt.want {
+				t.Errorf("Detect(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsHex(t *testing.T) {
 	tests := []struct {
 		input string

@@ -16,6 +16,8 @@ package format
 
 import (
 	"encoding/hex"
+	"encoding/json"
+	"net/url"
 	"strings"
 )
 
@@ -25,43 +27,131 @@ const (
 	FormatSDJWT   CredentialFormat = "dc+sd-jwt"
 	FormatJWT     CredentialFormat = "jwt"
 	FormatMDOC    CredentialFormat = "mso_mdoc"
+	FormatOID4VCI CredentialFormat = "oid4vci"
+	FormatOID4VP  CredentialFormat = "oid4vp"
 	FormatUnknown CredentialFormat = "unknown"
 )
 
-// Detect auto-detects the credential format from raw input.
-// SD-JWT: contains '~' separator (e.g. "header.payload.sig~disclosure1~disclosure2~")
-// mDOC: hex or base64url encoded CBOR (starts with CBOR map tag when decoded)
+// Detect auto-detects the format from raw input.
+//
+// Detection order:
+//  1. OpenID URI schemes (openid-credential-offer://, openid4vp://, haip://, eudi-openid4vp://)
+//  2. HTTP(S) URL with OID4 query params
+//  3. SD-JWT (contains '~')
+//  4. mDOC (hex/base64url CBOR)
+//  5. JSON — keys inspected for OID4 markers (before JWT, since JSON with dots can look like JWT)
+//  6. JWT (3 dot-separated parts) — payload inspected for OID4 markers
 func Detect(input string) CredentialFormat {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return FormatUnknown
 	}
 
-	// SD-JWT always contains ~ separators
+	// 1. OpenID URI schemes
+	lower := strings.ToLower(input)
+	if strings.HasPrefix(lower, "openid-credential-offer://") {
+		return FormatOID4VCI
+	}
+	if strings.HasPrefix(lower, "openid4vp://") || strings.HasPrefix(lower, "haip://") || strings.HasPrefix(lower, "eudi-openid4vp://") {
+		return FormatOID4VP
+	}
+
+	// 2. HTTP(S) URL with OID4 query params
+	if strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") {
+		if f := detectHTTPOID4(input); f != FormatUnknown {
+			return f
+		}
+		// Non-OID4 HTTP URLs — return unknown (caller decides whether to fetch)
+		return FormatUnknown
+	}
+
+	// 3. SD-JWT always contains ~ separators
 	if strings.Contains(input, "~") {
 		return FormatSDJWT
 	}
 
-	// Try hex decode — mDOC is often hex-encoded CBOR
+	// 4. mDOC — hex or base64url encoded CBOR
 	if isHex(input) {
 		b, err := hex.DecodeString(input)
 		if err == nil && len(b) > 0 && isCBORStart(b[0]) {
 			return FormatMDOC
 		}
 	}
-
-	// Try base64url decode — mDOC can also be base64url
 	b, err := DecodeBase64URL(input)
 	if err == nil && len(b) > 0 && isCBORStart(b[0]) {
 		return FormatMDOC
 	}
 
-	// Could be a plain JWT (no disclosures) — check for 2-dot structure
+	// 5. JSON — inspect keys for OID4 markers (before JWT, since JSON with dots can look like JWT)
+	if strings.HasPrefix(input, "{") {
+		if f := detectJSONOID4(input); f != FormatUnknown {
+			return f
+		}
+		return FormatUnknown
+	}
+
+	// 6. JWT (3 dot-separated parts) — inspect payload for OID4 markers
 	parts := strings.Split(input, ".")
 	if len(parts) == 3 && len(parts[0]) > 0 && len(parts[1]) > 0 {
+		if f := detectJWTPayloadOID4(parts[1]); f != FormatUnknown {
+			return f
+		}
 		return FormatJWT
 	}
 
+	return FormatUnknown
+}
+
+// detectHTTPOID4 checks HTTP URL query params for OID4 markers.
+func detectHTTPOID4(raw string) CredentialFormat {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return FormatUnknown
+	}
+	q := u.Query()
+	if q.Has("credential_offer") || q.Has("credential_offer_uri") {
+		return FormatOID4VCI
+	}
+	if q.Has("client_id") || q.Has("response_type") || q.Has("request_uri") {
+		return FormatOID4VP
+	}
+	return FormatUnknown
+}
+
+// detectJWTPayloadOID4 decodes a JWT payload segment and checks for OID4 markers.
+func detectJWTPayloadOID4(payloadB64 string) CredentialFormat {
+	data, err := DecodeBase64URL(payloadB64)
+	if err != nil {
+		return FormatUnknown
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return FormatUnknown
+	}
+	if _, ok := m["credential_issuer"]; ok {
+		return FormatOID4VCI
+	}
+	if _, ok := m["client_id"]; ok {
+		return FormatOID4VP
+	}
+	if _, ok := m["response_type"]; ok {
+		return FormatOID4VP
+	}
+	return FormatUnknown
+}
+
+// detectJSONOID4 parses JSON and checks keys for OID4 markers.
+func detectJSONOID4(raw string) CredentialFormat {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return FormatUnknown
+	}
+	if _, ok := m["credential_issuer"]; ok {
+		return FormatOID4VCI
+	}
+	if _, ok := m["client_id"]; ok {
+		return FormatOID4VP
+	}
 	return FormatUnknown
 }
 

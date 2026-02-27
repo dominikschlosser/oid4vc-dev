@@ -16,6 +16,7 @@ package web
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/dominikschlosser/ssi-debugger/internal/format"
 	"github.com/dominikschlosser/ssi-debugger/internal/mdoc"
@@ -25,7 +26,7 @@ import (
 
 // Decode detects the credential format and returns a JSON-serializable map.
 func Decode(input string) (map[string]any, error) {
-	detected := format.Detect(input)
+	detected := detectCredentialFormat(input)
 
 	switch detected {
 	case format.FormatSDJWT:
@@ -52,4 +53,26 @@ func Decode(input string) (map[string]any, error) {
 	default:
 		return nil, fmt.Errorf("unable to auto-detect credential format (not JWT, SD-JWT, or mDOC)")
 	}
+}
+
+// detectCredentialFormat runs format.Detect and coerces OID4 results back to
+// credential formats when the input is structurally a JWT or SD-JWT. This
+// handles the case where a credential JWT contains OID4-like fields
+// (e.g. client_id, credential_issuer) but should still be decoded as a
+// credential.
+func detectCredentialFormat(input string) format.CredentialFormat {
+	detected := format.Detect(input)
+
+	if detected == format.FormatOID4VCI || detected == format.FormatOID4VP {
+		trimmed := strings.TrimSpace(input)
+		if strings.Contains(trimmed, "~") {
+			return format.FormatSDJWT
+		}
+		parts := strings.Split(trimmed, ".")
+		if len(parts) == 3 && len(parts[0]) > 0 && len(parts[1]) > 0 {
+			return format.FormatJWT
+		}
+	}
+
+	return detected
 }

@@ -40,7 +40,7 @@ type ValidateOpts struct {
 // Validate decodes a credential and runs validation checks.
 // It returns the same structure as Decode, plus a "validation" object.
 func Validate(input string, opts ValidateOpts) (map[string]any, error) {
-	detected := format.Detect(input)
+	detected := detectCredentialFormat(input)
 
 	var checks []CheckResult
 
