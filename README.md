@@ -3,9 +3,7 @@
 [![CI](https://github.com/dominikschlosser/oid4vc-dev/actions/workflows/ci.yml/badge.svg)](https://github.com/dominikschlosser/oid4vc-dev/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/dominikschlosser/oid4vc-dev)](https://github.com/dominikschlosser/oid4vc-dev/releases/latest)
 
-A local-first CLI tool for decoding, validating, and inspecting SSI credentials and OpenID4VCI/VP requests.
-
-No network calls by default. Decode and verify credentials entirely offline.
+A developer toolkit for OpenID4VC — decode, issue, and present verifiable credentials, run a testing wallet, or proxy live wallet traffic for debugging.
 
 ## Highlights
 
