@@ -359,3 +359,165 @@ func TestSignJWT(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateVPToken_ImportedSDJWT_PreservesDisclosures(t *testing.T) {
+	// Simulates importing an externally-issued SD-JWT and presenting it
+	w := generateTestWallet(t)
+
+	// Generate an SD-JWT from an "external" issuer (different key, with holder binding)
+	externalKey, _ := mock.GenerateKey()
+	rawSDJWT, err := mock.GenerateSDJWT(mock.SDJWTConfig{
+		Issuer:    "https://external-issuer.example",
+		VCT:       "urn:test:user_binding",
+		ExpiresIn: 24 * time.Hour,
+		Claims:    map[string]any{"user_id": "abc123", "role": "admin", "department": "engineering"},
+		Key:       externalKey,
+		HolderKey: &w.HolderKey.PublicKey,
+	})
+	if err != nil {
+		t.Fatalf("generating external SD-JWT: %v", err)
+	}
+
+	// Import it
+	if err := w.ImportCredential(rawSDJWT); err != nil {
+		t.Fatalf("importing SD-JWT: %v", err)
+	}
+
+	cred := w.GetCredentials()[0]
+	if cred.Format != "dc+sd-jwt" {
+		t.Fatalf("expected dc+sd-jwt format, got %s", cred.Format)
+	}
+	if len(cred.Disclosures) == 0 {
+		t.Fatal("expected disclosures after import")
+	}
+
+	// Simulate persist + reload
+	cred.Disclosures = nil
+	if err := cred.Rehydrate(); err != nil {
+		t.Fatalf("Rehydrate: %v", err)
+	}
+
+	w.mu.Lock()
+	w.Credentials[0] = cred
+	w.mu.Unlock()
+
+	// Present with selective disclosure
+	match := CredentialMatch{
+		QueryID:      "test",
+		CredentialID: cred.ID,
+		Format:       "dc+sd-jwt",
+		SelectedKeys: []string{"user_id"},
+	}
+
+	result, err := w.CreateVPToken(match, PresentationParams{
+		Nonce:    "test-nonce",
+		ClientID: "https://verifier.example",
+		ResponseURI: "https://verifier.example/callback",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPToken error: %v", err)
+	}
+
+	// Parse the VP token and verify user_id disclosure is present
+	parsed, err := sdjwt.Parse(result.Token)
+	if err != nil {
+		t.Fatalf("parsing VP token: %v", err)
+	}
+
+	foundUserID := false
+	for _, d := range parsed.Disclosures {
+		if d.Name == "user_id" {
+			foundUserID = true
+			if d.Value != "abc123" {
+				t.Errorf("expected user_id value abc123, got %v", d.Value)
+			}
+		}
+	}
+	if !foundUserID {
+		t.Error("user_id disclosure missing from VP token — disclosures were stripped during import/persist/present")
+	}
+
+	// Resolved claims should contain user_id
+	if parsed.ResolvedClaims["user_id"] != "abc123" {
+		t.Errorf("expected user_id in resolved claims, got %v", parsed.ResolvedClaims["user_id"])
+	}
+}
+
+func TestCreateVPToken_SDJWT_SurvivesPersistReload(t *testing.T) {
+	// Simulates: import → save to disk (Disclosures lost) → reload + Rehydrate → present
+	w := generateTestWalletWithPID(t)
+
+	creds := w.GetCredentials()
+	var sdCred StoredCredential
+	for _, c := range creds {
+		if c.Format == "dc+sd-jwt" {
+			sdCred = c
+			break
+		}
+	}
+	if sdCred.ID == "" {
+		t.Fatal("no SD-JWT credential found")
+	}
+
+	originalDisclosureCount := len(sdCred.Disclosures)
+	if originalDisclosureCount == 0 {
+		t.Fatal("expected disclosures in original credential")
+	}
+
+	// Simulate persistence: clear non-serialized fields (json:"-")
+	sdCred.Disclosures = nil
+	sdCred.NameSpaces = nil
+
+	// Simulate reload: rehydrate from Raw
+	if err := sdCred.Rehydrate(); err != nil {
+		t.Fatalf("Rehydrate: %v", err)
+	}
+
+	if len(sdCred.Disclosures) != originalDisclosureCount {
+		t.Fatalf("expected %d disclosures after rehydrate, got %d", originalDisclosureCount, len(sdCred.Disclosures))
+	}
+
+	// Put the rehydrated credential back into the wallet
+	w.mu.Lock()
+	for i, c := range w.Credentials {
+		if c.ID == sdCred.ID {
+			w.Credentials[i] = sdCred
+			break
+		}
+	}
+	w.mu.Unlock()
+
+	// Now present — should include disclosures
+	match := CredentialMatch{
+		QueryID:      "test",
+		CredentialID: sdCred.ID,
+		Format:       "dc+sd-jwt",
+		SelectedKeys: []string{"given_name", "family_name"},
+	}
+
+	result, err := w.CreateVPToken(match, PresentationParams{Nonce: "n", ClientID: "client", ResponseURI: "response"})
+	if err != nil {
+		t.Fatalf("CreateVPToken error: %v", err)
+	}
+
+	parsed, err := sdjwt.Parse(result.Token)
+	if err != nil {
+		t.Fatalf("parsing VP token: %v", err)
+	}
+
+	// Must have disclosures in the presentation
+	var names []string
+	for _, d := range parsed.Disclosures {
+		if !d.IsArrayEntry {
+			names = append(names, d.Name)
+		}
+	}
+	if len(names) != 2 {
+		t.Errorf("expected 2 disclosures after persist/reload round-trip, got %d: %v", len(names), names)
+	}
+
+	// Must have KB-JWT
+	if parsed.KeyBindingJWT == nil {
+		t.Error("expected KB-JWT in VP token after persist/reload round-trip")
+	}
+}
