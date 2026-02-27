@@ -29,12 +29,14 @@ import (
 
 // SDJWTConfig holds options for generating a mock SD-JWT credential.
 type SDJWTConfig struct {
-	Issuer    string
-	VCT       string
-	ExpiresIn time.Duration
-	Claims    map[string]any
-	Key       *ecdsa.PrivateKey
-	HolderKey *ecdsa.PublicKey // optional: adds cnf claim for holder binding
+	Issuer        string
+	VCT           string
+	ExpiresIn     time.Duration
+	Claims        map[string]any
+	Key           *ecdsa.PrivateKey
+	HolderKey     *ecdsa.PublicKey // optional: adds cnf claim for holder binding
+	StatusListURI string          // optional: status list URI for revocation
+	StatusListIdx int             // optional: index in the status list
 }
 
 // GenerateSDJWT creates a mock SD-JWT credential with all claims selectively disclosable.
@@ -77,6 +79,16 @@ func GenerateSDJWT(cfg SDJWTConfig) (string, error) {
 	if cfg.HolderKey != nil {
 		payload["cnf"] = map[string]any{
 			"jwk": PublicKeyJWKMap(cfg.HolderKey),
+		}
+	}
+
+	// Add status list reference (non-disclosed)
+	if cfg.StatusListURI != "" {
+		payload["status"] = map[string]any{
+			"status_list": map[string]any{
+				"uri": cfg.StatusListURI,
+				"idx": cfg.StatusListIdx,
+			},
 		}
 	}
 

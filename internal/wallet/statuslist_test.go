@@ -1,0 +1,458 @@
+package wallet
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
+)
+
+// --- Wallet Status Entry Tests ---
+
+func TestSetCredentialStatus(t *testing.T) {
+	w := generateTestWallet(t)
+	w.StatusEntries = map[string]StatusEntry{
+		"cred-1": {Index: 0, Status: 0},
+	}
+
+	entry, ok := w.SetCredentialStatus("cred-1", 1)
+	if !ok {
+		t.Fatal("expected to find credential status entry")
+	}
+	if entry.Status != 1 {
+		t.Errorf("expected status 1, got %d", entry.Status)
+	}
+	if entry.Index != 0 {
+		t.Errorf("expected index 0, got %d", entry.Index)
+	}
+
+	// Verify it was persisted in the map
+	if w.StatusEntries["cred-1"].Status != 1 {
+		t.Error("status not updated in map")
+	}
+}
+
+func TestSetCredentialStatus_NotFound(t *testing.T) {
+	w := generateTestWallet(t)
+
+	_, ok := w.SetCredentialStatus("nonexistent", 1)
+	if ok {
+		t.Error("expected false for nonexistent credential")
+	}
+}
+
+func TestSetCredentialStatus_Unrevoke(t *testing.T) {
+	w := generateTestWallet(t)
+	w.StatusEntries = map[string]StatusEntry{
+		"cred-1": {Index: 0, Status: 1},
+	}
+
+	entry, ok := w.SetCredentialStatus("cred-1", 0)
+	if !ok {
+		t.Fatal("expected to find credential status entry")
+	}
+	if entry.Status != 0 {
+		t.Errorf("expected status 0 after un-revoke, got %d", entry.Status)
+	}
+}
+
+func TestBuildStatusBitstring_Empty(t *testing.T) {
+	w := generateTestWallet(t)
+
+	bs := w.BuildStatusBitstring()
+	if len(bs) < 1 {
+		t.Fatal("expected at least 1 byte")
+	}
+	// All zeros
+	for i, b := range bs {
+		if b != 0 {
+			t.Errorf("expected byte %d to be 0, got %d", i, b)
+		}
+	}
+}
+
+func TestBuildStatusBitstring_WithEntries(t *testing.T) {
+	w := generateTestWallet(t)
+	w.StatusListCounter = 4
+	w.StatusEntries = map[string]StatusEntry{
+		"cred-0": {Index: 0, Status: 0},
+		"cred-1": {Index: 1, Status: 1}, // revoked
+		"cred-2": {Index: 2, Status: 0},
+		"cred-3": {Index: 3, Status: 1}, // revoked
+	}
+
+	bs := w.BuildStatusBitstring()
+
+	// Index 1: bit 1 = 0b00000010
+	// Index 3: bit 3 = 0b00001000
+	// Combined: 0b00001010 = 0x0A
+	if bs[0] != 0x0A {
+		t.Errorf("expected byte 0 = 0x0A, got 0x%02X", bs[0])
+	}
+}
+
+func TestBuildStatusBitstring_MinimumSize(t *testing.T) {
+	w := generateTestWallet(t)
+	w.StatusListCounter = 1
+	w.StatusEntries = map[string]StatusEntry{
+		"cred-0": {Index: 0, Status: 0},
+	}
+
+	bs := w.BuildStatusBitstring()
+	// Minimum 16 bytes per RFC 9596
+	if len(bs) < 16 {
+		t.Errorf("expected minimum 16 bytes, got %d", len(bs))
+	}
+}
+
+// --- Credential Generation with Status List ---
+
+func TestGenerateDefaultCredentials_WithStatusList(t *testing.T) {
+	w := generateTestWallet(t)
+	w.BaseURL = "http://localhost:8085"
+
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("GenerateDefaultCredentials: %v", err)
+	}
+
+	creds := w.GetCredentials()
+	if len(creds) != 2 {
+		t.Fatalf("expected 2 credentials, got %d", len(creds))
+	}
+
+	// Both credentials should have status entries
+	if len(w.StatusEntries) != 2 {
+		t.Fatalf("expected 2 status entries, got %d", len(w.StatusEntries))
+	}
+
+	// Counter should be 2
+	if w.StatusListCounter != 2 {
+		t.Errorf("expected counter=2, got %d", w.StatusListCounter)
+	}
+
+	// SD-JWT credential should have status claim in payload
+	sdCred := creds[0]
+	token, err := sdjwt.Parse(sdCred.Raw)
+	if err != nil {
+		t.Fatalf("parsing SD-JWT: %v", err)
+	}
+	status, ok := token.Payload["status"].(map[string]any)
+	if !ok {
+		t.Fatal("expected status claim in SD-JWT payload")
+	}
+	sl, ok := status["status_list"].(map[string]any)
+	if !ok {
+		t.Fatal("expected status_list in status claim")
+	}
+	if sl["uri"] != "http://localhost:8085/api/statuslist" {
+		t.Errorf("expected status list URI, got %v", sl["uri"])
+	}
+	if sl["idx"] != float64(0) {
+		t.Errorf("expected idx=0, got %v", sl["idx"])
+	}
+
+	// Status entries should map to correct credentials
+	for credID, entry := range w.StatusEntries {
+		if entry.Status != 0 {
+			t.Errorf("credential %s: expected status 0, got %d", credID, entry.Status)
+		}
+	}
+}
+
+func TestGenerateDefaultCredentials_WithoutStatusList(t *testing.T) {
+	w := generateTestWallet(t)
+	// BaseURL not set — status list disabled
+
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("GenerateDefaultCredentials: %v", err)
+	}
+
+	creds := w.GetCredentials()
+	if len(creds) != 2 {
+		t.Fatalf("expected 2 credentials, got %d", len(creds))
+	}
+
+	// No status entries
+	if len(w.StatusEntries) != 0 {
+		t.Errorf("expected 0 status entries, got %d", len(w.StatusEntries))
+	}
+
+	// SD-JWT should not have status claim
+	sdCred := creds[0]
+	token, err := sdjwt.Parse(sdCred.Raw)
+	if err != nil {
+		t.Fatalf("parsing SD-JWT: %v", err)
+	}
+	if _, ok := token.Payload["status"]; ok {
+		t.Error("expected no status claim when status list is disabled")
+	}
+}
+
+func TestGenerateDefaultCredentials_StatusIndexIncrement(t *testing.T) {
+	w := generateTestWallet(t)
+	w.BaseURL = "http://localhost:8085"
+
+	// Generate first batch
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("first GenerateDefaultCredentials: %v", err)
+	}
+	if w.StatusListCounter != 2 {
+		t.Errorf("expected counter=2 after first generation, got %d", w.StatusListCounter)
+	}
+
+	// Generate second batch (replaces existing PIDs)
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("second GenerateDefaultCredentials: %v", err)
+	}
+	// Counter should continue incrementing, not reset
+	if w.StatusListCounter != 4 {
+		t.Errorf("expected counter=4 after second generation, got %d", w.StatusListCounter)
+	}
+}
+
+// --- Server Status List API Tests ---
+
+func TestStatusListAPI(t *testing.T) {
+	srv := newTestServer(t, false)
+
+	w := serverRequest(t, srv, "GET", "/api/statuslist", "")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if ct := w.Header().Get("Content-Type"); ct != "application/statuslist+jwt" {
+		t.Errorf("expected Content-Type application/statuslist+jwt, got %s", ct)
+	}
+
+	// Should be a valid 3-part JWT
+	jwt := w.Body.String()
+	parts := strings.SplitN(jwt, ".", 3)
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 JWT parts, got %d", len(parts))
+	}
+
+	// Parse payload
+	payloadBytes, err := format.DecodeBase64URL(parts[1])
+	if err != nil {
+		t.Fatalf("decoding payload: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		t.Fatalf("parsing payload: %v", err)
+	}
+
+	if _, ok := payload["status_list"]; !ok {
+		t.Error("expected status_list in JWT payload")
+	}
+}
+
+func TestStatusListAPI_WithRevokedCredential(t *testing.T) {
+	w := generateTestWallet(t)
+	w.BaseURL = "http://localhost:8085"
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("generating credentials: %v", err)
+	}
+	srv := NewServer(w, 0, nil)
+
+	// Revoke the first credential
+	creds := w.GetCredentials()
+	w.SetCredentialStatus(creds[0].ID, 1)
+
+	resp := serverRequest(t, srv, "GET", "/api/statuslist", "")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	// The JWT should contain the revocation
+	jwt := resp.Body.String()
+	parts := strings.SplitN(jwt, ".", 3)
+	payloadBytes, _ := format.DecodeBase64URL(parts[1])
+	var payload map[string]any
+	json.Unmarshal(payloadBytes, &payload)
+
+	sl := payload["status_list"].(map[string]any)
+	if sl["bits"] != float64(1) {
+		t.Errorf("expected bits=1, got %v", sl["bits"])
+	}
+	if _, ok := sl["lst"].(string); !ok {
+		t.Fatal("missing lst")
+	}
+}
+
+func TestSetCredentialStatusAPI(t *testing.T) {
+	w := generateTestWallet(t)
+	w.BaseURL = "http://localhost:8085"
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("generating credentials: %v", err)
+	}
+	srv := NewServer(w, 0, nil)
+
+	creds := w.GetCredentials()
+	credID := creds[0].ID
+
+	// Revoke
+	resp := serverRequest(t, srv, "POST", "/api/credentials/"+credID+"/status", `{"status":1}`)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var entry StatusEntry
+	if err := json.Unmarshal(resp.Body.Bytes(), &entry); err != nil {
+		t.Fatalf("parsing response: %v", err)
+	}
+	if entry.Status != 1 {
+		t.Errorf("expected status 1, got %d", entry.Status)
+	}
+
+	// Un-revoke
+	resp = serverRequest(t, srv, "POST", "/api/credentials/"+credID+"/status", `{"status":0}`)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+	json.Unmarshal(resp.Body.Bytes(), &entry)
+	if entry.Status != 0 {
+		t.Errorf("expected status 0 after un-revoke, got %d", entry.Status)
+	}
+}
+
+func TestSetCredentialStatusAPI_NotFound(t *testing.T) {
+	srv := newTestServer(t, false)
+
+	resp := serverRequest(t, srv, "POST", "/api/credentials/nonexistent/status", `{"status":1}`)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.Code)
+	}
+}
+
+func TestSetCredentialStatusAPI_InvalidJSON(t *testing.T) {
+	w := generateTestWallet(t)
+	w.BaseURL = "http://localhost:8085"
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("generating credentials: %v", err)
+	}
+	srv := NewServer(w, 0, nil)
+
+	creds := w.GetCredentials()
+	resp := serverRequest(t, srv, "POST", "/api/credentials/"+creds[0].ID+"/status", "not-json")
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.Code)
+	}
+}
+
+// --- Store Persistence Tests ---
+
+func TestWalletStore_StatusEntriesPersistence(t *testing.T) {
+	dir := t.TempDir()
+	store := NewWalletStore(dir)
+
+	w, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+
+	w.BaseURL = "http://localhost:8085"
+	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
+		t.Fatalf("generating credentials: %v", err)
+	}
+
+	// Revoke one credential
+	creds := w.GetCredentials()
+	w.SetCredentialStatus(creds[0].ID, 1)
+
+	// Save
+	if err := store.Save(w); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Reload
+	w2, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatalf("LoadOrCreate after save: %v", err)
+	}
+
+	if len(w2.StatusEntries) != len(w.StatusEntries) {
+		t.Fatalf("expected %d status entries, got %d", len(w.StatusEntries), len(w2.StatusEntries))
+	}
+	if w2.StatusListCounter != w.StatusListCounter {
+		t.Errorf("expected counter=%d, got %d", w.StatusListCounter, w2.StatusListCounter)
+	}
+
+	// Check the revoked entry survived
+	entry := w2.StatusEntries[creds[0].ID]
+	if entry.Status != 1 {
+		t.Errorf("expected status 1 after reload, got %d", entry.Status)
+	}
+}
+
+// --- SD-JWT Status Claim Tests ---
+
+func TestGenerateSDJWT_WithStatusList(t *testing.T) {
+	key, _ := mock.GenerateKey()
+
+	cfg := mock.SDJWTConfig{
+		Issuer:        "https://issuer.example",
+		VCT:           "test",
+		ExpiresIn:     3600,
+		Claims:        map[string]any{"name": "Test"},
+		Key:           key,
+		StatusListURI: "http://localhost:8085/api/statuslist",
+		StatusListIdx: 42,
+	}
+
+	result, err := mock.GenerateSDJWT(cfg)
+	if err != nil {
+		t.Fatalf("GenerateSDJWT: %v", err)
+	}
+
+	token, err := sdjwt.Parse(result)
+	if err != nil {
+		t.Fatalf("sdjwt.Parse: %v", err)
+	}
+
+	// status should be in the payload (not selectively disclosed)
+	status, ok := token.Payload["status"].(map[string]any)
+	if !ok {
+		t.Fatal("expected status in payload")
+	}
+	sl, ok := status["status_list"].(map[string]any)
+	if !ok {
+		t.Fatal("expected status_list in status")
+	}
+	if sl["uri"] != "http://localhost:8085/api/statuslist" {
+		t.Errorf("expected URI, got %v", sl["uri"])
+	}
+	if sl["idx"] != float64(42) {
+		t.Errorf("expected idx=42, got %v", sl["idx"])
+	}
+}
+
+func TestGenerateSDJWT_WithoutStatusList(t *testing.T) {
+	key, _ := mock.GenerateKey()
+
+	cfg := mock.SDJWTConfig{
+		Issuer:    "https://issuer.example",
+		VCT:       "test",
+		ExpiresIn: 3600,
+		Claims:    map[string]any{"name": "Test"},
+		Key:       key,
+	}
+
+	result, err := mock.GenerateSDJWT(cfg)
+	if err != nil {
+		t.Fatalf("GenerateSDJWT: %v", err)
+	}
+
+	token, err := sdjwt.Parse(result)
+	if err != nil {
+		t.Fatalf("sdjwt.Parse: %v", err)
+	}
+
+	if _, ok := token.Payload["status"]; ok {
+		t.Error("expected no status claim when not configured")
+	}
+}

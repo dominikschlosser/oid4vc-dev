@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/statuslist"
 	"github.com/fatih/color"
 	"github.com/google/uuid"
 )
@@ -59,6 +60,10 @@ func (s *Server) setupRoutes() {
 
 	// API: trust list
 	s.mux.HandleFunc("GET /api/trustlist", s.handleTrustList)
+
+	// API: status list
+	s.mux.HandleFunc("GET /api/statuslist", s.handleStatusList)
+	s.mux.HandleFunc("POST /api/credentials/{id}/status", s.handleSetCredentialStatus)
 
 	// API: log
 	s.mux.HandleFunc("GET /api/log", s.handleLog)
@@ -410,6 +415,40 @@ func (s *Server) handleTrustList(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/jwt")
 	w.Write([]byte(jwt))
+}
+
+// handleStatusList generates and serves a status list JWT.
+func (s *Server) handleStatusList(w http.ResponseWriter, r *http.Request) {
+	bitstring := s.wallet.BuildStatusBitstring()
+	jwt, err := statuslist.GenerateStatusListJWT(bitstring, s.wallet.IssuerKey)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("generating status list: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/statuslist+jwt")
+	w.Write([]byte(jwt))
+}
+
+// handleSetCredentialStatus sets the revocation status for a credential.
+func (s *Server) handleSetCredentialStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var body struct {
+		Status int `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	entry, ok := s.wallet.SetCredentialStatus(id, body.Status)
+	if !ok {
+		http.Error(w, "credential has no status entry", http.StatusNotFound)
+		return
+	}
+
+	s.triggerSave()
+	writeJSON(w, http.StatusOK, entry)
 }
 
 // handleAuthFlow is the core OID4VP flow handler.

@@ -28,11 +28,13 @@ import (
 
 // MDOCConfig holds options for generating a mock mDOC credential.
 type MDOCConfig struct {
-	DocType   string
-	Namespace string
-	Claims    map[string]any
-	Key       *ecdsa.PrivateKey
-	HolderKey *ecdsa.PublicKey // optional: adds deviceKeyInfo to MSO
+	DocType       string
+	Namespace     string
+	Claims        map[string]any
+	Key           *ecdsa.PrivateKey
+	HolderKey     *ecdsa.PublicKey // optional: adds deviceKeyInfo to MSO
+	StatusListURI string          // optional: status list URI for revocation
+	StatusListIdx int             // optional: index in the status list
 }
 
 // GenerateMDOC creates a mock mDOC (IssuerSigned) credential.
@@ -95,6 +97,16 @@ func GenerateMDOC(cfg MDOCConfig) (string, error) {
 			"validFrom":  cbor.Tag{Number: 0, Content: now.Format(time.RFC3339)},
 			"validUntil": cbor.Tag{Number: 0, Content: validUntil.Format(time.RFC3339)},
 		},
+	}
+
+	// Add status list reference
+	if cfg.StatusListURI != "" {
+		mso["status"] = map[string]any{
+			"status_list": map[string]any{
+				"uri": cfg.StatusListURI,
+				"idx": cfg.StatusListIdx,
+			},
+		}
 	}
 
 	// Add deviceKeyInfo with holder's COSE_Key

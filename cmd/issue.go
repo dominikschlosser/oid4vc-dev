@@ -29,16 +29,18 @@ import (
 )
 
 var (
-	issueClaims    string
-	issueKeyPath   string
-	issueIssuer    string
-	issueVCT       string
-	issueExpires   string
-	issueDocType   string
-	issueNamespace string
-	issuePID       bool
-	issueOmit      []string
-	issueToWallet  bool
+	issueClaims        string
+	issueKeyPath       string
+	issueIssuer        string
+	issueVCT           string
+	issueExpires       string
+	issueDocType       string
+	issueNamespace     string
+	issuePID           bool
+	issueOmit          []string
+	issueToWallet      bool
+	issueStatusListURI string
+	issueStatusListIdx int
 )
 
 var issueCmd = &cobra.Command{
@@ -75,6 +77,8 @@ func init() {
 	issueSDJWTCmd.Flags().BoolVar(&issuePID, "pid", false, "Use full EUDI PID Rulebook claims")
 	issueSDJWTCmd.Flags().StringSliceVar(&issueOmit, "omit", nil, "Comma-separated claim names to omit from --pid (e.g. resident_address,birth_place)")
 	issueSDJWTCmd.Flags().BoolVar(&issueToWallet, "wallet", false, "Import the issued credential into the wallet")
+	issueSDJWTCmd.Flags().StringVar(&issueStatusListURI, "status-list-uri", "", "Status list URI to embed in credential")
+	issueSDJWTCmd.Flags().IntVar(&issueStatusListIdx, "status-list-idx", 0, "Status list index to embed in credential")
 
 	// mDOC flags
 	issueMDOCCmd.Flags().StringVar(&issueClaims, "claims", "", "Claims as JSON string or @filepath")
@@ -84,6 +88,8 @@ func init() {
 	issueMDOCCmd.Flags().BoolVar(&issuePID, "pid", false, "Use full EUDI PID Rulebook claims")
 	issueMDOCCmd.Flags().StringSliceVar(&issueOmit, "omit", nil, "Comma-separated claim names to omit from --pid (e.g. resident_address,birth_place)")
 	issueMDOCCmd.Flags().BoolVar(&issueToWallet, "wallet", false, "Import the issued credential into the wallet")
+	issueMDOCCmd.Flags().StringVar(&issueStatusListURI, "status-list-uri", "", "Status list URI to embed in credential")
+	issueMDOCCmd.Flags().IntVar(&issueStatusListIdx, "status-list-idx", 0, "Status list index to embed in credential")
 }
 
 func runIssueSDJWT(cmd *cobra.Command, args []string) error {
@@ -103,11 +109,13 @@ func runIssueSDJWT(cmd *cobra.Command, args []string) error {
 	}
 
 	cfg := mock.SDJWTConfig{
-		Issuer:    issueIssuer,
-		VCT:       issueVCT,
-		ExpiresIn: expDuration,
-		Claims:    claims,
-		Key:       key,
+		Issuer:        issueIssuer,
+		VCT:           issueVCT,
+		ExpiresIn:     expDuration,
+		Claims:        claims,
+		Key:           key,
+		StatusListURI: issueStatusListURI,
+		StatusListIdx: issueStatusListIdx,
 	}
 
 	result, err := mock.GenerateSDJWT(cfg)
@@ -135,10 +143,12 @@ func runIssueMDOC(cmd *cobra.Command, args []string) error {
 	}
 
 	cfg := mock.MDOCConfig{
-		DocType:   issueDocType,
-		Namespace: issueNamespace,
-		Claims:    claims,
-		Key:       key,
+		DocType:       issueDocType,
+		Namespace:     issueNamespace,
+		Claims:        claims,
+		Key:           key,
+		StatusListURI: issueStatusListURI,
+		StatusListIdx: issueStatusListIdx,
 	}
 
 	result, err := mock.GenerateMDOC(cfg)

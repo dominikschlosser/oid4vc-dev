@@ -19,8 +19,10 @@ type WalletStore struct {
 
 // walletJSON is the on-disk format of wallet.json.
 type walletJSON struct {
-	Credentials []StoredCredential `json:"credentials"`
-	Port        int                `json:"port,omitempty"`
+	Credentials       []StoredCredential   `json:"credentials"`
+	StatusEntries     map[string]StatusEntry `json:"status_entries,omitempty"`
+	StatusListCounter int                    `json:"status_list_counter,omitempty"`
+	Port              int                    `json:"port,omitempty"`
 }
 
 // DefaultWalletDir returns the default wallet storage directory.
@@ -88,6 +90,8 @@ func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
 	}
 
 	w.Credentials = wj.Credentials
+	w.StatusEntries = wj.StatusEntries
+	w.StatusListCounter = wj.StatusListCounter
 
 	// Re-hydrate non-serializable fields from Raw
 	for i := range w.Credentials {
@@ -106,8 +110,14 @@ func (s *WalletStore) Save(w *Wallet) error {
 	}
 
 	creds := w.GetCredentials()
+	w.mu.RLock()
+	statusEntries := w.StatusEntries
+	statusListCounter := w.StatusListCounter
+	w.mu.RUnlock()
 	wj := walletJSON{
-		Credentials: creds,
+		Credentials:       creds,
+		StatusEntries:     statusEntries,
+		StatusListCounter: statusListCounter,
 	}
 
 	data, err := json.MarshalIndent(wj, "", "  ")

@@ -33,6 +33,12 @@ const (
 	SessionTranscriptOID4VP SessionTranscriptMode = "oid4vp"
 )
 
+// StatusEntry tracks the status list index and current status for a credential.
+type StatusEntry struct {
+	Index  int `json:"index"`
+	Status int `json:"status"` // 0=valid, 1=revoked
+}
+
 // Wallet holds credentials, keys, and manages presentation consent flows.
 type Wallet struct {
 	HolderKey            *ecdsa.PrivateKey
@@ -40,6 +46,9 @@ type Wallet struct {
 	AutoAccept           bool
 	SessionTranscript    SessionTranscriptMode // "oid4vp" (default) or "iso"
 	Credentials          []StoredCredential
+	StatusEntries        map[string]StatusEntry // credential ID → status entry
+	StatusListCounter    int                    // next available status list index
+	BaseURL              string                 // base URL for status list endpoint
 	Requests             map[string]*ConsentRequest
 	Log                  []LogEntry
 	mu                   sync.RWMutex
@@ -164,14 +173,24 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 		holderPubKey = &w.HolderKey.PublicKey
 	}
 
-	sdResult, err := mock.GenerateSDJWT(mock.SDJWTConfig{
+	sdConfig := mock.SDJWTConfig{
 		Issuer:    "https://issuer.example",
 		VCT:       vct,
 		ExpiresIn: 365 * 24 * time.Hour,
 		Claims:    sdClaims,
 		Key:       issuerKey,
 		HolderKey: holderPubKey,
-	})
+	}
+
+	// Assign status list indices if enabled
+	var sdStatusIdx, mdocStatusIdx int
+	if w.BaseURL != "" {
+		sdStatusIdx = w.nextStatusIndex()
+		sdConfig.StatusListURI = w.BaseURL + "/api/statuslist"
+		sdConfig.StatusListIdx = sdStatusIdx
+	}
+
+	sdResult, err := mock.GenerateSDJWT(sdConfig)
 	if err != nil {
 		return fmt.Errorf("generating SD-JWT PID: %w", err)
 	}
@@ -179,14 +198,28 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 		return fmt.Errorf("importing SD-JWT PID: %w", err)
 	}
 
-	// Generate mDoc PID
-	mdocResult, err := mock.GenerateMDOC(mock.MDOCConfig{
+	// Register status entry for SD-JWT credential
+	if w.BaseURL != "" {
+		sdCred := w.Credentials[len(w.Credentials)-1]
+		w.registerStatusEntry(sdCred.ID, sdStatusIdx)
+	}
+
+	mdocConfig := mock.MDOCConfig{
 		DocType:   "eu.europa.ec.eudi.pid.1",
 		Namespace: "eu.europa.ec.eudi.pid.1",
 		Claims:    mdocClaims,
 		Key:       issuerKey,
 		HolderKey: holderPubKey,
-	})
+	}
+
+	if w.BaseURL != "" {
+		mdocStatusIdx = w.nextStatusIndex()
+		mdocConfig.StatusListURI = w.BaseURL + "/api/statuslist"
+		mdocConfig.StatusListIdx = mdocStatusIdx
+	}
+
+	// Generate mDoc PID
+	mdocResult, err := mock.GenerateMDOC(mdocConfig)
 	if err != nil {
 		return fmt.Errorf("generating mDoc PID: %w", err)
 	}
@@ -194,7 +227,32 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 		return fmt.Errorf("importing mDoc PID: %w", err)
 	}
 
+	// Register status entry for mDoc credential
+	if w.BaseURL != "" {
+		mdocCred := w.Credentials[len(w.Credentials)-1]
+		w.registerStatusEntry(mdocCred.ID, mdocStatusIdx)
+	}
+
 	return nil
+}
+
+// nextStatusIndex returns the next status list index and increments the counter.
+func (w *Wallet) nextStatusIndex() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	idx := w.StatusListCounter
+	w.StatusListCounter++
+	return idx
+}
+
+// registerStatusEntry records a status entry for a credential.
+func (w *Wallet) registerStatusEntry(credID string, idx int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.StatusEntries == nil {
+		w.StatusEntries = make(map[string]StatusEntry)
+	}
+	w.StatusEntries[credID] = StatusEntry{Index: idx, Status: 0}
 }
 
 // removeByType removes credentials matching the given format and vct/doctype.
@@ -566,6 +624,50 @@ func (w *Wallet) ImportCredentialFromFile(path string) error {
 		return fmt.Errorf("reading credential file: %w", err)
 	}
 	return w.ImportCredential(raw)
+}
+
+// SetCredentialStatus sets the status value for a credential.
+func (w *Wallet) SetCredentialStatus(credID string, status int) (StatusEntry, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	entry, ok := w.StatusEntries[credID]
+	if !ok {
+		return StatusEntry{}, false
+	}
+	entry.Status = status
+	w.StatusEntries[credID] = entry
+	return entry, true
+}
+
+// BuildStatusBitstring builds a bitstring from status entries (1 bit per entry).
+func (w *Wallet) BuildStatusBitstring() []byte {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if w.StatusListCounter == 0 {
+		// Minimum 1 byte
+		return make([]byte, 1)
+	}
+
+	// Calculate number of bytes needed
+	numBytes := (w.StatusListCounter + 7) / 8
+	// Minimum 16 bytes as per RFC 9596
+	if numBytes < 16 {
+		numBytes = 16
+	}
+	bitstring := make([]byte, numBytes)
+
+	for _, entry := range w.StatusEntries {
+		if entry.Status != 0 {
+			byteIdx := entry.Index / 8
+			bitOffset := entry.Index % 8
+			if byteIdx < len(bitstring) {
+				bitstring[byteIdx] |= byte(1 << bitOffset)
+			}
+		}
+	}
+
+	return bitstring
 }
 
 // CredentialsJSON returns all credentials as JSON bytes.

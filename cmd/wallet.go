@@ -102,6 +102,8 @@ func walletServeCmd() *cobra.Command {
 		sessionTranscript string
 		register          bool
 		noRegister        bool
+		statusList        bool
+		baseURL           string
 	)
 
 	cmd := &cobra.Command{
@@ -149,6 +151,13 @@ so the wallet automatically receives incoming protocol requests.`,
 				return err
 			}
 
+			if statusList {
+				if baseURL == "" {
+					baseURL = fmt.Sprintf("http://localhost:%d", port)
+				}
+				w.BaseURL = baseURL
+			}
+
 			if pid {
 				if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
 					return fmt.Errorf("generating PID credentials: %w", err)
@@ -188,6 +197,9 @@ so the wallet automatically receives incoming protocol requests.`,
 				fmt.Printf("  Mode:        interactive (consent UI)\n")
 			}
 			fmt.Printf("  Transcript:  %s\n", w.SessionTranscript)
+			if w.BaseURL != "" {
+				fmt.Printf("  Status List: %s/api/statuslist\n", w.BaseURL)
+			}
 
 			// Register URL scheme handlers if requested
 			if register && !noRegister {
@@ -248,6 +260,8 @@ so the wallet automatically receives incoming protocol requests.`,
 	cmd.Flags().StringVar(&sessionTranscript, "session-transcript", "oid4vp", "mDoc session transcript mode: 'oid4vp' (OID4VP 1.0, default) or 'iso' (ISO 18013-7)")
 	cmd.Flags().BoolVar(&register, "register", false, "Register OS URL scheme handlers (openid4vp://, openid-credential-offer://)")
 	cmd.Flags().BoolVar(&noRegister, "no-register", false, "Skip URL scheme registration (overrides --register)")
+	cmd.Flags().BoolVar(&statusList, "status-list", false, "Embed status list references in generated credentials")
+	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL for status list endpoint (default: http://localhost:<port>)")
 	return cmd
 }
 
@@ -362,6 +376,8 @@ func walletGeneratePIDCmd() *cobra.Command {
 		claimsFlag string
 		keyPath    string
 		vctFlag    string
+		statusList bool
+		baseURL    string
 	)
 
 	cmd := &cobra.Command{
@@ -380,6 +396,13 @@ func walletGeneratePIDCmd() *cobra.Command {
 					return err
 				}
 				w.IssuerKey = issuerKey
+			}
+
+			if statusList {
+				if baseURL == "" {
+					baseURL = "http://localhost:8085"
+				}
+				w.BaseURL = baseURL
 			}
 
 			overrides, err := parseClaimsOverrides(claimsFlag)
@@ -403,6 +426,8 @@ func walletGeneratePIDCmd() *cobra.Command {
 	cmd.Flags().StringVar(&claimsFlag, "claims", "", "Claim overrides as JSON (e.g. '{\"given_name\":\"Max\"}')")
 	cmd.Flags().StringVar(&keyPath, "key", "", "Path to PEM-encoded EC private key for signing (default: auto-generated)")
 	cmd.Flags().StringVar(&vctFlag, "vct", mock.DefaultPIDVCT, "Verifiable Credential Type for SD-JWT PID")
+	cmd.Flags().BoolVar(&statusList, "status-list", false, "Embed status list references in generated credentials")
+	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL for status list endpoint (default: http://localhost:8085)")
 	return cmd
 }
 
