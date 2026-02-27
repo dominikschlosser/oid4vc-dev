@@ -30,7 +30,11 @@ docker run -i ghcr.io/dominikschlosser/oid4vc-dev validate --trust-list https://
 |----------|--------|---------|
 | `/authorize` | GET/POST | OID4VP authorization endpoint — accepts standard OID4VP query parameters (`client_id`, `response_type`, `dcql_query`, `nonce`, `state`, `response_uri`, `response_mode`, `request_uri`) |
 | `/api/trustlist` | GET | Returns the wallet's ETSI trust list JWT — use this to validate the signatures of credentials issued by the wallet |
-| `/api/credentials` | GET | Lists all credentials currently held by the wallet |
+| `/api/credentials` | GET/POST | List all credentials / import a credential |
+| `/api/credentials/<id>/status` | POST | Set revocation status for a credential |
+| `/api/statuslist` | GET | Status list JWT (requires `--status-list`) |
+| `/api/next-error` | POST/DELETE | Set or clear a one-shot error override |
+| `/api/config/preferred-format` | PUT | Set credential format preference (`dc+sd-jwt` / `mso_mdoc` / empty) |
 
 ## Typical verifier integration test flow
 
@@ -114,6 +118,87 @@ docker run --rm -v wallet-data:/root/.oid4vc-dev/wallet ghcr.io/dominikschlosser
 docker run -p 8085:8085 -v wallet-data:/root/.oid4vc-dev/wallet ghcr.io/dominikschlosser/oid4vc-dev \
   wallet serve --auto-accept --port 8085
 ```
+
+## Testing API
+
+The wallet exposes additional API endpoints for controlling its behavior in automated tests.
+
+### Error simulation
+
+Pre-program a one-shot error response. The next OID4VP request returns the configured error instead of processing normally, then the wallet resumes normal behavior.
+
+```bash
+# Set up error for next request
+curl -X POST http://localhost:8085/api/next-error \
+  -H 'Content-Type: application/json' \
+  -d '{"error": "access_denied", "error_description": "Simulated denial"}'
+
+# Clear without consuming
+curl -X DELETE http://localhost:8085/api/next-error
+```
+
+### Format preference
+
+When the DCQL query matches both SD-JWT and mDoc credentials, control which format is selected:
+
+```bash
+curl -X PUT http://localhost:8085/api/config/preferred-format \
+  -H 'Content-Type: application/json' \
+  -d '{"format": "dc+sd-jwt"}'   # or "mso_mdoc" or "" to clear
+```
+
+Or set at startup: `--preferred-format dc+sd-jwt`
+
+### Credential import
+
+```bash
+curl -X POST http://localhost:8085/api/credentials -d 'eyJhbGci...'
+```
+
+### Status list (revocation)
+
+Enable with `--status-list`. Generated credentials will include a status list reference pointing to the wallet's `/api/statuslist` endpoint.
+
+**Important:** The status list URI is baked into the credential at generation time. When the verifier runs inside Docker and the wallet runs on the host (or vice versa), use `--base-url` to set a URI that both sides can reach:
+
+```bash
+# Wallet on host, verifier in Docker
+oid4vc-dev wallet serve --pid --auto-accept --status-list \
+  --base-url http://host.docker.internal:8085
+```
+
+```yaml
+# Docker Compose: both in containers — use the service name
+services:
+  wallet:
+    image: ghcr.io/dominikschlosser/oid4vc-dev:latest
+    command: ["wallet", "serve", "--auto-accept", "--pid", "--port", "8085",
+              "--status-list", "--base-url", "http://wallet:8085"]
+    ports:
+      - "8085:8085"
+```
+
+Toggle revocation at runtime:
+
+```bash
+# Revoke (status=1)
+curl -X POST http://localhost:8085/api/credentials/<id>/status \
+  -H 'Content-Type: application/json' -d '{"status": 1}'
+
+# Un-revoke (status=0)
+curl -X POST http://localhost:8085/api/credentials/<id>/status \
+  -H 'Content-Type: application/json' -d '{"status": 0}'
+```
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/next-error` | POST/DELETE | Set or clear one-shot error override |
+| `/api/config/preferred-format` | PUT | Set credential format preference |
+| `/api/credentials` | POST | Import a credential |
+| `/api/credentials/<id>/status` | POST | Set revocation status |
+| `/api/statuslist` | GET | Status list JWT |
+
+> See [wallet docs](wallet.md#testing-api) for full details and an end-to-end example.
 
 ## Supported response modes
 
