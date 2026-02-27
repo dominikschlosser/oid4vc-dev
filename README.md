@@ -263,7 +263,7 @@ Pass a credential as an argument (file path, URL, or raw string) to pre-fill the
 
 ### Decode
 
-Auto-detect and decode credentials (SD-JWT, JWT, mDOC) and OpenID4VCI/VP requests. This is the unified entry point — it replaces the former separate `openid` command.
+Auto-detect and decode credentials (SD-JWT, JWT, mDOC) and OpenID4VCI/VP requests.
 
 ```bash
 # Credentials
