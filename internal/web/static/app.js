@@ -397,7 +397,7 @@
 
     if (fmt === "dc+sd-jwt") {
       renderSDJWT(data);
-    } else if (fmt === "jwt") {
+    } else if (fmt === "jwt" || fmt === "jwt_vc_json") {
       renderJWT(data);
     } else if (fmt === "mso_mdoc") {
       renderMDOC(data);
@@ -451,8 +451,8 @@
     if (format === "dc+sd-jwt") {
       formatBadge.textContent = "SD-JWT";
       formatBadge.className = "badge sd-jwt";
-    } else if (format === "jwt") {
-      formatBadge.textContent = "JWT";
+    } else if (format === "jwt" || format === "jwt_vc_json") {
+      formatBadge.textContent = format === "jwt_vc_json" ? "JWT VC" : "JWT";
       formatBadge.className = "badge jwt";
     } else if (format === "mso_mdoc") {
       formatBadge.textContent = "mDOC";

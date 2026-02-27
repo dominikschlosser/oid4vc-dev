@@ -593,6 +593,15 @@ func (c *StoredCredential) Rehydrate() error {
 			c.Claims = token.ResolvedClaims
 		}
 
+	case "jwt_vc_json":
+		if c.Claims == nil {
+			_, payload, _, err := format.ParseJWTParts(c.Raw)
+			if err != nil {
+				return fmt.Errorf("parsing JWT: %w", err)
+			}
+			c.Claims = payload
+		}
+
 	case "mso_mdoc":
 		doc, err := mdoc.Parse(c.Raw)
 		if err != nil {

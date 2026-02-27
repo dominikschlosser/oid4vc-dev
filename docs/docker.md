@@ -34,7 +34,7 @@ docker run -i ghcr.io/dominikschlosser/oid4vc-dev validate --trust-list https://
 | `/api/credentials/<id>/status` | POST | Set revocation status for a credential |
 | `/api/statuslist` | GET | Status list JWT (requires `--status-list`) |
 | `/api/next-error` | POST/DELETE | Set or clear a one-shot error override |
-| `/api/config/preferred-format` | PUT | Set credential format preference (`dc+sd-jwt` / `mso_mdoc` / empty) |
+| `/api/config/preferred-format` | PUT | Set credential format preference (`dc+sd-jwt` / `mso_mdoc` / `jwt_vc_json` / empty) |
 
 ## Typical verifier integration test flow
 
@@ -150,6 +150,8 @@ curl -X PUT http://localhost:8085/api/config/preferred-format \
 Or set at startup: `--preferred-format dc+sd-jwt`
 
 ### Credential import
+
+Supports SD-JWT (`dc+sd-jwt`), plain JWT VC (`jwt_vc_json`), and mDoc (`mso_mdoc`). Plain JWT VCs are presented as-is without selective disclosure.
 
 ```bash
 curl -X POST http://localhost:8085/api/credentials -d 'eyJhbGci...'

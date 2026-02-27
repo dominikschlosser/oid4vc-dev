@@ -160,6 +160,7 @@ header h1 {
 }
 
 .format-sdjwt { background: rgba(122, 162, 247, 0.2); color: var(--accent); }
+.format-jwt { background: rgba(224, 175, 104, 0.2); color: #e0af68; }
 .format-mdoc { background: rgba(158, 206, 106, 0.2); color: var(--green); }
 
 .credential-info {

@@ -8,7 +8,7 @@ A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR
 |----------------|-----------------------------------------------------------------|
 | `serve`        | Start wallet HTTP server with web UI, OID4VP endpoints, and optional URL scheme handling |
 | `list`         | List stored credentials                                         |
-| `import`       | Import a credential from file, stdin, or raw string             |
+| `import`       | Import a credential from file, stdin, or raw string (SD-JWT, JWT VC, mDoc) |
 | `remove`       | Remove a credential by ID                                       |
 | `generate-pid` | Generate default EUDI PID credentials (SD-JWT + mDoc)           |
 | `accept`       | Accept an OID4VP presentation request or OID4VCI credential offer (auto-detects) |
@@ -92,7 +92,7 @@ oid4vc-dev wallet serve --register --port 9000
 | `--session-transcript`  | `oid4vp` | mDoc session transcript mode: `oid4vp` or `iso`  |
 | `--register`            | `false`  | Register OS URL scheme handlers                  |
 | `--no-register`         | `false`  | Skip URL scheme registration (overrides --register) |
-| `--preferred-format`    | —        | Preferred credential format when multiple match: `dc+sd-jwt` or `mso_mdoc` |
+| `--preferred-format`    | —        | Preferred credential format when multiple match: `dc+sd-jwt`, `mso_mdoc`, or `jwt_vc_json` |
 | `--status-list`         | `false`  | Embed status list references in generated credentials |
 | `--base-url`            | —        | Base URL for status list endpoint (default: `http://localhost:<port>`) |
 
@@ -222,9 +222,10 @@ curl -X PUT http://localhost:8085/api/config/preferred-format \
 
 | Method | Path                           | Body                    | Description                    |
 |--------|--------------------------------|-------------------------|--------------------------------|
-| `PUT`  | `/api/config/preferred-format` | `{"format": "dc+sd-jwt"}` | Prefer SD-JWT when both match |
-| `PUT`  | `/api/config/preferred-format` | `{"format": "mso_mdoc"}`  | Prefer mDoc when both match   |
-| `PUT`  | `/api/config/preferred-format` | `{"format": ""}`           | Clear preference (default)    |
+| `PUT`  | `/api/config/preferred-format` | `{"format": "dc+sd-jwt"}`  | Prefer SD-JWT when multiple match |
+| `PUT`  | `/api/config/preferred-format` | `{"format": "mso_mdoc"}`   | Prefer mDoc when multiple match   |
+| `PUT`  | `/api/config/preferred-format` | `{"format": "jwt_vc_json"}` | Prefer JWT VC when multiple match |
+| `PUT`  | `/api/config/preferred-format` | `{"format": ""}`            | Clear preference (default)        |
 
 The preference can also be set at startup via `--preferred-format`:
 
@@ -234,9 +235,22 @@ oid4vc-dev wallet serve --auto-accept --pid --preferred-format dc+sd-jwt
 
 ### Credential import
 
-Credentials can be imported at runtime via `POST /api/credentials`. The body is the raw credential string (SD-JWT or mDoc):
+Credentials can be imported at runtime via `POST /api/credentials`. The body is the raw credential string. Supported formats:
+
+| Format | Detection | Stored as |
+|--------|-----------|-----------|
+| SD-JWT | Contains `~` separator | `dc+sd-jwt` |
+| Plain JWT | 3-part JWT without `~` | `jwt_vc_json` |
+| mDoc | CBOR-encoded | `mso_mdoc` |
+
+Plain JWT VCs are presented as-is (no selective disclosure, no KB-JWT). Use `"format": "jwt_vc_json"` in DCQL queries to match them.
 
 ```bash
+# Import an SD-JWT
+curl -X POST http://localhost:8085/api/credentials \
+  -d 'eyJhbGciOiJFUzI1NiJ9.eyJ2Y3QiOiJ...~eyJhbGci...~'
+
+# Import a plain JWT VC
 curl -X POST http://localhost:8085/api/credentials \
   -d 'eyJhbGciOiJFUzI1NiJ9.eyJ2Y3QiOiJ...'
 ```

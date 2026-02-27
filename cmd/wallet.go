@@ -781,7 +781,7 @@ func walletScanCmd() *cobra.Command {
 			detected := format.Detect(content)
 
 			// For credential formats, import directly
-			if detected == format.FormatSDJWT || detected == format.FormatMDOC {
+			if detected == format.FormatSDJWT || detected == format.FormatMDOC || detected == format.FormatJWT {
 				w, store, err := loadWallet()
 				if err != nil {
 					return err

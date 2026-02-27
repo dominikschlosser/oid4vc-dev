@@ -57,8 +57,8 @@
       const card = document.createElement('div');
       card.className = 'credential-card';
 
-      const formatClass = cred.format === 'dc+sd-jwt' ? 'format-sdjwt' : 'format-mdoc';
-      const formatLabel = cred.format === 'dc+sd-jwt' ? 'SD-JWT' : 'mDoc';
+      const formatClass = cred.format === 'dc+sd-jwt' ? 'format-sdjwt' : cred.format === 'jwt_vc_json' ? 'format-jwt' : 'format-mdoc';
+      const formatLabel = cred.format === 'dc+sd-jwt' ? 'SD-JWT' : cred.format === 'jwt_vc_json' ? 'JWT VC' : 'mDoc';
       const typeLabel = cred.vct || cred.doctype || cred.format;
 
       const claimKeys = Object.keys(cred.claims || {}).slice(0, 6);
@@ -303,8 +303,8 @@
 
     if (req.matched_credentials && req.matched_credentials.length > 0) {
       req.matched_credentials.forEach((mc, idx) => {
-        const formatClass = mc.format === 'dc+sd-jwt' ? 'format-sdjwt' : 'format-mdoc';
-        const formatLabel = mc.format === 'dc+sd-jwt' ? 'SD-JWT' : 'mDoc';
+        const formatClass = mc.format === 'dc+sd-jwt' ? 'format-sdjwt' : mc.format === 'jwt_vc_json' ? 'format-jwt' : 'format-mdoc';
+        const formatLabel = mc.format === 'dc+sd-jwt' ? 'SD-JWT' : mc.format === 'jwt_vc_json' ? 'JWT VC' : 'mDoc';
         const typeLabel = mc.vct || mc.doctype || mc.format;
 
         html += '<div class="consent-credential">' +

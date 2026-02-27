@@ -12,9 +12,9 @@ No network calls by default. Decode and verify credentials entirely offline.
 - **Testing Wallet** — stateful CLI wallet with file persistence, OID4VP/VCI flows, QR scanning, and OS URL scheme registration ([wallet](#wallet))
 - **Reverse Proxy** — intercept, classify, and decode OID4VP/VCI wallet traffic in real time ([proxy](#proxy))
 - **Web UI** — paste, decode, and validate credentials in a split-pane browser interface ([serve](#serve))
-- **Unified Decode** — a single `decode` command handles SD-JWT, JWT, mDOC, OID4VCI offers, OID4VP requests, and ETSI trust lists
+- **Unified Decode** — a single `decode` command handles SD-JWT, JWT VC, JWT, mDOC, OID4VCI offers, OID4VP requests, and ETSI trust lists
 - **QR Screen Capture** — scan a QR code straight from your screen to decode credentials or OpenID requests ([decode --screen](#decode))
-- **Offline Decode & Validate** — SD-JWT, mDOC, JWT with signature verification and trust list support
+- **Offline Decode & Validate** — SD-JWT, JWT VC, mDOC, JWT with signature verification and trust list support
 - **DCQL Generation** — generate Digital Credentials Query Language queries from existing credentials
 
 ## Install
@@ -61,7 +61,7 @@ Input can be a **file path**, **URL**, **raw credential string**, or piped via *
 | Command    | Purpose                                                    |
 |------------|------------------------------------------------------------|
 | `wallet`   | Stateful testing wallet with CLI-driven OID4VP/VCI flows   |
-| `issue`    | Generate test SD-JWT or mDOC credentials                   |
+| `issue`    | Generate test SD-JWT or mDOC credentials for development   |
 | `proxy`    | Debugging reverse proxy for OID4VP/VCI wallet traffic      |
 | `serve`    | Web UI for decoding and validating credentials in the browser |
 | `decode`   | Auto-detect & decode credentials, OpenID4VCI/VP, and trust lists (read-only, no verification) |
@@ -140,7 +140,7 @@ Opens a split-pane interface at `http://localhost:8080` (default) with auto-deco
 
 ### Decode
 
-Auto-detect and decode credentials (SD-JWT, JWT, mDOC), OpenID4VCI/VP requests, and ETSI trust lists.
+Auto-detect and decode credentials (SD-JWT, JWT VC, mDOC), OpenID4VCI/VP requests, and ETSI trust lists.
 
 ```bash
 oid4vc-dev decode credential.txt
@@ -200,6 +200,7 @@ oid4vc-dev dcql credential.txt
 | Format | Description |
 |--------|-------------|
 | **SD-JWT** (`dc+sd-jwt`) | Header/payload, disclosures, `_sd` resolution, key binding JWT. Signature: ES256/384/512, RS256/384/512, PS256 |
+| **JWT VC** (`jwt_vc_json`) | Plain JWT Verifiable Credentials (W3C JWT VC format). Presented as-is without selective disclosure |
 | **mDOC** (`mso_mdoc`) | CBOR IssuerSigned & DeviceResponse (hex/base64url), COSE_Sign1 issuerAuth, MSO |
 | **OpenID4VCI / VP** | Credential offers, authorization requests, URI schemes (`openid-credential-offer://`, `openid4vp://`, `haip://`, `eudi-openid4vp://`) |
 | **ETSI Trust Lists** | TS 119 602 trust list JWTs with entity names, identifiers, and service types |
