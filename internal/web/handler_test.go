@@ -324,8 +324,8 @@ func TestStaticFiles_Index(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "SSI Debugger") {
-		t.Error("expected index.html to contain 'SSI Debugger'")
+	if !strings.Contains(body, "OID4VC Dev") {
+		t.Error("expected index.html to contain 'OID4VC Dev'")
 	}
 	if !strings.Contains(body, "app.js") {
 		t.Error("expected index.html to reference app.js")

@@ -224,8 +224,8 @@ func TestStaticFiles_Index(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "SSI Debugger Wallet") {
-		t.Error("expected index.html to contain 'SSI Debugger Wallet'")
+	if !strings.Contains(body, "OID4VC Dev Wallet") {
+		t.Error("expected index.html to contain 'OID4VC Dev Wallet'")
 	}
 	if !strings.Contains(body, "app.js") {
 		t.Error("expected index.html to reference app.js")
@@ -749,8 +749,8 @@ func TestTrustListAPI_ParseableByTrustlistParser(t *testing.T) {
 	if tl.SchemeInfo == nil {
 		t.Fatal("expected SchemeInfo to be parsed")
 	}
-	if tl.SchemeInfo.SchemeOperatorName != "SSI Debugger Wallet" {
-		t.Errorf("expected operator name 'SSI Debugger Wallet', got %q", tl.SchemeInfo.SchemeOperatorName)
+	if tl.SchemeInfo.SchemeOperatorName != "OID4VC Dev Wallet" {
+		t.Errorf("expected operator name 'OID4VC Dev Wallet', got %q", tl.SchemeInfo.SchemeOperatorName)
 	}
 	if tl.SchemeInfo.LoTEType != "http://uri.etsi.org/19602/LoTEType/local" {
 		t.Errorf("unexpected LoTEType: %s", tl.SchemeInfo.LoTEType)

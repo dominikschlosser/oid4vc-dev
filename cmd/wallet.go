@@ -173,7 +173,7 @@ so the wallet automatically receives incoming protocol requests.`,
 			dim := color.New(color.Faint)
 			yellow := color.New(color.FgYellow)
 
-			cyan.Printf("SSI Debugger Wallet\n")
+			cyan.Printf("OID4VC Dev Wallet\n")
 			dim.Println("───────────────────────────────────────")
 			fmt.Printf("  Server:      http://localhost:%d\n", port)
 			fmt.Printf("  Authorize:   http://localhost:%d/authorize\n", port)

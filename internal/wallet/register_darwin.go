@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-const appBundleName = "SSI-Debugger-Wallet.app"
+const appBundleName = "OID4VC-Dev-Wallet.app"
 
 func appBundlePath() string {
 	home, _ := os.UserHomeDir()

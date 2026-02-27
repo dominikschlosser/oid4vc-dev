@@ -53,9 +53,9 @@ const TEST_SDJWT = makeSDJWT(
 );
 
 test.describe("Page load", () => {
-  test("shows SSI Debugger title and empty state", async ({ page }) => {
+  test("shows OID4VC Dev title and empty state", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator("h1")).toHaveText("SSI Debugger");
+    await expect(page.locator("h1")).toHaveText("OID4VC Dev");
     await expect(page.locator(".placeholder")).toHaveText(
       "Paste a credential to see decoded output"
     );

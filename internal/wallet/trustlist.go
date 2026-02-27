@@ -21,7 +21,7 @@ func GenerateTrustListJWT(issuerKey *ecdsa.PrivateKey) (string, error) {
 	// Create a self-signed X.509 certificate from the issuer key
 	certTemplate := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "SSI Debugger Wallet Issuer"},
+		Subject:               pkix.Name{CommonName: "OID4VC Dev Wallet Issuer"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
@@ -39,7 +39,7 @@ func GenerateTrustListJWT(issuerKey *ecdsa.PrivateKey) (string, error) {
 	payload := map[string]any{
 		"ListAndSchemeInformation": map[string]any{
 			"LoTEType":           "http://uri.etsi.org/19602/LoTEType/local",
-			"SchemeOperatorName": []map[string]string{{"lang": "en", "value": "SSI Debugger Wallet"}},
+			"SchemeOperatorName": []map[string]string{{"lang": "en", "value": "OID4VC Dev Wallet"}},
 			"ListIssueDatetime":  time.Now().UTC().Format(time.RFC3339),
 		},
 		"TrustedEntitiesList": []map[string]any{

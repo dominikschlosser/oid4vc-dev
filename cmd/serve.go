@@ -47,6 +47,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		credential = raw
 	}
 
-	fmt.Printf("Starting SSI Debugger Web UI at http://localhost:%d\n", port)
+	fmt.Printf("Starting OID4VC Dev Web UI at http://localhost:%d\n", port)
 	return web.ListenAndServe(port, credential)
 }
