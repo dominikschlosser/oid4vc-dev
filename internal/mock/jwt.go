@@ -29,6 +29,7 @@ type JWTConfig struct {
 	Issuer        string
 	VCT           string
 	ExpiresIn     time.Duration
+	NotBefore     *time.Time // optional: sets nbf claim
 	Claims        map[string]any
 	Key           *ecdsa.PrivateKey
 	StatusListURI string // optional: status list URI for revocation
@@ -50,6 +51,10 @@ func GenerateJWT(cfg JWTConfig) (string, error) {
 		"iat": now.Unix(),
 		"exp": now.Add(cfg.ExpiresIn).Unix(),
 		"vct": cfg.VCT,
+	}
+
+	if cfg.NotBefore != nil {
+		payload["nbf"] = cfg.NotBefore.Unix()
 	}
 
 	for name, value := range cfg.Claims {

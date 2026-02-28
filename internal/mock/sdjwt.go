@@ -32,6 +32,7 @@ type SDJWTConfig struct {
 	Issuer        string
 	VCT           string
 	ExpiresIn     time.Duration
+	NotBefore     *time.Time // optional: sets nbf claim
 	Claims        map[string]any
 	Key           *ecdsa.PrivateKey
 	HolderKey     *ecdsa.PublicKey // optional: adds cnf claim for holder binding
@@ -73,6 +74,10 @@ func GenerateSDJWT(cfg SDJWTConfig) (string, error) {
 		"vct":     cfg.VCT,
 		"_sd_alg": "sha-256",
 		"_sd":     digests,
+	}
+
+	if cfg.NotBefore != nil {
+		payload["nbf"] = cfg.NotBefore.Unix()
 	}
 
 	// Add holder binding (cnf claim with JWK)

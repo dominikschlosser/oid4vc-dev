@@ -34,6 +34,7 @@ var (
 	issueIssuer        string
 	issueVCT           string
 	issueExpires       string
+	issueNBF           string
 	issueDocType       string
 	issueNamespace     string
 	issuePID           bool
@@ -81,7 +82,8 @@ func init() {
 	issueSDJWTCmd.Flags().StringVar(&issueKeyPath, "key", "", "Private key file (PEM or JWK); ephemeral P-256 if omitted")
 	issueSDJWTCmd.Flags().StringVar(&issueIssuer, "iss", "https://issuer.example", "Issuer URL")
 	issueSDJWTCmd.Flags().StringVar(&issueVCT, "vct", mock.DefaultPIDVCT, "Verifiable Credential Type")
-	issueSDJWTCmd.Flags().StringVar(&issueExpires, "exp", "24h", "Expiration duration (e.g. 24h, 30m)")
+	issueSDJWTCmd.Flags().StringVar(&issueExpires, "exp", "720h", "Expiration duration (e.g. 720h, 24h)")
+	issueSDJWTCmd.Flags().StringVar(&issueNBF, "nbf", "", "Not-before time (RFC3339 e.g. 2025-01-15T00:00:00Z, or duration e.g. -1h)")
 	issueSDJWTCmd.Flags().BoolVar(&issuePID, "pid", false, "Use full EUDI PID Rulebook claims")
 	issueSDJWTCmd.Flags().StringSliceVar(&issueOmit, "omit", nil, "Comma-separated claim names to omit from --pid (e.g. resident_address,birth_place)")
 	issueSDJWTCmd.Flags().BoolVar(&issueToWallet, "wallet", false, "Import the issued credential into the wallet")
@@ -93,7 +95,8 @@ func init() {
 	issueJWTCmd.Flags().StringVar(&issueKeyPath, "key", "", "Private key file (PEM or JWK); ephemeral P-256 if omitted")
 	issueJWTCmd.Flags().StringVar(&issueIssuer, "iss", "https://issuer.example", "Issuer URL")
 	issueJWTCmd.Flags().StringVar(&issueVCT, "vct", mock.DefaultPIDVCT, "Verifiable Credential Type")
-	issueJWTCmd.Flags().StringVar(&issueExpires, "exp", "24h", "Expiration duration (e.g. 24h, 30m)")
+	issueJWTCmd.Flags().StringVar(&issueExpires, "exp", "720h", "Expiration duration (e.g. 720h, 24h)")
+	issueJWTCmd.Flags().StringVar(&issueNBF, "nbf", "", "Not-before time (RFC3339 e.g. 2025-01-15T00:00:00Z, or duration e.g. -1h)")
 	issueJWTCmd.Flags().BoolVar(&issuePID, "pid", false, "Use full EUDI PID Rulebook claims")
 	issueJWTCmd.Flags().StringSliceVar(&issueOmit, "omit", nil, "Comma-separated claim names to omit from --pid (e.g. resident_address,birth_place)")
 	issueJWTCmd.Flags().BoolVar(&issueToWallet, "wallet", false, "Import the issued credential into the wallet")
@@ -105,6 +108,8 @@ func init() {
 	issueMDOCCmd.Flags().StringVar(&issueKeyPath, "key", "", "Private key file (PEM or JWK); ephemeral P-256 if omitted")
 	issueMDOCCmd.Flags().StringVar(&issueDocType, "doc-type", "eu.europa.ec.eudi.pid.1", "Document type")
 	issueMDOCCmd.Flags().StringVar(&issueNamespace, "namespace", "eu.europa.ec.eudi.pid.1", "Namespace")
+	issueMDOCCmd.Flags().StringVar(&issueExpires, "exp", "720h", "Expiration duration (e.g. 720h, 24h)")
+	issueMDOCCmd.Flags().StringVar(&issueNBF, "nbf", "", "Not-before time (RFC3339 e.g. 2025-01-15T00:00:00Z, or duration e.g. -1h)")
 	issueMDOCCmd.Flags().BoolVar(&issuePID, "pid", false, "Use full EUDI PID Rulebook claims")
 	issueMDOCCmd.Flags().StringSliceVar(&issueOmit, "omit", nil, "Comma-separated claim names to omit from --pid (e.g. resident_address,birth_place)")
 	issueMDOCCmd.Flags().BoolVar(&issueToWallet, "wallet", false, "Import the issued credential into the wallet")
@@ -128,10 +133,16 @@ func runIssueSDJWT(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid --exp duration: %w", err)
 	}
 
+	nbf, err := parseNBF(issueNBF)
+	if err != nil {
+		return err
+	}
+
 	cfg := mock.SDJWTConfig{
 		Issuer:        issueIssuer,
 		VCT:           issueVCT,
 		ExpiresIn:     expDuration,
+		NotBefore:     nbf,
 		Claims:        claims,
 		Key:           key,
 		StatusListURI: issueStatusListURI,
@@ -167,10 +178,16 @@ func runIssueJWT(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid --exp duration: %w", err)
 	}
 
+	nbf, err := parseNBF(issueNBF)
+	if err != nil {
+		return err
+	}
+
 	cfg := mock.JWTConfig{
 		Issuer:        issueIssuer,
 		VCT:           issueVCT,
 		ExpiresIn:     expDuration,
+		NotBefore:     nbf,
 		Claims:        claims,
 		Key:           key,
 		StatusListURI: issueStatusListURI,
@@ -201,11 +218,23 @@ func runIssueMDOC(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	expDuration, err := time.ParseDuration(issueExpires)
+	if err != nil {
+		return fmt.Errorf("invalid --exp duration: %w", err)
+	}
+
+	nbf, err := parseNBF(issueNBF)
+	if err != nil {
+		return err
+	}
+
 	cfg := mock.MDOCConfig{
 		DocType:       issueDocType,
 		Namespace:     issueNamespace,
 		Claims:        claims,
 		Key:           key,
+		ExpiresIn:     expDuration,
+		ValidFrom:     nbf,
 		StatusListURI: issueStatusListURI,
 		StatusListIdx: issueStatusListIdx,
 	}
@@ -300,6 +329,23 @@ func importToWallet(raw string) error {
 	}
 	fmt.Fprintf(os.Stderr, "Imported %s credential (%s) into wallet\n", imported.Format, label)
 	return nil
+}
+
+func parseNBF(val string) (*time.Time, error) {
+	if val == "" {
+		return nil, nil
+	}
+	// Try as duration first (e.g. "-1h")
+	if d, err := time.ParseDuration(val); err == nil {
+		t := time.Now().Add(d)
+		return &t, nil
+	}
+	// Try as RFC3339
+	t, err := time.Parse(time.RFC3339, val)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --nbf value %q: expected RFC3339 (e.g. 2025-01-15T00:00:00Z) or duration (e.g. -1h)", val)
+	}
+	return &t, nil
 }
 
 func omitClaims(claims map[string]any, omit []string) map[string]any {

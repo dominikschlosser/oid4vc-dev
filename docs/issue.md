@@ -7,7 +7,7 @@ oid4vc-dev issue sdjwt
 oid4vc-dev issue sdjwt --pid
 oid4vc-dev issue sdjwt --pid --omit resident_address,birth_place,administrative_number
 oid4vc-dev issue sdjwt --claims '{"name":"Test","age":30}'
-oid4vc-dev issue sdjwt --iss https://my-issuer.example --vct my-type --exp 48h
+oid4vc-dev issue sdjwt --iss https://my-issuer.example --vct my-type --exp 48h --nbf 2025-06-01T00:00:00Z
 oid4vc-dev issue sdjwt --key signing-key.pem
 oid4vc-dev issue sdjwt --wallet                # Issue and import into wallet
 oid4vc-dev issue jwt                           # Plain JWT VC (no selective disclosure)
@@ -37,7 +37,8 @@ oid4vc-dev issue mdoc  | oid4vc-dev decode
 | `--key`    | —                         | Private key file (PEM or JWK); ephemeral if omitted |
 | `--iss`    | `https://issuer.example`  | Issuer URL                                     |
 | `--vct`    | `urn:eudi:pid:de:1`       | Verifiable Credential Type                     |
-| `--exp`    | `24h`                     | Expiration duration                            |
+| `--exp`    | `720h` (30 days)          | Expiration duration                            |
+| `--nbf`    | —                         | Not-before time (RFC3339 or duration, e.g. `-1h`) |
 | `--pid`    | `false`                   | Use full EUDI PID Rulebook claims              |
 | `--omit`   | —                         | Comma-separated claim names to exclude         |
 | `--wallet` | `false`                   | Import the issued credential into the wallet   |
@@ -52,7 +53,8 @@ oid4vc-dev issue mdoc  | oid4vc-dev decode
 | `--key`    | —                         | Private key file (PEM or JWK); ephemeral if omitted |
 | `--iss`    | `https://issuer.example`  | Issuer URL                                     |
 | `--vct`    | `urn:eudi:pid:de:1`       | Verifiable Credential Type                     |
-| `--exp`    | `24h`                     | Expiration duration                            |
+| `--exp`    | `720h` (30 days)          | Expiration duration                            |
+| `--nbf`    | —                         | Not-before time (RFC3339 or duration, e.g. `-1h`) |
 | `--pid`    | `false`                   | Use full EUDI PID Rulebook claims              |
 | `--omit`   | —                         | Comma-separated claim names to exclude         |
 | `--wallet` | `false`                   | Import the issued credential into the wallet   |
@@ -69,6 +71,8 @@ Unlike SD-JWT, the JWT subcommand produces a standard JWT with all claims direct
 | `--key`       | —                              | Private key file (PEM or JWK); ephemeral if omitted |
 | `--doc-type`  | `eu.europa.ec.eudi.pid.1`      | Document type                                  |
 | `--namespace` | `eu.europa.ec.eudi.pid.1`      | Namespace                                      |
+| `--exp`       | `720h` (30 days)               | Expiration duration                            |
+| `--nbf`       | —                              | Not-before time (RFC3339 or duration, e.g. `-1h`) |
 | `--pid`       | `false`                        | Use full EUDI PID Rulebook claims              |
 | `--omit`      | —                              | Comma-separated claim names to exclude         |
 | `--wallet`    | `false`                        | Import the issued credential into the wallet   |

@@ -60,6 +60,8 @@ All wallet state is stored in `~/.oid4vc-dev/wallet/` by default:
 
 Keys are P-256 EC keys, auto-generated on first use and reused across invocations. The issuer key is shared across all signing operations — it signs generated credentials (SD-JWT, JWT, mDoc), status list JWTs (`/api/statuslist`), and the trust list JWT (`/api/trustlist`).
 
+Generated credentials expire in **30 days** by default. Use `--exp` to override (e.g. `--exp 720h` for 30 days, `--exp 24h` for 1 day). Use `--nbf` to set a not-before time (RFC3339 or duration, e.g. `--nbf 2025-01-15T00:00:00Z` or `--nbf -1h`).
+
 ![Wallet UI](./wallet-ui.png)
 
 ## `wallet serve`

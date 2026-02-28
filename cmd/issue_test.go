@@ -363,6 +363,8 @@ func TestIssueMDOC_EndToEnd(t *testing.T) {
 	issueKeyPath = ""
 	issueOmit = nil
 	issuePID = false
+	issueExpires = "720h"
+	issueNBF = ""
 	issueDocType = "eu.europa.ec.eudi.pid.1"
 	issueNamespace = "eu.europa.ec.eudi.pid.1"
 
@@ -379,6 +381,8 @@ func TestIssueMDOC_WithPID(t *testing.T) {
 	issueClaims = ""
 	issueKeyPath = ""
 	issueOmit = nil
+	issueExpires = "720h"
+	issueNBF = ""
 
 	rootCmd.SetArgs([]string{"issue", "mdoc", "--pid"})
 	if err := rootCmd.Execute(); err != nil {
@@ -394,6 +398,8 @@ func TestIssueMDOC_WithCustomDocType(t *testing.T) {
 	issueKeyPath = ""
 	issueOmit = nil
 	issuePID = false
+	issueExpires = "720h"
+	issueNBF = ""
 
 	rootCmd.SetArgs([]string{"issue", "mdoc", "--doc-type", "com.example.test", "--namespace", "com.example.test"})
 	if err := rootCmd.Execute(); err != nil {
@@ -414,6 +420,8 @@ func TestIssueMDOC_WithClaimsFile(t *testing.T) {
 	issueKeyPath = ""
 	issueOmit = nil
 	issuePID = false
+	issueExpires = "720h"
+	issueNBF = ""
 	issueDocType = "eu.europa.ec.eudi.pid.1"
 	issueNamespace = "eu.europa.ec.eudi.pid.1"
 
@@ -427,6 +435,8 @@ func TestIssueMDOC_InvalidKeyFile(t *testing.T) {
 	issueClaims = ""
 	issueOmit = nil
 	issuePID = false
+	issueExpires = "720h"
+	issueNBF = ""
 	issueDocType = "eu.europa.ec.eudi.pid.1"
 	issueNamespace = "eu.europa.ec.eudi.pid.1"
 

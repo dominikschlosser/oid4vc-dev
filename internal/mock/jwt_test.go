@@ -190,3 +190,54 @@ func TestGenerateJWT_StatusList(t *testing.T) {
 		t.Errorf("expected status list idx 42, got %v", sl["idx"])
 	}
 }
+
+func TestGenerateJWT_WithNotBefore(t *testing.T) {
+	key, _ := GenerateKey()
+	nbf := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	cfg := JWTConfig{
+		Issuer:    "https://issuer.example",
+		VCT:       "test",
+		ExpiresIn: 24 * time.Hour,
+		NotBefore: &nbf,
+		Claims:    map[string]any{"name": "test"},
+		Key:       key,
+	}
+
+	result, err := GenerateJWT(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token, err := sdjwt.Parse(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nbfVal, ok := token.Payload["nbf"].(float64)
+	if !ok {
+		t.Fatal("expected nbf in payload")
+	}
+	if int64(nbfVal) != nbf.Unix() {
+		t.Errorf("expected nbf=%d, got %d", nbf.Unix(), int64(nbfVal))
+	}
+}
+
+func TestGenerateJWT_WithoutNotBefore(t *testing.T) {
+	key, _ := GenerateKey()
+
+	cfg := JWTConfig{
+		Issuer:    "https://issuer.example",
+		VCT:       "test",
+		ExpiresIn: 24 * time.Hour,
+		Claims:    map[string]any{"name": "test"},
+		Key:       key,
+	}
+
+	result, _ := GenerateJWT(cfg)
+	token, _ := sdjwt.Parse(result)
+
+	if _, ok := token.Payload["nbf"]; ok {
+		t.Error("nbf should not be present when NotBefore is nil")
+	}
+}

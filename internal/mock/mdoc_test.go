@@ -16,6 +16,7 @@ package mock
 
 import (
 	"testing"
+	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
 )
@@ -237,9 +238,9 @@ func TestGenerateMDOC_ValidityInfo(t *testing.T) {
 	}
 	if vi.ValidFrom != nil && vi.ValidUntil != nil {
 		diff := vi.ValidUntil.Sub(*vi.ValidFrom)
-		// Should be ~90 days
-		if diff.Hours() < 89*24 || diff.Hours() > 91*24 {
-			t.Errorf("expected ~90 days validity, got %v", diff)
+		// Should be ~30 days (default)
+		if diff.Hours() < 29*24 || diff.Hours() > 31*24 {
+			t.Errorf("expected ~30 days validity, got %v", diff)
 		}
 	}
 }
@@ -331,5 +332,61 @@ func TestGenerateMDOC_ClaimValuesPreserved(t *testing.T) {
 	}
 	if v, ok := found["bool_val"]; !ok || v != true {
 		t.Errorf("bool_val: expected true, got %v", v)
+	}
+}
+
+func TestGenerateMDOC_CustomExpiresIn(t *testing.T) {
+	key, _ := GenerateKey()
+
+	cfg := MDOCConfig{
+		DocType:   "eu.europa.ec.eudi.pid.1",
+		Namespace: "eu.europa.ec.eudi.pid.1",
+		Claims:    DefaultClaims,
+		Key:       key,
+		ExpiresIn: 7 * 24 * time.Hour, // 7 days
+	}
+
+	result, err := GenerateMDOC(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doc, err := mdoc.Parse(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vi := doc.IssuerAuth.MSO.ValidityInfo
+	diff := vi.ValidUntil.Sub(*vi.ValidFrom)
+	if diff.Hours() < 6*24 || diff.Hours() > 8*24 {
+		t.Errorf("expected ~7 days validity, got %v", diff)
+	}
+}
+
+func TestGenerateMDOC_WithValidFrom(t *testing.T) {
+	key, _ := GenerateKey()
+	vf := time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	cfg := MDOCConfig{
+		DocType:   "eu.europa.ec.eudi.pid.1",
+		Namespace: "eu.europa.ec.eudi.pid.1",
+		Claims:    DefaultClaims,
+		Key:       key,
+		ValidFrom: &vf,
+	}
+
+	result, err := GenerateMDOC(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doc, err := mdoc.Parse(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vi := doc.IssuerAuth.MSO.ValidityInfo
+	if !vi.ValidFrom.Equal(vf) {
+		t.Errorf("expected validFrom=%v, got %v", vf, *vi.ValidFrom)
 	}
 }

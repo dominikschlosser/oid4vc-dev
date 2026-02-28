@@ -199,7 +199,7 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 	sdConfig := mock.SDJWTConfig{
 		Issuer:    "https://issuer.example",
 		VCT:       vct,
-		ExpiresIn: 365 * 24 * time.Hour,
+		ExpiresIn: 30 * 24 * time.Hour,
 		Claims:    sdClaims,
 		Key:       issuerKey,
 		HolderKey: holderPubKey,
@@ -233,6 +233,7 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 		Claims:    mdocClaims,
 		Key:       issuerKey,
 		HolderKey: holderPubKey,
+		ExpiresIn: 30 * 24 * time.Hour,
 	}
 
 	if w.BaseURL != "" {

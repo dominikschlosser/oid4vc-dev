@@ -33,6 +33,8 @@ type MDOCConfig struct {
 	Claims        map[string]any
 	Key           *ecdsa.PrivateKey
 	HolderKey     *ecdsa.PublicKey // optional: adds deviceKeyInfo to MSO
+	ExpiresIn     time.Duration   // validity duration; defaults to 30 days if zero
+	ValidFrom     *time.Time      // optional: override validFrom (defaults to now)
 	StatusListURI string          // optional: status list URI for revocation
 	StatusListIdx int             // optional: index in the status list
 }
@@ -40,7 +42,15 @@ type MDOCConfig struct {
 // GenerateMDOC creates a mock mDOC (IssuerSigned) credential.
 func GenerateMDOC(cfg MDOCConfig) (string, error) {
 	now := time.Now().UTC().Truncate(time.Second)
-	validUntil := now.Add(90 * 24 * time.Hour)
+	expiresIn := cfg.ExpiresIn
+	if expiresIn == 0 {
+		expiresIn = 30 * 24 * time.Hour
+	}
+	validFrom := now
+	if cfg.ValidFrom != nil {
+		validFrom = cfg.ValidFrom.UTC().Truncate(time.Second)
+	}
+	validUntil := now.Add(expiresIn)
 
 	// Build IssuerSignedItems and compute value digests
 	var tag24Items []cbor.RawMessage
@@ -94,7 +104,7 @@ func GenerateMDOC(cfg MDOCConfig) (string, error) {
 		},
 		"validityInfo": map[string]any{
 			"signed":     cbor.Tag{Number: 0, Content: now.Format(time.RFC3339)},
-			"validFrom":  cbor.Tag{Number: 0, Content: now.Format(time.RFC3339)},
+			"validFrom":  cbor.Tag{Number: 0, Content: validFrom.Format(time.RFC3339)},
 			"validUntil": cbor.Tag{Number: 0, Content: validUntil.Format(time.RFC3339)},
 		},
 	}
