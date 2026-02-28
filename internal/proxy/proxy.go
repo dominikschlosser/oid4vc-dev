@@ -19,6 +19,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -63,6 +64,10 @@ func NewServer(cfg Config, writer EntryWriter) *Server {
 			req.Host = cfg.TargetURL.Host
 		},
 		ModifyResponse: s.modifyResponse,
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			log.Printf("proxy: backend error for %s %s: %v", r.Method, r.URL.Path, err)
+			w.WriteHeader(http.StatusBadGateway)
+		},
 	}
 
 	return s
@@ -91,10 +96,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Capture and strip debug JWE key header before forwarding
+	debugJWEKey := r.Header.Get("X-Debug-JWE-CEK")
+	r.Header.Del("X-Debug-JWE-CEK")
+
 	// Store request info in context via header (cleaned up in modifyResponse)
 	r.Header.Set("X-Proxy-Start", fmt.Sprintf("%d", start.UnixNano()))
 	r.Header.Set("X-Proxy-ReqBody", reqBody)
 	r.Header.Set("X-Proxy-OrigURL", origURL)
+	if debugJWEKey != "" {
+		r.Header.Set("X-Proxy-JWEKey", debugJWEKey)
+	}
 
 	s.proxy.ServeHTTP(w, r)
 }
@@ -130,11 +142,13 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 	}
 	reqBody := resp.Request.Header.Get("X-Proxy-ReqBody")
 	origURL := resp.Request.Header.Get("X-Proxy-OrigURL")
+	debugJWEKey := resp.Request.Header.Get("X-Proxy-JWEKey")
 
 	// Clean up internal headers
 	resp.Request.Header.Del("X-Proxy-Start")
 	resp.Request.Header.Del("X-Proxy-ReqBody")
 	resp.Request.Header.Del("X-Proxy-OrigURL")
+	resp.Request.Header.Del("X-Proxy-JWEKey")
 
 	// Read response body
 	var respBody string
@@ -189,6 +203,7 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 		ResponseBody:    respBody,
 		Duration:        duration,
 		DurationMS:      duration.Milliseconds(),
+		DebugJWEKey:     debugJWEKey,
 	}
 
 	Classify(entry)

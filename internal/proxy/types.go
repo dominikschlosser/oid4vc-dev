@@ -72,6 +72,7 @@ type TrafficEntry struct {
 	Duration        time.Duration  `json:"duration"`
 	DurationMS      int64          `json:"durationMs"`
 	FlowID          string         `json:"flowId,omitempty"`
+	DebugJWEKey     string         `json:"-"` // CEK from X-Debug-JWE-CEK header (internal, not serialized)
 }
 
 // EntryWriter is called for each intercepted traffic entry.

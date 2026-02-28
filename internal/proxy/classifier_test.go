@@ -15,6 +15,9 @@
 package proxy
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -22,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/wallet"
 )
 
 // --- classifyEntry tests ---
@@ -622,7 +626,7 @@ func TestDecodeJARMResponseJWS(t *testing.T) {
 	)
 
 	decoded := make(map[string]any)
-	decodeJARMResponse(jws, decoded)
+	decodeJARMResponse(jws, "", decoded)
 
 	if decoded["response_type"] != "JWS (signed)" {
 		t.Errorf("response_type: got %v", decoded["response_type"])
@@ -648,7 +652,7 @@ func TestDecodeJARMResponseJWE(t *testing.T) {
 	jwe := base64.RawURLEncoding.EncodeToString(h) + ".enckey.iv.cipher.tag"
 
 	decoded := make(map[string]any)
-	decodeJARMResponse(jwe, decoded)
+	decodeJARMResponse(jwe, "", decoded)
 
 	if !strings.Contains(decoded["response_type"].(string), "JWE") {
 		t.Errorf("expected JWE response type, got %v", decoded["response_type"])
@@ -828,5 +832,106 @@ func TestExtractCorrelationKeyVCICredentialRequestNoAuth(t *testing.T) {
 	key := ExtractCorrelationKey(entry)
 	if key != "" {
 		t.Errorf("expected empty string when no auth header, got %q", key)
+	}
+}
+
+// --- decodeJARMResponse with CEK decryption ---
+
+func TestDecodeJARMResponseJWEWithCEK(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := map[string]any{"vp_token": "test-cred", "state": "s1"}
+	payloadJSON, _ := json.Marshal(payload)
+
+	jwe, cek, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "kid", "A128GCM", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cekB64 := base64.RawURLEncoding.EncodeToString(cek)
+
+	decoded := make(map[string]any)
+	decodeJARMResponse(jwe, cekB64, decoded)
+
+	if decoded["response_type"] != "JWE (decrypted via debug key)" {
+		t.Errorf("expected decrypted response_type, got %v", decoded["response_type"])
+	}
+	responsePayload, ok := decoded["response_payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected response_payload as map, got %T", decoded["response_payload"])
+	}
+	if responsePayload["vp_token"] != "test-cred" {
+		t.Errorf("expected vp_token=test-cred, got %v", responsePayload["vp_token"])
+	}
+	if responsePayload["state"] != "s1" {
+		t.Errorf("expected state=s1, got %v", responsePayload["state"])
+	}
+	// Should also have header fields
+	if decoded["encryption_alg"] != "ECDH-ES" {
+		t.Errorf("expected encryption_alg=ECDH-ES, got %v", decoded["encryption_alg"])
+	}
+}
+
+func TestDecodeJARMResponseJWEWithoutCEK(t *testing.T) {
+	header := map[string]any{
+		"alg": "ECDH-ES",
+		"enc": "A128GCM",
+	}
+	h, _ := json.Marshal(header)
+	jwe := base64.RawURLEncoding.EncodeToString(h) + ".enckey.iv.cipher.tag"
+
+	decoded := make(map[string]any)
+	decodeJARMResponse(jwe, "", decoded)
+
+	if !strings.Contains(decoded["response_type"].(string), "not readable") {
+		t.Errorf("expected 'not readable' in response_type without CEK, got %v", decoded["response_type"])
+	}
+	if decoded["response_payload"] != nil {
+		t.Error("expected no response_payload without CEK")
+	}
+}
+
+// --- Classify with DebugJWEKey ---
+
+func TestClassifyVPAuthResponseWithDebugKey(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := map[string]any{"vp_token": "decrypted-token", "state": "s1"}
+	payloadJSON, _ := json.Marshal(payload)
+
+	jwe, cek, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "kid", "A128GCM", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cekB64 := base64.RawURLEncoding.EncodeToString(cek)
+
+	e := &TrafficEntry{
+		Method:      "POST",
+		URL:         "http://example.com/response",
+		RequestBody: "response=" + jwe,
+		StatusCode:  200,
+		DebugJWEKey: cekB64,
+	}
+	Classify(e)
+
+	if e.Class != ClassVPAuthResponse {
+		t.Errorf("expected ClassVPAuthResponse, got %d (%s)", e.Class, e.ClassLabel)
+	}
+	if e.Decoded["response_type"] != "JWE (decrypted via debug key)" {
+		t.Errorf("expected decrypted response_type, got %v", e.Decoded["response_type"])
+	}
+	responsePayload, ok := e.Decoded["response_payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected response_payload as map, got %T", e.Decoded["response_payload"])
+	}
+	if responsePayload["vp_token"] != "decrypted-token" {
+		t.Errorf("expected vp_token=decrypted-token, got %v", responsePayload["vp_token"])
 	}
 }

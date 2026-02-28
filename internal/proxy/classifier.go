@@ -146,7 +146,7 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 		// direct_post.jwt: encrypted/signed JARM response in "response" field
 		if jarm, ok := fields["response"]; ok && jarm != "" {
 			decoded["response_preview"] = format.Truncate(jarm, 100)
-			decodeJARMResponse(jarm, decoded)
+			decodeJARMResponse(jarm, e.DebugJWEKey, decoded)
 		}
 
 		if vpToken, ok := fields["vp_token"]; ok {
@@ -247,14 +247,13 @@ func isJWE(s string) bool {
 }
 
 // decodeJARMResponse decodes a JARM response (direct_post.jwt).
-// JWE (5 parts): only the protected header is readable (payload is encrypted
-// with the verifier's ephemeral key — see encryption_jwks in the request object).
+// JWE (5 parts): only the protected header is readable unless a debug CEK
+// (content encryption key) is available from the X-Debug-JWE-CEK header.
 // JWS (3 parts): header and payload are readable.
-func decodeJARMResponse(raw string, decoded map[string]any) {
+func decodeJARMResponse(raw string, cekB64 string, decoded map[string]any) {
 	raw = strings.TrimSpace(raw)
 
 	if isJWE(raw) {
-		decoded["response_type"] = "JWE (encrypted — payload not readable without verifier's ephemeral private key)"
 		headerBytes, err := format.DecodeBase64URL(strings.SplitN(raw, ".", 2)[0])
 		if err != nil {
 			return
@@ -285,6 +284,23 @@ func decodeJARMResponse(raw string, decoded map[string]any) {
 		if apv, ok := header["apv"].(string); ok {
 			decoded["encryption_apv"] = apv
 		}
+
+		// Try to decrypt with debug CEK if available
+		if cekB64 != "" {
+			cek, err := format.DecodeBase64URL(cekB64)
+			if err == nil {
+				if plaintext, err := DecryptJWEWithCEK(raw, cek); err == nil {
+					var payload map[string]any
+					if err := json.Unmarshal(plaintext, &payload); err == nil {
+						decoded["response_type"] = "JWE (decrypted via debug key)"
+						decoded["response_payload"] = payload
+						return
+					}
+				}
+			}
+		}
+
+		decoded["response_type"] = "JWE (encrypted — payload not readable without verifier's ephemeral private key)"
 		return
 	}
 

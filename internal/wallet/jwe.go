@@ -35,29 +35,30 @@ import (
 // recipientKey is the verifier's public EC key, kid identifies it,
 // enc is the content encryption algorithm (e.g. "A128GCM" or "A256GCM"),
 // and apu is the Agreement PartyUInfo (set to mdoc_generated_nonce for ISO mode, nil otherwise).
-func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, enc string, apu []byte) (string, error) {
+// Returns the JWE compact serialization and the derived content encryption key (CEK).
+func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, enc string, apu []byte) (string, []byte, error) {
 	keyBitLen, err := encKeyBitLen(enc)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Generate ephemeral EC P-256 key pair
 	ephemeralPriv, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
-		return "", fmt.Errorf("generating ephemeral key: %w", err)
+		return "", nil, fmt.Errorf("generating ephemeral key: %w", err)
 	}
 	ephemeralPub := ephemeralPriv.PublicKey()
 
 	// Convert recipient ECDSA public key to ECDH
 	recipientECDH, err := recipientKey.ECDH()
 	if err != nil {
-		return "", fmt.Errorf("converting recipient key to ECDH: %w", err)
+		return "", nil, fmt.Errorf("converting recipient key to ECDH: %w", err)
 	}
 
 	// ECDH key agreement
 	z, err := ephemeralPriv.ECDH(recipientECDH)
 	if err != nil {
-		return "", fmt.Errorf("ECDH key agreement: %w", err)
+		return "", nil, fmt.Errorf("ECDH key agreement: %w", err)
 	}
 
 	// Derive key via Concat KDF (NIST SP 800-56A, RFC 7518 §4.6)
@@ -82,24 +83,24 @@ func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, enc s
 
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
-		return "", fmt.Errorf("marshaling header: %w", err)
+		return "", nil, fmt.Errorf("marshaling header: %w", err)
 	}
 	headerB64 := format.EncodeBase64URL(headerJSON)
 
 	// Generate random 96-bit IV
 	iv := make([]byte, 12)
 	if _, err := rand.Read(iv); err != nil {
-		return "", fmt.Errorf("generating IV: %w", err)
+		return "", nil, fmt.Errorf("generating IV: %w", err)
 	}
 
 	// AES-GCM encrypt with AAD = ASCII(protected header)
 	block, err := aes.NewCipher(derivedKey)
 	if err != nil {
-		return "", fmt.Errorf("creating AES cipher: %w", err)
+		return "", nil, fmt.Errorf("creating AES cipher: %w", err)
 	}
 	aead, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", fmt.Errorf("creating GCM: %w", err)
+		return "", nil, fmt.Errorf("creating GCM: %w", err)
 	}
 
 	aad := []byte(headerB64)
@@ -111,10 +112,11 @@ func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, enc s
 
 	// Compact serialization: header.encryptedKey.iv.ciphertext.tag
 	// ECDH-ES has no encrypted key (empty string)
-	return headerB64 + ".." +
+	jweStr := headerB64 + ".." +
 		format.EncodeBase64URL(iv) + "." +
 		format.EncodeBase64URL(ciphertext) + "." +
-		format.EncodeBase64URL(tag), nil
+		format.EncodeBase64URL(tag)
+	return jweStr, derivedKey, nil
 }
 
 // concatKDF derives a key using the Concat KDF from NIST SP 800-56A (single round for <=256 bits).

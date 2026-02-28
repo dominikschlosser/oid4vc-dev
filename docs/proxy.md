@@ -33,6 +33,8 @@ By default, only OID4VP/VCI traffic is shown. Non-matching requests (favicon, he
 ## Features
 
 - **Smart decoding** — payloads are decoded inline (SD-JWT, JWT, mDOC, DCQL queries, JWE headers)
+- **Credential decode hints** — detected credentials are printed as `oid4vc-dev decode` commands for quick inspection
+- **JARM/JWE decryption** — when the built-in wallet sends a `direct_post.jwt` response through the proxy, the encrypted payload is automatically decrypted (see [JWE Decryption](#jwe-decryption) below)
 - **Flow correlation** — related protocol steps are grouped by shared `state`/`nonce` values
 - **Web dashboard** at `http://localhost:9091` with live SSE updates, expandable cards, "View in Decoder" links, HAR export, and cURL copy
 - **JARM/JWE detection** — shows encrypted response headers and the verifier's ephemeral public key
@@ -63,6 +65,31 @@ By default, only OID4VP/VCI traffic is shown. Non-matching requests (favicon, he
     ┌ payload: { ... }
 
 ━━━ [14:32:06] POST /response  ← 200 (89ms)  [VP Auth Response]
-    ┌ response_type: JWE (encrypted)
+    ┌ response_type: JWE (decrypted via debug key)
     ┌ encryption_alg: ECDH-ES
+    ┌ response_payload: {"vp_token":{...},"state":"abc123"}
+  → oid4vc-dev decode 'eyJhbGci...'  (vp_token)
 ```
+
+## JWE decryption
+
+When the built-in wallet (`oid4vc-dev wallet`) sends an encrypted JARM response (`direct_post.jwt`) through the proxy, the proxy automatically decrypts the payload and shows the contained `vp_token` and `state`.
+
+This works via a debug header: the wallet includes the AES content encryption key (CEK) in `X-Debug-JWE-CEK`. The proxy strips this header before forwarding the request to the verifier, so the verifier never sees it.
+
+No configuration is needed — simply route the wallet through the proxy:
+
+```
+oid4vc-dev wallet                          # wallet sends to response_uri
+oid4vc-dev proxy --target http://verifier  # proxy intercepts, decrypts, forwards
+```
+
+If the debug header is not present (e.g. when using a third-party wallet), the proxy falls back to showing only the JWE header fields (`alg`, `enc`, `kid`, `epk`).
+
+## Debugging tips
+
+- The wallet logs credentials and encryption keys to stdout for local debugging:
+  - `[VP] JWE content encryption key for proxy debugging: <base64url CEK>`
+  - `[VP] SD-JWT presentation created: ...`
+- Use `--all-traffic` to see non-OID4VP/VCI requests (health checks, favicon, etc.)
+- Pipe to `jq` with `--json` for structured analysis: `oid4vc-dev proxy --target ... --json | jq '.credentials'`

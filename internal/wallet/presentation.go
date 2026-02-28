@@ -458,11 +458,11 @@ func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, state, responseU
 	vpToken := vpResult.VPToken()
 
 	if params.ResponseMode == "direct_post.jwt" && HasEncryptionKey(params.RequestObject) {
-		jwe, err := w.EncryptResponse(vpToken, state, vpResult.MDocNonce, params)
+		jwe, cek, err := w.EncryptResponse(vpToken, state, vpResult.MDocNonce, params)
 		if err != nil {
 			return nil, fmt.Errorf("encrypting response: %w", err)
 		}
-		return SubmitDirectPostJWT(responseURI, jwe)
+		return SubmitDirectPostJWT(responseURI, jwe, cek)
 	}
 	return SubmitDirectPost(responseURI, state, vpToken)
 }
@@ -590,7 +590,8 @@ func HasEncryptionKey(reqObj *oid4vc.RequestObjectJWT) bool {
 }
 
 // EncryptResponse encrypts vp_token and state as a JWE for direct_post.jwt response mode.
-func (w *Wallet) EncryptResponse(vpToken any, state string, mdocNonce string, params PresentationParams) (string, error) {
+// Returns the JWE string and the derived content encryption key (CEK) for debugging.
+func (w *Wallet) EncryptResponse(vpToken any, state string, mdocNonce string, params PresentationParams) (string, []byte, error) {
 	log.Printf("[VP] Encrypting response: response_mode=direct_post.jwt")
 	payload := map[string]any{
 		"vp_token": vpToken,
@@ -598,12 +599,12 @@ func (w *Wallet) EncryptResponse(vpToken any, state string, mdocNonce string, pa
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("marshaling response payload: %w", err)
+		return "", nil, fmt.Errorf("marshaling response payload: %w", err)
 	}
 
 	encKey, kid, err := extractEncryptionKey(params.RequestObject)
 	if err != nil {
-		return "", fmt.Errorf("extracting encryption key: %w", err)
+		return "", nil, fmt.Errorf("extracting encryption key: %w", err)
 	}
 
 	// Determine enc algorithm from client_metadata

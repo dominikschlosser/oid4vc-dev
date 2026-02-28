@@ -32,7 +32,7 @@ func TestEncryptJWE_CompactFormat(t *testing.T) {
 	}
 
 	payload := []byte(`{"vp_token":"test","state":"abc123"}`)
-	jwe, err := EncryptJWE(payload, &key.PublicKey, "test-kid", "A128GCM", nil)
+	jwe, _, err := EncryptJWE(payload, &key.PublicKey, "test-kid", "A128GCM", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestEncryptJWE_WithAPU(t *testing.T) {
 	}
 
 	apu := []byte("mdoc-nonce-value")
-	jwe, err := EncryptJWE([]byte(`{}`), &key.PublicKey, "kid2", "A256GCM", apu)
+	jwe, _, err := EncryptJWE([]byte(`{}`), &key.PublicKey, "kid2", "A256GCM", apu)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestEncryptJWE_A256GCM(t *testing.T) {
 	}
 
 	payload := []byte(`{"test":"value"}`)
-	jwe, err := EncryptJWE(payload, &key.PublicKey, "kid3", "A256GCM", nil)
+	jwe, _, err := EncryptJWE(payload, &key.PublicKey, "kid3", "A256GCM", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,5 +129,32 @@ func TestEncryptJWE_A256GCM(t *testing.T) {
 
 	if header["enc"] != "A256GCM" {
 		t.Errorf("expected enc=A256GCM, got %v", header["enc"])
+	}
+}
+
+func TestEncryptJWE_ReturnsCEK(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := []byte(`{"test":"value"}`)
+
+	// A128GCM → 16-byte key
+	_, cek128, err := EncryptJWE(payload, &key.PublicKey, "kid", "A128GCM", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cek128) != 16 {
+		t.Errorf("expected 16-byte CEK for A128GCM, got %d bytes", len(cek128))
+	}
+
+	// A256GCM → 32-byte key
+	_, cek256, err := EncryptJWE(payload, &key.PublicKey, "kid", "A256GCM", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cek256) != 32 {
+		t.Errorf("expected 32-byte CEK for A256GCM, got %d bytes", len(cek256))
 	}
 }

@@ -212,6 +212,76 @@ func TestServerClassifiesVPAuthRequest(t *testing.T) {
 	}
 }
 
+func TestServerStripsDebugJWEKeyHeader(t *testing.T) {
+	var receivedHeaders http.Header
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHeaders = r.Header.Clone()
+		w.WriteHeader(200)
+	}))
+	defer backend.Close()
+
+	targetURL, _ := url.Parse(backend.URL)
+	var captured []*TrafficEntry
+	writer := &testWriter{entries: &captured}
+
+	srv := NewServer(Config{TargetURL: targetURL, AllTraffic: true}, writer)
+	proxy := httptest.NewServer(srv)
+	defer proxy.Close()
+
+	req, _ := http.NewRequest("POST", proxy.URL+"/response", strings.NewReader("response=jwe-value"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Debug-JWE-CEK", "test-cek-value")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// Header should be stripped before reaching backend
+	if receivedHeaders.Get("X-Debug-JWE-CEK") != "" {
+		t.Error("X-Debug-JWE-CEK header was not stripped before forwarding to backend")
+	}
+
+	// But proxy should have captured it
+	if len(captured) != 1 {
+		t.Fatalf("expected 1 captured entry, got %d", len(captured))
+	}
+	if captured[0].DebugJWEKey != "test-cek-value" {
+		t.Errorf("expected DebugJWEKey=test-cek-value, got %q", captured[0].DebugJWEKey)
+	}
+}
+
+func TestServerErrorHandler(t *testing.T) {
+	// Test that the error handler returns 502 instead of panicking
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Force close the connection immediately
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			w.WriteHeader(200)
+			return
+		}
+		conn, _, _ := hj.Hijack()
+		conn.Close()
+	}))
+	defer backend.Close()
+
+	targetURL, _ := url.Parse(backend.URL)
+	srv := NewServer(Config{TargetURL: targetURL, AllTraffic: true}, nil)
+	proxy := httptest.NewServer(srv)
+	defer proxy.Close()
+
+	resp, err := http.Get(proxy.URL + "/test")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", resp.StatusCode)
+	}
+}
+
 // testWriter is a simple EntryWriter that records all entries.
 type testWriter struct {
 	entries *[]*TrafficEntry

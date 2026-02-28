@@ -14,7 +14,15 @@
 
 package proxy
 
-import "testing"
+import (
+	"bytes"
+	"io"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/fatih/color"
+)
 
 func TestTerminalWriterImplementsEntryWriter(t *testing.T) {
 	var _ EntryWriter = &TerminalWriter{}
@@ -48,6 +56,72 @@ func TestTerminalWriterAllTrafficTrueIncludesUnknown(t *testing.T) {
 	}
 	// Should not panic
 	tw.WriteEntry(entry)
+}
+
+// captureOutput redirects both os.Stdout and color.Output to capture all print output.
+func captureOutput(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	oldColor := color.Output
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	color.Output = w
+
+	fn()
+
+	w.Close()
+	os.Stdout = oldStdout
+	color.Output = oldColor
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
+}
+
+func TestPrintEntryIncludesDecodeHints(t *testing.T) {
+	entry := &TrafficEntry{
+		Method:           "POST",
+		URL:              "http://example.com/response",
+		StatusCode:       200,
+		Class:            ClassVPAuthResponse,
+		ClassLabel:       "VP Auth Response",
+		Credentials:      []string{"eyJhbGciOiJFUzI1NiJ9.test.sig"},
+		CredentialLabels: []string{"vp_token"},
+	}
+
+	output := captureOutput(t, func() { PrintEntry(entry) })
+
+	if !strings.Contains(output, "oid4vc-dev decode") {
+		t.Error("expected decode hint in output")
+	}
+	if !strings.Contains(output, "eyJhbGciOiJFUzI1NiJ9.test.sig") {
+		t.Error("expected credential in decode hint")
+	}
+	if !strings.Contains(output, "vp_token") {
+		t.Error("expected credential label in decode hint")
+	}
+}
+
+func TestPrintDecodeHintWithLabel(t *testing.T) {
+	output := captureOutput(t, func() { printDecodeHint("cred-value", "id_token") })
+
+	if !strings.Contains(output, "oid4vc-dev decode 'cred-value'") {
+		t.Errorf("expected decode command with credential, got %q", output)
+	}
+	if !strings.Contains(output, "(id_token)") {
+		t.Errorf("expected label in output, got %q", output)
+	}
+}
+
+func TestPrintDecodeHintWithoutLabel(t *testing.T) {
+	output := captureOutput(t, func() { printDecodeHint("cred-value", "") })
+
+	if !strings.Contains(output, "oid4vc-dev decode 'cred-value'") {
+		t.Errorf("expected decode command, got %q", output)
+	}
+	if strings.Contains(output, "(") {
+		t.Errorf("expected no label parens, got %q", output)
+	}
 }
 
 func TestTruncateURL(t *testing.T) {

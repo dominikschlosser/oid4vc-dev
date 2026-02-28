@@ -72,6 +72,15 @@ func PrintEntry(entry *TrafficEntry) {
 		}
 	}
 
+	// Decode commands for detected credentials
+	for i, cred := range entry.Credentials {
+		label := ""
+		if i < len(entry.CredentialLabels) {
+			label = entry.CredentialLabels[i]
+		}
+		printDecodeHint(cred, label)
+	}
+
 	fmt.Println()
 }
 
@@ -98,6 +107,14 @@ func printDecodedField(key string, val any, depth int) {
 			valueColor.Println(fmt.Sprintf("%v", val))
 		}
 	}
+}
+
+func printDecodeHint(credential, label string) {
+	hint := fmt.Sprintf("  → oid4vc-dev decode '%s'", credential)
+	if label != "" {
+		hint += fmt.Sprintf("  (%s)", label)
+	}
+	dimColor.Println(hint)
 }
 
 func truncateURL(u string, maxLen int) string {

@@ -15,9 +15,11 @@
 package wallet
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -77,11 +79,24 @@ type DirectPostResult struct {
 
 // SubmitDirectPostJWT submits an encrypted JARM response via direct_post.jwt.
 // The vp_token and state are inside the encrypted responseJWT payload.
-func SubmitDirectPostJWT(responseURI string, responseJWT string) (*DirectPostResult, error) {
+// If cek is non-nil, it is included as X-Debug-JWE-CEK header for proxy debugging.
+func SubmitDirectPostJWT(responseURI string, responseJWT string, cek []byte) (*DirectPostResult, error) {
 	form := url.Values{}
 	form.Set("response", responseJWT)
 
-	resp, err := http.PostForm(responseURI, form)
+	req, err := http.NewRequest("POST", responseURI, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	if len(cek) > 0 {
+		cekB64 := base64.RawURLEncoding.EncodeToString(cek)
+		req.Header.Set("X-Debug-JWE-CEK", cekB64)
+		log.Printf("[VP] JWE content encryption key for proxy debugging: %s", cekB64)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("posting to response_uri: %w", err)
 	}
