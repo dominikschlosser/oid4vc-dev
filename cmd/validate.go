@@ -156,6 +156,49 @@ func runValidate(cmd *cobra.Command, args []string) error {
 			checkStatus(token.ResolvedClaims, opts)
 		}
 
+	case format.FormatJWT:
+		token, err := sdjwt.Parse(raw)
+		if err != nil {
+			return fmt.Errorf("parsing JWT: %w", err)
+		}
+		output.PrintJWT(token, opts)
+
+		if verifySig {
+			x5cKey, _ := validate.ExtractAndValidateX5C(token.Header, tlCerts)
+			bestResult := verifyWithBestKey(pubKeys, x5cKey, func(key crypto.PublicKey) (*sdjwt.VerifyResult, bool) {
+				r := sdjwt.Verify(token, key)
+				return r, r.SignatureValid
+			})
+			output.PrintVerifyResultSDJWT(bestResult, opts)
+
+			if !bestResult.SignatureValid {
+				return fmt.Errorf("signature verification failed")
+			}
+			if bestResult.Expired && !allowExpired {
+				return fmt.Errorf("credential expired")
+			}
+		} else {
+			if !opts.JSON {
+				fmt.Println("\n  Signature verification skipped (no --key or --trust-list provided)")
+			}
+			if exp, ok := token.ResolvedClaims["exp"]; ok {
+				if expFloat, ok := exp.(float64); ok {
+					if time.Unix(int64(expFloat), 0).Before(time.Now()) {
+						if !opts.JSON {
+							fmt.Println("  ✗ Credential expired")
+						}
+						if !allowExpired {
+							return fmt.Errorf("credential expired")
+						}
+					}
+				}
+			}
+		}
+
+		if statusListFlag {
+			checkStatus(token.ResolvedClaims, opts)
+		}
+
 	case format.FormatMDOC:
 		doc, err := mdoc.Parse(raw)
 		if err != nil {
