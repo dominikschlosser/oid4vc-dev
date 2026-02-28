@@ -60,6 +60,13 @@ func runDCQL(cmd *cobra.Command, args []string) error {
 		}
 		query = dcql.FromSDJWT(token)
 
+	case format.FormatJWT:
+		token, err := sdjwt.Parse(raw)
+		if err != nil {
+			return fmt.Errorf("parsing JWT: %w", err)
+		}
+		query = dcql.FromSDJWT(token)
+
 	case format.FormatMDOC:
 		doc, err := mdoc.Parse(raw)
 		if err != nil {
