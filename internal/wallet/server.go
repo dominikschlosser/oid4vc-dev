@@ -207,7 +207,8 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 // handleOfferAPI processes a credential offer URI.
 func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		URI string `json:"uri"`
+		URI    string `json:"uri"`
+		TxCode string `json:"tx_code,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -217,6 +218,10 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	s.log("Received credential offer")
 	uriDisplay := format.Truncate(body.URI, 120)
 	s.log("  URI: %s", uriDisplay)
+
+	if body.TxCode != "" {
+		s.wallet.TxCode = body.TxCode
+	}
 
 	result, err := s.wallet.ProcessCredentialOffer(body.URI)
 	if err != nil {

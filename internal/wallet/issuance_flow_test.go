@@ -229,6 +229,159 @@ func TestProcessCredentialOffer_Draft14CredentialsArray(t *testing.T) {
 	}
 }
 
+func TestProcessCredentialOffer_AuthCodeOnlyRejected(t *testing.T) {
+	w := generateTestWallet(t)
+
+	// Build an offer with only authorization_code grant (no pre-authorized code)
+	offer := map[string]any{
+		"credential_issuer":            "https://issuer.example",
+		"credential_configuration_ids": []string{"test-config"},
+		"grants": map[string]any{
+			"authorization_code": map[string]any{
+				"issuer_state": "some-state",
+			},
+		},
+	}
+	offerJSON, _ := json.Marshal(offer)
+	offerURI := "openid-credential-offer://?credential_offer=" + url.QueryEscape(string(offerJSON))
+
+	_, err := w.ProcessCredentialOffer(offerURI)
+	if err == nil {
+		t.Fatal("expected error for authorization_code-only offer")
+	}
+	if !strings.Contains(err.Error(), "authorization_code") {
+		t.Errorf("expected error about authorization_code, got: %v", err)
+	}
+}
+
+func TestProcessCredentialOffer_TxCodeSentInTokenRequest(t *testing.T) {
+	w := generateTestWallet(t)
+
+	credRaw := generateTestCredential(t, w)
+	var receivedTxCode string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/.well-known/openid-credential-issuer"):
+			meta := map[string]any{
+				"credential_issuer":   "", // will be replaced
+				"credential_endpoint": "",
+				"token_endpoint":      "",
+			}
+			rw.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(rw).Encode(meta)
+
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/token"):
+			body, _ := io.ReadAll(r.Body)
+			form, _ := url.ParseQuery(string(body))
+			receivedTxCode = form.Get("tx_code")
+			resp := map[string]any{
+				"access_token": "test-token",
+				"token_type":   "Bearer",
+				"c_nonce":      "test-nonce",
+			}
+			rw.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(rw).Encode(resp)
+
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/credential"):
+			rw.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(rw).Encode(map[string]any{"credential": credRaw})
+
+		default:
+			rw.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	// Patch metadata responses to use actual server URL
+	srvURL := srv.URL
+	origHandler := srv.Config.Handler
+	srv.Config.Handler = http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/.well-known/openid-credential-issuer") {
+			meta := map[string]any{
+				"credential_issuer":   srvURL,
+				"credential_endpoint": srvURL + "/credential",
+				"token_endpoint":      srvURL + "/token",
+			}
+			rw.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(rw).Encode(meta)
+			return
+		}
+		origHandler.ServeHTTP(rw, r)
+	})
+
+	oldClient := httpClient
+	httpClient = srv.Client()
+	defer func() { httpClient = oldClient }()
+
+	// Set tx_code on wallet
+	w.TxCode = "123456"
+
+	offer := map[string]any{
+		"credential_issuer":            srvURL,
+		"credential_configuration_ids": []string{"test-config"},
+		"grants": map[string]any{
+			"urn:ietf:params:oauth:grant-type:pre-authorized_code": map[string]any{
+				"pre-authorized_code": "test-code",
+				"tx_code":             map[string]any{"length": 6},
+			},
+		},
+	}
+	offerJSON, _ := json.Marshal(offer)
+	offerURI := "openid-credential-offer://?credential_offer=" + url.QueryEscape(string(offerJSON))
+
+	_, err := w.ProcessCredentialOffer(offerURI)
+	if err != nil {
+		t.Fatalf("ProcessCredentialOffer: %v", err)
+	}
+
+	if receivedTxCode != "123456" {
+		t.Errorf("expected tx_code=123456 in token request, got %q", receivedTxCode)
+	}
+
+	// Verify tx_code was cleared
+	if w.TxCode != "" {
+		t.Errorf("expected TxCode to be cleared after use, got %q", w.TxCode)
+	}
+}
+
+func TestProcessCredentialOffer_NoTxCodeWhenNotSet(t *testing.T) {
+	w := generateTestWallet(t)
+
+	var receivedForm string
+
+	srv, offerURI := setupMockIssuer(t, w, mockIssuerOpts{
+		tokenCNonce: "test-nonce",
+	})
+	defer srv.Close()
+
+	// Wrap the server to capture the token request form body
+	origHandler := srv.Config.Handler
+	srv.Config.Handler = http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/token") {
+			body, _ := io.ReadAll(r.Body)
+			receivedForm = string(body)
+			// Reconstruct body for the original handler
+			r.Body = io.NopCloser(strings.NewReader(receivedForm))
+		}
+		origHandler.ServeHTTP(rw, r)
+	})
+
+	oldClient := httpClient
+	httpClient = srv.Client()
+	defer func() { httpClient = oldClient }()
+
+	// Don't set TxCode
+	_, err := w.ProcessCredentialOffer(offerURI)
+	if err != nil {
+		t.Fatalf("ProcessCredentialOffer: %v", err)
+	}
+
+	if strings.Contains(receivedForm, "tx_code") {
+		t.Errorf("expected no tx_code in token request when not set, but got: %s", receivedForm)
+	}
+}
+
 func TestProcessCredentialOffer_Draft14RawStringArray(t *testing.T) {
 	w := generateTestWallet(t)
 	credRaw := generateTestCredential(t, w)

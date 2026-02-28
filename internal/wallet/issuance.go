@@ -48,6 +48,11 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 		return nil, fmt.Errorf("unexpected result type")
 	}
 
+	// Reject offers that only have authorization_code grant (not supported)
+	if offer.Grants.PreAuthorizedCode == "" {
+		return nil, fmt.Errorf("credential offer requires authorization_code grant which is not supported; only pre-authorized_code flow is implemented")
+	}
+
 	// Fetch issuer metadata
 	metadata, err := fetchIssuerMetadata(offer.CredentialIssuer)
 	if err != nil {
@@ -59,7 +64,9 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 	credentialEndpoint := getCredentialEndpoint(metadata, offer.CredentialIssuer)
 
 	// Token exchange (pre-authorized code flow)
-	tokenResp, err := exchangeToken(tokenEndpoint, offer)
+	txCode := w.TxCode
+	w.TxCode = "" // clear after use
+	tokenResp, err := exchangeToken(tokenEndpoint, offer, txCode)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange: %w", err)
 	}
@@ -287,10 +294,13 @@ func resolveCredentialFormat(metadata map[string]any, configID string) string {
 }
 
 // exchangeToken performs the pre-authorized code token exchange.
-func exchangeToken(tokenEndpoint string, offer *oid4vc.CredentialOffer) (map[string]any, error) {
+func exchangeToken(tokenEndpoint string, offer *oid4vc.CredentialOffer, txCode string) (map[string]any, error) {
 	form := url.Values{}
 	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:pre-authorized_code")
 	form.Set("pre-authorized_code", offer.Grants.PreAuthorizedCode)
+	if txCode != "" {
+		form.Set("tx_code", txCode)
+	}
 
 	req, err := http.NewRequest("POST", tokenEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {

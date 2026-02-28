@@ -57,6 +57,7 @@ type Wallet struct {
 	StatusListCounter    int                    // next available status list index
 	BaseURL              string                 // base URL for status list endpoint
 	Requests             map[string]*ConsentRequest
+	TxCode               string `json:"-"` // one-shot tx_code for OID4VCI token request
 	Log                  []LogEntry
 	mu                   sync.RWMutex
 	nextError            *NextErrorOverride

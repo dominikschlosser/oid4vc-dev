@@ -629,6 +629,7 @@ type dispatchOID4Opts struct {
 	port              int
 	autoAccept        bool
 	sessionTranscript string
+	txCode            string
 }
 
 // dispatchURI detects the URI type and dispatches to the appropriate wallet flow.
@@ -650,7 +651,7 @@ func dispatchURI(uri string, opts dispatchOID4Opts) error {
 		return runPresent(w, store, uri, opts.port)
 
 	case format.FormatOID4VCI:
-		return processCredentialOffer(uri)
+		return processCredentialOffer(uri, opts.txCode)
 
 	default:
 		return fmt.Errorf("unable to detect URI type (expected openid4vp://, openid-credential-offer://, or similar): %s", format.Truncate(uri, 80))
@@ -658,10 +659,14 @@ func dispatchURI(uri string, opts dispatchOID4Opts) error {
 }
 
 // processCredentialOffer fetches and stores a credential from an OID4VCI offer URI.
-func processCredentialOffer(uri string) error {
+func processCredentialOffer(uri string, txCode string) error {
 	w, store, err := loadWallet()
 	if err != nil {
 		return err
+	}
+
+	if txCode != "" {
+		w.TxCode = txCode
 	}
 
 	result, err := w.ProcessCredentialOffer(uri)
@@ -690,6 +695,7 @@ func walletAcceptCmd() *cobra.Command {
 		port              int
 		autoAccept        bool
 		sessionTranscript string
+		txCode            string
 	)
 
 	cmd := &cobra.Command{
@@ -712,6 +718,7 @@ only apply to OID4VP flows.`,
 				port:              port,
 				autoAccept:        autoAccept,
 				sessionTranscript: sessionTranscript,
+				txCode:            txCode,
 			})
 		},
 	}
@@ -719,6 +726,7 @@ only apply to OID4VP flows.`,
 	cmd.Flags().IntVar(&port, "port", 8085, "Server port for OID4VP (serves trust list and consent UI)")
 	cmd.Flags().BoolVar(&autoAccept, "auto-accept", false, "Auto-approve OID4VP presentations")
 	cmd.Flags().StringVar(&sessionTranscript, "session-transcript", "oid4vp", "mDoc session transcript mode: 'oid4vp' (OID4VP 1.0, default) or 'iso' (ISO 18013-7)")
+	cmd.Flags().StringVar(&txCode, "tx-code", "", "Transaction code for OID4VCI pre-authorized code flow")
 	return cmd
 }
 
