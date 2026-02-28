@@ -9,12 +9,15 @@ const HOST_PORT = 18925;
 const WALLET_URL = `http://localhost:${HOST_PORT}`;
 
 test.describe.configure({ mode: "serial" });
+// Docker build + container startup can exceed the default 30s timeout
+test.setTimeout(120_000);
 
 test.beforeAll(async () => {
-  // Build Docker image
+  // Build Docker image (can take a while in CI with cold cache)
   execSync(`docker build -t ${DOCKER_IMAGE} ..`, {
     cwd: __dirname,
     stdio: "pipe",
+    timeout: 120_000,
   });
 
   // Remove any leftover container
