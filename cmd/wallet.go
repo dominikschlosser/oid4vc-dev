@@ -118,6 +118,7 @@ func walletServeCmd() *cobra.Command {
 		noRegister        bool
 		statusList        bool
 		baseURL           string
+		docker            bool
 		preferredFormat   string
 	)
 
@@ -172,7 +173,11 @@ so the wallet automatically receives incoming protocol requests.`,
 
 			if statusList {
 				if baseURL == "" {
-					baseURL = fmt.Sprintf("http://localhost:%d", port)
+					if docker {
+						baseURL = fmt.Sprintf("http://host.docker.internal:%d", port)
+					} else {
+						baseURL = fmt.Sprintf("http://localhost:%d", port)
+					}
 				}
 				w.BaseURL = baseURL
 			}
@@ -284,6 +289,7 @@ so the wallet automatically receives incoming protocol requests.`,
 	cmd.Flags().BoolVar(&noRegister, "no-register", false, "Skip URL scheme registration (overrides --register)")
 	cmd.Flags().BoolVar(&statusList, "status-list", false, "Embed status list references in generated credentials")
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL for status list endpoint (default: http://localhost:<port>)")
+	cmd.Flags().BoolVar(&docker, "docker", false, "Use host.docker.internal instead of localhost for --base-url")
 	cmd.Flags().StringVar(&preferredFormat, "preferred-format", "", "Preferred credential format when multiple match: 'dc+sd-jwt', 'mso_mdoc', or 'jwt_vc_json'")
 	return cmd
 }
@@ -400,6 +406,7 @@ func walletGeneratePIDCmd() *cobra.Command {
 		vctFlag    string
 		statusList bool
 		baseURL    string
+		docker     bool
 	)
 
 	cmd := &cobra.Command{
@@ -422,7 +429,11 @@ func walletGeneratePIDCmd() *cobra.Command {
 
 			if statusList {
 				if baseURL == "" {
-					baseURL = "http://localhost:8085"
+					if docker {
+						baseURL = "http://host.docker.internal:8085"
+					} else {
+						baseURL = "http://localhost:8085"
+					}
 				}
 				w.BaseURL = baseURL
 			}
@@ -450,6 +461,7 @@ func walletGeneratePIDCmd() *cobra.Command {
 	cmd.Flags().StringVar(&vctFlag, "vct", mock.DefaultPIDVCT, "Verifiable Credential Type for SD-JWT PID")
 	cmd.Flags().BoolVar(&statusList, "status-list", false, "Embed status list references in generated credentials")
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Base URL for status list endpoint (default: http://localhost:8085)")
+	cmd.Flags().BoolVar(&docker, "docker", false, "Use host.docker.internal instead of localhost for --base-url")
 	return cmd
 }
 

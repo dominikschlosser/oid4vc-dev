@@ -161,12 +161,11 @@ curl -X POST http://localhost:8085/api/credentials -d 'eyJhbGci...'
 
 Enable with `--status-list`. Generated credentials will include a status list reference pointing to the wallet's `/api/statuslist` endpoint.
 
-**Important:** The status list URI is baked into the credential at generation time. When the verifier runs inside Docker and the wallet runs on the host (or vice versa), use `--base-url` to set a URI that both sides can reach:
+**Important:** The status list URI is baked into the credential at generation time. When the verifier runs inside Docker and the wallet runs on the host (or vice versa), use `--docker` (or `--base-url` for a custom URL) so the URI is reachable from both sides:
 
 ```bash
 # Wallet on host, verifier in Docker
-oid4vc-dev wallet serve --pid --auto-accept --status-list \
-  --base-url http://host.docker.internal:8085
+oid4vc-dev wallet serve --pid --auto-accept --status-list --docker
 ```
 
 ```yaml

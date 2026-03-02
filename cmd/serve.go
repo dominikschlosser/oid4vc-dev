@@ -27,7 +27,7 @@ var port int
 var serveCmd = &cobra.Command{
 	Use:   "serve [credential]",
 	Short: "Start a local web UI for decoding and validating credentials",
-	Long:  "Starts a local HTTP server with a web UI for decoding, validating, and inspecting SSI credentials (SD-JWT, JWT, mDOC). Optionally pass a credential to pre-fill the input.",
+	Long:  "Starts a local HTTP server with a web UI for decoding, validating, and inspecting verifiable credentials (SD-JWT, JWT, mDOC). Optionally pass a credential to pre-fill the input.",
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runServe,
 }

@@ -97,6 +97,7 @@ oid4vc-dev wallet serve --register --port 9000
 | `--preferred-format`    | —        | Preferred credential format when multiple match: `dc+sd-jwt`, `mso_mdoc`, or `jwt_vc_json` |
 | `--status-list`         | `false`  | Embed status list references in generated credentials |
 | `--base-url`            | —        | Base URL for status list endpoint (default: `http://localhost:<port>`) |
+| `--docker`              | `false`  | Use `host.docker.internal` instead of `localhost` for `--base-url` |
 
 ## `wallet accept <uri>`
 
@@ -271,14 +272,17 @@ curl -X POST http://localhost:8085/api/credentials \
 
 When `--status-list` is enabled, generated credentials include a `status.status_list` claim pointing to the wallet's status list endpoint. The URI baked into credentials is `<base-url>/api/statuslist`, where `<base-url>` defaults to `http://localhost:<port>`.
 
-**Important:** If the verifier runs in Docker (or any environment that can't reach `localhost`), use `--base-url` to set a reachable URL:
+**Important:** If the verifier runs in Docker (or any environment that can't reach `localhost`), use `--docker` (or `--base-url` for a custom URL):
 
 ```bash
 # Verifier on the same host
 oid4vc-dev wallet serve --pid --status-list
 
-# Verifier in Docker
-oid4vc-dev wallet serve --pid --status-list --base-url http://host.docker.internal:8085
+# Verifier in Docker (shortcut for --base-url http://host.docker.internal:<port>)
+oid4vc-dev wallet serve --pid --status-list --docker
+
+# Custom base URL
+oid4vc-dev wallet serve --pid --status-list --base-url http://my-host:8085
 ```
 
 The status of individual credentials can be changed at runtime:
