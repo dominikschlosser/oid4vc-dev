@@ -121,12 +121,11 @@ func TestPrintDecodeHintWithoutLabel(t *testing.T) {
 func TestPrintDecodeHintWithDashboardPort(t *testing.T) {
 	output := captureOutput(t, func() { printDecodeHint("cred-value", "vp_token", 9091) })
 
-	// Should contain OSC 8 hyperlink with the URL
 	if !strings.Contains(output, "http://localhost:9091/decode?credential=cred-value") {
-		t.Errorf("expected decode URL in hyperlink, got %q", output)
+		t.Errorf("expected decode URL in output, got %q", output)
 	}
-	if !strings.Contains(output, "View vp_token in Decoder") {
-		t.Errorf("expected labeled link text, got %q", output)
+	if !strings.Contains(output, "vp_token") {
+		t.Errorf("expected label in output, got %q", output)
 	}
 }
 
