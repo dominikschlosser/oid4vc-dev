@@ -550,33 +550,44 @@ func computeJWKThumbprint(jwk map[string]any) []byte {
 	return hash[:]
 }
 
-// extractEncryptionKey extracts the EC public key and kid from
+// encryptionKeyInfo holds the extracted encryption key parameters from a JWK.
+type encryptionKeyInfo struct {
+	Key *ecdsa.PublicKey
+	Kid string
+	Alg string // JWE algorithm (e.g. "ECDH-ES") — MUST be present per OID4VP 1.0
+}
+
+// extractEncryptionKey extracts the EC public key, kid, and alg from
 // client_metadata.jwks per OID4VP 1.0.
-func extractEncryptionKey(reqObj *oid4vc.RequestObjectJWT) (*ecdsa.PublicKey, string, error) {
+func extractEncryptionKey(reqObj *oid4vc.RequestObjectJWT) (*encryptionKeyInfo, error) {
 	jwk := findEncryptionJWK(reqObj)
 	if jwk == nil {
-		return nil, "", fmt.Errorf("no encryption JWK found in request object")
+		return nil, fmt.Errorf("no encryption JWK found in client_metadata.jwks")
 	}
 
 	x, _ := jwk["x"].(string)
 	y, _ := jwk["y"].(string)
 	kid, _ := jwk["kid"].(string)
+	alg, _ := jwk["alg"].(string)
 
 	if x == "" || y == "" {
-		return nil, "", fmt.Errorf("missing x or y in JWK")
+		return nil, fmt.Errorf("missing x or y in JWK")
+	}
+	if alg == "" {
+		return nil, fmt.Errorf("JWK missing required 'alg' parameter (OID4VP 1.0 requires alg in each JWK)")
 	}
 
 	pubKey, err := ecdsaPublicKeyFromJWK(x, y)
 	if err != nil {
-		return nil, "", fmt.Errorf("constructing EC key: %w", err)
+		return nil, fmt.Errorf("constructing EC key: %w", err)
 	}
 
-	return pubKey, kid, nil
+	return &encryptionKeyInfo{Key: pubKey, Kid: kid, Alg: alg}, nil
 }
 
-// HasEncryptionKey checks if the request object contains an encryption JWK.
+// HasEncryptionKey checks if the request object contains a valid encryption JWK.
 func HasEncryptionKey(reqObj *oid4vc.RequestObjectJWT) bool {
-	_, _, err := extractEncryptionKey(reqObj)
+	_, err := extractEncryptionKey(reqObj)
 	return err == nil
 }
 
@@ -593,12 +604,12 @@ func (w *Wallet) EncryptResponse(vpToken any, state string, mdocNonce string, pa
 		return "", nil, fmt.Errorf("marshaling response payload: %w", err)
 	}
 
-	encKey, kid, err := extractEncryptionKey(params.RequestObject)
+	keyInfo, err := extractEncryptionKey(params.RequestObject)
 	if err != nil {
 		return "", nil, fmt.Errorf("extracting encryption key: %w", err)
 	}
 
-	// Determine enc algorithm from client_metadata or top-level request object fields
+	// Determine enc algorithm from client_metadata
 	// OID4VP 1.0: encrypted_response_enc_values_supported (array)
 	enc := "A128GCM"
 	if params.RequestObject != nil && params.RequestObject.Payload != nil {
@@ -611,7 +622,7 @@ func (w *Wallet) EncryptResponse(vpToken any, state string, mdocNonce string, pa
 		apu = []byte(mdocNonce)
 	}
 
-	return EncryptJWE(payloadJSON, encKey, kid, enc, apu)
+	return EncryptJWE(payloadJSON, keyInfo.Key, keyInfo.Kid, keyInfo.Alg, enc, apu)
 }
 
 // detectEncAlgorithm finds the content encryption algorithm from

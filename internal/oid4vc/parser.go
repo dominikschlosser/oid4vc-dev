@@ -187,14 +187,6 @@ func parseVPParams(q url.Values) (RequestType, any, error) {
 		}
 	}
 
-	// Parse presentation_definition
-	if pd := q.Get("presentation_definition"); pd != "" {
-		var m map[string]any
-		if err := json.Unmarshal([]byte(pd), &m); err == nil {
-			req.PresentationDefinition = m
-		}
-	}
-
 	// Parse dcql_query
 	if dq := q.Get("dcql_query"); dq != "" {
 		var m map[string]any
@@ -224,11 +216,6 @@ func mergeJWTPayloadIntoRequest(req *AuthorizationRequest, payload map[string]an
 	setIfEmpty(&req.ResponseURI, "response_uri")
 	setIfEmpty(&req.Scope, "scope")
 
-	if req.PresentationDefinition == nil {
-		if pd, ok := payload["presentation_definition"].(map[string]any); ok {
-			req.PresentationDefinition = pd
-		}
-	}
 	if req.DCQLQuery == nil {
 		if dq, ok := payload["dcql_query"].(map[string]any); ok {
 			req.DCQLQuery = dq
@@ -317,9 +304,6 @@ func buildVPFromJSON(m map[string]any) (RequestType, *AuthorizationRequest) {
 	req.ResponseURI = getString("response_uri")
 	req.Scope = getString("scope")
 
-	if pd, ok := m["presentation_definition"].(map[string]any); ok {
-		req.PresentationDefinition = pd
-	}
 	if dq, ok := m["dcql_query"].(map[string]any); ok {
 		req.DCQLQuery = dq
 	}

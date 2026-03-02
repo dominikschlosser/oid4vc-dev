@@ -198,7 +198,11 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 		s.log("  Nonce:         %s", parsed.Nonce)
 	}
 
-	if warning := VerifyClientID(parsed.ClientID, parsed.RequestObject); warning != "" {
+	parsedResponseURI := parsed.ResponseURI
+	if parsedResponseURI == "" {
+		parsedResponseURI = parsed.RedirectURI
+	}
+	if warning := VerifyClientID(parsed.ClientID, parsed.RequestObject, parsedResponseURI); warning != "" {
 		s.log("  WARNING: %s", warning)
 		s.wallet.AddLog("presentation", fmt.Sprintf("client_id warning: %s", warning), false)
 	}
@@ -516,10 +520,20 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 		return
 	}
 
-	// Check client_id against x5c SAN
-	if warning := VerifyClientID(authReq.ClientID, authReq.RequestObject); warning != "" {
+	// Check client_id against x5c SAN / redirect_uri
+	responseURI := authReq.ResponseURI
+	if responseURI == "" {
+		responseURI = authReq.RedirectURI
+	}
+	if warning := VerifyClientID(authReq.ClientID, authReq.RequestObject, responseURI); warning != "" {
 		s.log("  WARNING: %s", warning)
 		s.wallet.AddLog("presentation", fmt.Sprintf("client_id warning: %s", warning), false)
+	}
+
+	// Validate Request Object typ header (OID4VP 1.0: MUST be oauth-authz-req+jwt)
+	if warning := ValidateRequestObject(authReq.ClientID, authReq.RequestObject); warning != "" {
+		s.log("  WARNING: %s", warning)
+		s.wallet.AddLog("presentation", fmt.Sprintf("request object warning: %s", warning), false)
 	}
 
 	// Log DCQL query

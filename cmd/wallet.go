@@ -463,7 +463,7 @@ func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port in
 		return fmt.Errorf("parsing authorization request: %w", err)
 	}
 
-	if warning := wallet.VerifyClientID(parsed.ClientID, parsed.RequestObject); warning != "" {
+	if warning := wallet.VerifyClientID(parsed.ClientID, parsed.RequestObject, wallet.GetResponseURI(parsed)); warning != "" {
 		yellow := color.New(color.FgYellow)
 		yellow.Printf("  WARNING: %s\n", warning)
 		w.AddLog("presentation", fmt.Sprintf("client_id warning: %s", warning), false)

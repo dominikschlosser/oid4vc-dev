@@ -15,6 +15,7 @@
 package wallet
 
 import (
+	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/json"
 	"strings"
@@ -27,6 +28,18 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/fxamacker/cbor/v2"
 )
+
+// testEncJWK creates a JWK map suitable for encryption tests, with the required "alg" field.
+func testEncJWK(t *testing.T, pub *ecdsa.PublicKey) map[string]any {
+	t.Helper()
+	jwkJSON := mock.PublicKeyJWK(pub)
+	var jwk map[string]any
+	if err := json.Unmarshal([]byte(jwkJSON), &jwk); err != nil {
+		t.Fatalf("parsing JWK: %v", err)
+	}
+	jwk["alg"] = "ECDH-ES"
+	return jwk
+}
 
 func TestCreateVPToken_SDJWT(t *testing.T) {
 	w := generateTestWalletWithPID(t)
@@ -463,12 +476,7 @@ func TestCreateVPToken_ImportedSDJWT_PreservesDisclosures(t *testing.T) {
 func TestEncryptResponse_UsesEncryptedResponseEncValuesSupported(t *testing.T) {
 	w := generateTestWallet(t)
 	key, _ := mock.GenerateKey()
-	jwkJSON := mock.PublicKeyJWK(&key.PublicKey)
-
-	var jwk map[string]any
-	if err := json.Unmarshal([]byte(jwkJSON), &jwk); err != nil {
-		t.Fatalf("parsing JWK: %v", err)
-	}
+	jwk := testEncJWK(t, &key.PublicKey)
 
 	reqObj := &oid4vc.RequestObjectJWT{
 		Payload: map[string]any{
@@ -515,12 +523,7 @@ func TestEncryptResponse_UsesEncryptedResponseEncValuesSupported(t *testing.T) {
 func TestEncryptResponse_DefaultsToA128GCMWhenNoEncValues(t *testing.T) {
 	w := generateTestWallet(t)
 	key, _ := mock.GenerateKey()
-	jwkJSON := mock.PublicKeyJWK(&key.PublicKey)
-
-	var jwk map[string]any
-	if err := json.Unmarshal([]byte(jwkJSON), &jwk); err != nil {
-		t.Fatalf("parsing JWK: %v", err)
-	}
+	jwk := testEncJWK(t, &key.PublicKey)
 
 	reqObj := &oid4vc.RequestObjectJWT{
 		Payload: map[string]any{
@@ -557,12 +560,7 @@ func TestEncryptResponse_DefaultsToA128GCMWhenNoEncValues(t *testing.T) {
 func TestEncryptResponse_TopLevelJWKSNotUsed(t *testing.T) {
 	w := generateTestWallet(t)
 	key, _ := mock.GenerateKey()
-	jwkJSON := mock.PublicKeyJWK(&key.PublicKey)
-
-	var jwk map[string]any
-	if err := json.Unmarshal([]byte(jwkJSON), &jwk); err != nil {
-		t.Fatalf("parsing JWK: %v", err)
-	}
+	jwk := testEncJWK(t, &key.PublicKey)
 
 	// JWK only at top-level jwks (not in client_metadata) — wallet should reject
 	reqObj := &oid4vc.RequestObjectJWT{
@@ -593,12 +591,7 @@ func TestEncryptResponse_TopLevelJWKSNotUsed(t *testing.T) {
 func TestEncryptResponse_LegacyFieldNamesIgnored(t *testing.T) {
 	w := generateTestWallet(t)
 	key, _ := mock.GenerateKey()
-	jwkJSON := mock.PublicKeyJWK(&key.PublicKey)
-
-	var jwk map[string]any
-	if err := json.Unmarshal([]byte(jwkJSON), &jwk); err != nil {
-		t.Fatalf("parsing JWK: %v", err)
-	}
+	jwk := testEncJWK(t, &key.PublicKey)
 
 	// Legacy field names only — wallet should ignore them and use default A128GCM
 	reqObj := &oid4vc.RequestObjectJWT{
@@ -741,5 +734,127 @@ func TestSubmitPresentation_DirectPostJWT_NoEncryptionKey(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no encryption key") {
 		t.Errorf("expected 'no encryption key' in error, got: %v", err)
+	}
+}
+
+func TestEncryptResponse_UsesAlgFromJWK(t *testing.T) {
+	w := generateTestWallet(t)
+	key, _ := mock.GenerateKey()
+	jwk := testEncJWK(t, &key.PublicKey)
+
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"jwks": map[string]any{
+					"keys": []any{jwk},
+				},
+			},
+		},
+	}
+
+	params := PresentationParams{
+		Nonce:         "test-nonce",
+		ClientID:      "https://verifier.example",
+		ResponseURI:   "https://verifier.example/response",
+		ResponseMode:  "direct_post.jwt",
+		RequestObject: reqObj,
+	}
+
+	jweStr, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "state", "", params)
+	if err != nil {
+		t.Fatalf("EncryptResponse error: %v", err)
+	}
+
+	parts := strings.Split(jweStr, ".")
+	headerJSON, _ := format.DecodeBase64URL(parts[0])
+	var header map[string]any
+	json.Unmarshal(headerJSON, &header)
+	if header["alg"] != "ECDH-ES" {
+		t.Errorf("expected alg=ECDH-ES from JWK, got %v", header["alg"])
+	}
+}
+
+func TestEncryptResponse_ErrorWhenJWKMissingAlg(t *testing.T) {
+	w := generateTestWallet(t)
+	key, _ := mock.GenerateKey()
+
+	// Create JWK without alg field
+	jwkJSON := mock.PublicKeyJWK(&key.PublicKey)
+	var jwk map[string]any
+	json.Unmarshal([]byte(jwkJSON), &jwk)
+	// Intentionally no jwk["alg"]
+
+	reqObj := &oid4vc.RequestObjectJWT{
+		Payload: map[string]any{
+			"client_metadata": map[string]any{
+				"jwks": map[string]any{
+					"keys": []any{jwk},
+				},
+			},
+		},
+	}
+
+	params := PresentationParams{
+		Nonce:         "test-nonce",
+		ClientID:      "https://verifier.example",
+		ResponseURI:   "https://verifier.example/response",
+		ResponseMode:  "direct_post.jwt",
+		RequestObject: reqObj,
+	}
+
+	_, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "state", "", params)
+	if err == nil {
+		t.Fatal("expected error when JWK is missing 'alg' field")
+	}
+	if !strings.Contains(err.Error(), "alg") {
+		t.Errorf("expected error about missing 'alg', got: %v", err)
+	}
+}
+
+func TestEncryptJWE_A128CBCHS256(t *testing.T) {
+	key, _ := mock.GenerateKey()
+	payload := []byte(`{"vp_token":"test","state":"s"}`)
+
+	jweStr, cek, err := EncryptJWE(payload, &key.PublicKey, "kid1", "ECDH-ES", "A128CBC-HS256", nil)
+	if err != nil {
+		t.Fatalf("EncryptJWE error: %v", err)
+	}
+
+	parts := strings.Split(jweStr, ".")
+	if len(parts) != 5 {
+		t.Fatalf("expected 5 JWE parts, got %d", len(parts))
+	}
+
+	// Verify header
+	headerJSON, _ := format.DecodeBase64URL(parts[0])
+	var header map[string]any
+	json.Unmarshal(headerJSON, &header)
+	if header["enc"] != "A128CBC-HS256" {
+		t.Errorf("expected enc=A128CBC-HS256, got %v", header["enc"])
+	}
+	if header["alg"] != "ECDH-ES" {
+		t.Errorf("expected alg=ECDH-ES, got %v", header["alg"])
+	}
+
+	// CEK should be 32 bytes (256-bit: 128 MAC + 128 enc)
+	if len(cek) != 32 {
+		t.Errorf("expected 32-byte CEK, got %d bytes", len(cek))
+	}
+
+	// Encrypted key part should be empty (ECDH-ES direct key agreement)
+	if parts[1] != "" {
+		t.Errorf("expected empty encrypted key for ECDH-ES, got %q", parts[1])
+	}
+
+	// IV should be 16 bytes (128-bit for AES-CBC)
+	ivBytes, _ := format.DecodeBase64URL(parts[2])
+	if len(ivBytes) != 16 {
+		t.Errorf("expected 16-byte IV, got %d bytes", len(ivBytes))
+	}
+
+	// Tag should be 16 bytes (128-bit truncated HMAC)
+	tagBytes, _ := format.DecodeBase64URL(parts[4])
+	if len(tagBytes) != 16 {
+		t.Errorf("expected 16-byte tag, got %d bytes", len(tagBytes))
 	}
 }

@@ -48,9 +48,8 @@ type AuthorizationRequest struct {
 	State                  string
 	RedirectURI            string
 	ResponseURI            string
-	Scope                  string
-	PresentationDefinition map[string]any
-	DCQLQuery              map[string]any
+	Scope     string
+	DCQLQuery map[string]any
 	RequestObject          *RequestObjectJWT
 	FullParams             map[string]string
 	FullJSON               map[string]any

@@ -122,20 +122,21 @@ func TestParseVPInlineParams(t *testing.T) {
 	}
 }
 
-func TestParseVPWithPresentationDefinition(t *testing.T) {
-	pd := `{"id":"test","input_descriptors":[{"id":"d1"}]}`
-	uri := "openid4vp://?client_id=v&response_type=vp_token&presentation_definition=" + url.QueryEscape(pd)
+func TestParseVPWithDCQLQuery(t *testing.T) {
+	dq := `{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{"vct_values":["urn:test"]}}]}`
+	uri := "openid4vp://?client_id=v&response_type=vp_token&dcql_query=" + url.QueryEscape(dq)
 
 	_, result, err := Parse(uri)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	ar := result.(*AuthorizationRequest)
-	if ar.PresentationDefinition == nil {
-		t.Fatal("expected presentation_definition to be parsed")
+	if ar.DCQLQuery == nil {
+		t.Fatal("expected dcql_query to be parsed")
 	}
-	if ar.PresentationDefinition["id"] != "test" {
-		t.Errorf("unexpected presentation_definition id: %v", ar.PresentationDefinition["id"])
+	creds, ok := ar.DCQLQuery["credentials"].([]any)
+	if !ok || len(creds) == 0 {
+		t.Fatal("expected credentials in dcql_query")
 	}
 }
 
@@ -307,27 +308,6 @@ func TestParseVCIFullJSONPreserved(t *testing.T) {
 	}
 }
 
-func TestParseVPWithDCQLQuery(t *testing.T) {
-	dq := `{"credentials":[{"id":"pid","format":"dc+sd-jwt"}]}`
-	uri := "openid4vp://?client_id=v&response_type=vp_token&dcql_query=" + url.QueryEscape(dq)
-
-	_, result, err := Parse(uri)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ar := result.(*AuthorizationRequest)
-	if ar.DCQLQuery == nil {
-		t.Fatal("expected dcql_query to be parsed")
-	}
-	creds, ok := ar.DCQLQuery["credentials"].([]any)
-	if !ok {
-		t.Fatalf("expected credentials array, got %T", ar.DCQLQuery["credentials"])
-	}
-	if len(creds) != 1 {
-		t.Errorf("expected 1 credential query, got %d", len(creds))
-	}
-}
-
 func TestParseVPFullParams(t *testing.T) {
 	uri := "openid4vp://?client_id=v&response_type=vp_token&nonce=n&state=s&scope=openid&redirect_uri=https://r.example"
 
@@ -375,18 +355,19 @@ func TestParseVPJWTAutoDetectByResponseType(t *testing.T) {
 	}
 }
 
-func TestParseVPJSONWithPresentationDefinition(t *testing.T) {
-	raw := `{"client_id":"v","response_type":"vp_token","presentation_definition":{"id":"pd1","input_descriptors":[]}}`
+func TestParseVPJSONWithDCQLQueryCredentials(t *testing.T) {
+	raw := `{"client_id":"v","response_type":"vp_token","dcql_query":{"credentials":[{"id":"pid","format":"dc+sd-jwt"}]}}`
 	_, result, err := Parse(raw)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	ar := result.(*AuthorizationRequest)
-	if ar.PresentationDefinition == nil {
-		t.Fatal("expected presentation_definition")
+	if ar.DCQLQuery == nil {
+		t.Fatal("expected dcql_query")
 	}
-	if ar.PresentationDefinition["id"] != "pd1" {
-		t.Errorf("pd.id = %v, want pd1", ar.PresentationDefinition["id"])
+	creds, ok := ar.DCQLQuery["credentials"].([]any)
+	if !ok || len(creds) != 1 {
+		t.Fatalf("expected 1 credential query, got %v", ar.DCQLQuery["credentials"])
 	}
 }
 
@@ -440,8 +421,8 @@ func TestParseVPJWTPayloadMerge(t *testing.T) {
 		"state":         "s1",
 		"response_uri":  "https://verifier.example/cb",
 		"scope":         "openid",
-		"presentation_definition": map[string]any{
-			"id": "pd-from-jwt",
+		"dcql_query": map[string]any{
+			"credentials": []any{},
 		},
 	}
 	jwt := makeTestJWT(map[string]any{"alg": "ES256"}, payload)
@@ -463,11 +444,8 @@ func TestParseVPJWTPayloadMerge(t *testing.T) {
 	if ar.Scope != "openid" {
 		t.Errorf("scope = %s, want openid", ar.Scope)
 	}
-	if ar.PresentationDefinition == nil {
-		t.Fatal("expected presentation_definition from JWT payload")
-	}
-	if ar.PresentationDefinition["id"] != "pd-from-jwt" {
-		t.Errorf("pd.id = %v, want pd-from-jwt", ar.PresentationDefinition["id"])
+	if ar.DCQLQuery == nil {
+		t.Fatal("expected dcql_query from JWT payload")
 	}
 }
 

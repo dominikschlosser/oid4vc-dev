@@ -597,23 +597,6 @@ func TestBuildAuthorizationRequestJSON_WithRequestObject(t *testing.T) {
 	}
 }
 
-func TestBuildAuthorizationRequestJSON_WithPD(t *testing.T) {
-	req := &oid4vc.AuthorizationRequest{
-		ClientID:     "v",
-		ResponseType: "vp_token",
-		PresentationDefinition: map[string]any{
-			"id":                "pd1",
-			"input_descriptors": []any{},
-		},
-	}
-	result := BuildAuthorizationRequestJSON(req)
-
-	pd := result["presentation_definition"].(map[string]any)
-	if pd["id"] != "pd1" {
-		t.Errorf("pd.id = %v, want pd1", pd["id"])
-	}
-}
-
 func TestBuildAuthorizationRequestJSON_WithDCQL(t *testing.T) {
 	req := &oid4vc.AuthorizationRequest{
 		ClientID:     "v",
@@ -736,28 +719,6 @@ func TestPrintAuthorizationRequest_WithRequestObject(t *testing.T) {
 	}
 	if !strings.Contains(out, "key-1") {
 		t.Error("missing kid in request object header")
-	}
-}
-
-func TestPrintAuthorizationRequest_WithPD(t *testing.T) {
-	req := &oid4vc.AuthorizationRequest{
-		ClientID:     "v",
-		ResponseType: "vp_token",
-		PresentationDefinition: map[string]any{
-			"id":                "pd-test",
-			"input_descriptors": []any{},
-		},
-	}
-
-	out := captureOutput(func() {
-		PrintAuthorizationRequest(req, Options{})
-	})
-
-	if !strings.Contains(out, "Presentation Definition") {
-		t.Error("missing Presentation Definition section")
-	}
-	if !strings.Contains(out, "pd-test") {
-		t.Error("missing PD id in output")
 	}
 }
 

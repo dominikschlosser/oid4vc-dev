@@ -846,7 +846,7 @@ func TestDecodeJARMResponseJWEWithCEK(t *testing.T) {
 	payload := map[string]any{"vp_token": "test-cred", "state": "s1"}
 	payloadJSON, _ := json.Marshal(payload)
 
-	jwe, cek, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "kid", "A128GCM", nil)
+	jwe, cek, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "kid", "ECDH-ES", "A128GCM", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -979,7 +979,7 @@ func TestExtractCredentialsFromDecryptedJARM(t *testing.T) {
 	}
 	payloadJSON, _ := json.Marshal(payload)
 
-	jwe, cek, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "kid", "A128GCM", nil)
+	jwe, cek, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "kid", "ECDH-ES", "A128GCM", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1016,7 +1016,7 @@ func TestClassifyVPAuthResponseWithDebugKey(t *testing.T) {
 	payload := map[string]any{"vp_token": "decrypted-token", "state": "s1"}
 	payloadJSON, _ := json.Marshal(payload)
 
-	jwe, cek, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "kid", "A128GCM", nil)
+	jwe, cek, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "kid", "ECDH-ES", "A128GCM", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

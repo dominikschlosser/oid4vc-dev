@@ -635,9 +635,6 @@ func BuildAuthorizationRequestJSON(req *oid4vc.AuthorizationRequest) map[string]
 		}
 	}
 	if req.RequestObject == nil {
-		if req.PresentationDefinition != nil {
-			out["presentation_definition"] = req.PresentationDefinition
-		}
 		if req.DCQLQuery != nil {
 			out["dcql_query"] = req.DCQLQuery
 		}
@@ -696,12 +693,6 @@ func PrintAuthorizationRequest(req *oid4vc.AuthorizationRequest, opts Options) {
 	// Only print these as separate sections when there's no request object,
 	// since the request object payload already contains them.
 	if req.RequestObject == nil {
-		if req.PresentationDefinition != nil {
-			printSection("Presentation Definition")
-			b, _ := json.MarshalIndent(req.PresentationDefinition, "  ", "  ")
-			fmt.Printf("  %s\n", string(b))
-		}
-
 		if req.DCQLQuery != nil {
 			printSection("DCQL Query")
 			b, _ := json.MarshalIndent(req.DCQLQuery, "  ", "  ")

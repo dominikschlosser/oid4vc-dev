@@ -20,6 +20,7 @@ import (
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -31,12 +32,13 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
-// EncryptJWE encrypts payload as a compact JWE using ECDH-ES with AES-GCM.
+// EncryptJWE encrypts payload as a compact JWE using ECDH-ES with AES-GCM or AES-CBC-HS.
 // recipientKey is the verifier's public EC key, kid identifies it,
-// enc is the content encryption algorithm (e.g. "A128GCM" or "A256GCM"),
+// alg is the JWE key agreement algorithm from the JWK (e.g. "ECDH-ES"),
+// enc is the content encryption algorithm (e.g. "A128GCM", "A256GCM", "A128CBC-HS256"),
 // and apu is the Agreement PartyUInfo (set to mdoc_generated_nonce for ISO mode, nil otherwise).
 // Returns the JWE compact serialization and the derived content encryption key (CEK).
-func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, enc string, apu []byte) (string, []byte, error) {
+func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, alg string, enc string, apu []byte) (string, []byte, error) {
 	keyBitLen, err := encKeyBitLen(enc)
 	if err != nil {
 		return "", nil, err
@@ -67,7 +69,7 @@ func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, enc s
 	// Build protected header
 	epkX, epkY := unmarshalECDHPublicKey(ephemeralPub)
 	header := map[string]any{
-		"alg": "ECDH-ES",
+		"alg": alg,
 		"enc": enc,
 		"kid": kid,
 		"epk": map[string]any{
@@ -87,28 +89,19 @@ func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, enc s
 	}
 	headerB64 := format.EncodeBase64URL(headerJSON)
 
-	// Generate random 96-bit IV
-	iv := make([]byte, 12)
-	if _, err := rand.Read(iv); err != nil {
-		return "", nil, fmt.Errorf("generating IV: %w", err)
-	}
+	var iv, ciphertext, tag []byte
 
-	// AES-GCM encrypt with AAD = ASCII(protected header)
-	block, err := aes.NewCipher(derivedKey)
+	switch enc {
+	case "A128GCM", "A256GCM":
+		iv, ciphertext, tag, err = encryptAESGCM(derivedKey, payload, []byte(headerB64))
+	case "A128CBC-HS256":
+		iv, ciphertext, tag, err = encryptAESCBCHS256(derivedKey, payload, []byte(headerB64))
+	default:
+		return "", nil, fmt.Errorf("unsupported enc algorithm: %s", enc)
+	}
 	if err != nil {
-		return "", nil, fmt.Errorf("creating AES cipher: %w", err)
+		return "", nil, err
 	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", nil, fmt.Errorf("creating GCM: %w", err)
-	}
-
-	aad := []byte(headerB64)
-	sealed := aead.Seal(nil, iv, payload, aad)
-
-	// sealed = ciphertext || tag (tag is last 16 bytes)
-	ciphertext := sealed[:len(sealed)-aead.Overhead()]
-	tag := sealed[len(sealed)-aead.Overhead():]
 
 	// Compact serialization: header.encryptedKey.iv.ciphertext.tag
 	// ECDH-ES has no encrypted key (empty string)
@@ -117,6 +110,84 @@ func EncryptJWE(payload []byte, recipientKey *ecdsa.PublicKey, kid string, enc s
 		format.EncodeBase64URL(ciphertext) + "." +
 		format.EncodeBase64URL(tag)
 	return jweStr, derivedKey, nil
+}
+
+// encryptAESGCM encrypts with AES-GCM (for A128GCM / A256GCM).
+func encryptAESGCM(key, plaintext, aad []byte) (iv, ciphertext, tag []byte, err error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("creating AES cipher: %w", err)
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("creating GCM: %w", err)
+	}
+
+	iv = make([]byte, 12) // 96-bit IV
+	if _, err := rand.Read(iv); err != nil {
+		return nil, nil, nil, fmt.Errorf("generating IV: %w", err)
+	}
+
+	sealed := aead.Seal(nil, iv, plaintext, aad)
+	ciphertext = sealed[:len(sealed)-aead.Overhead()]
+	tag = sealed[len(sealed)-aead.Overhead():]
+	return iv, ciphertext, tag, nil
+}
+
+// encryptAESCBCHS256 encrypts with AES-128-CBC + HMAC-SHA-256 per RFC 7516 §5.2.6.
+// Key layout: derivedKey = MAC_KEY (16 bytes) || ENC_KEY (16 bytes)
+func encryptAESCBCHS256(derivedKey, plaintext, aad []byte) (iv, ciphertext, tag []byte, err error) {
+	if len(derivedKey) != 32 {
+		return nil, nil, nil, fmt.Errorf("A128CBC-HS256 requires 256-bit key, got %d bits", len(derivedKey)*8)
+	}
+
+	macKey := derivedKey[:16]
+	encKey := derivedKey[16:]
+
+	// Generate 128-bit IV
+	iv = make([]byte, aes.BlockSize) // 16 bytes
+	if _, err := rand.Read(iv); err != nil {
+		return nil, nil, nil, fmt.Errorf("generating IV: %w", err)
+	}
+
+	// PKCS#7 padding
+	padded := pkcs7Pad(plaintext, aes.BlockSize)
+
+	// AES-CBC encrypt
+	block, err := aes.NewCipher(encKey)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("creating AES cipher: %w", err)
+	}
+	ciphertext = make([]byte, len(padded))
+	cipher.NewCBCEncrypter(block, iv).CryptBlocks(ciphertext, padded)
+
+	// Compute authentication tag: HMAC-SHA-256(MAC_KEY, AAD || IV || ciphertext || AL)
+	// AL = bit length of AAD as 64-bit big-endian
+	var al [8]byte
+	binary.BigEndian.PutUint64(al[:], uint64(len(aad)*8))
+
+	mac := hmac.New(sha256.New, macKey)
+	mac.Write(aad)
+	mac.Write(iv)
+	mac.Write(ciphertext)
+	mac.Write(al[:])
+	fullMAC := mac.Sum(nil)
+
+	// Tag = first 128 bits (16 bytes) of HMAC output
+	tag = fullMAC[:16]
+
+	return iv, ciphertext, tag, nil
+}
+
+// pkcs7Pad adds PKCS#7 padding to plaintext.
+func pkcs7Pad(data []byte, blockSize int) []byte {
+	padding := blockSize - (len(data) % blockSize)
+	padded := make([]byte, len(data)+padding)
+	copy(padded, data)
+	for i := len(data); i < len(padded); i++ {
+		padded[i] = byte(padding)
+	}
+	return padded
 }
 
 // concatKDF derives a key using the Concat KDF from NIST SP 800-56A (single round for <=256 bits).
@@ -167,6 +238,8 @@ func encKeyBitLen(enc string) (int, error) {
 		return 128, nil
 	case "A256GCM":
 		return 256, nil
+	case "A128CBC-HS256":
+		return 256, nil // 128-bit MAC key + 128-bit enc key
 	default:
 		return 0, fmt.Errorf("unsupported content encryption algorithm: %s", enc)
 	}

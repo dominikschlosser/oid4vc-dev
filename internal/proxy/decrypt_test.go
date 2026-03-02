@@ -33,7 +33,7 @@ func TestDecryptJWEWithCEK(t *testing.T) {
 	payload := map[string]any{"vp_token": "test-credential", "state": "abc123"}
 	payloadJSON, _ := json.Marshal(payload)
 
-	jwe, cek, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "test-kid", "A128GCM", nil)
+	jwe, cek, err := wallet.EncryptJWE(payloadJSON, &key.PublicKey, "test-kid", "ECDH-ES", "A128GCM", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestDecryptJWEWithCEK_A256GCM(t *testing.T) {
 	}
 
 	payload := []byte(`{"test":"value"}`)
-	jwe, cek, err := wallet.EncryptJWE(payload, &key.PublicKey, "kid", "A256GCM", nil)
+	jwe, cek, err := wallet.EncryptJWE(payload, &key.PublicKey, "kid", "ECDH-ES", "A256GCM", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestDecryptJWEWithCEK_InvalidParts(t *testing.T) {
 func TestDecryptJWEWithCEK_WrongKey(t *testing.T) {
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	payload := []byte(`{"test":"value"}`)
-	jwe, _, err := wallet.EncryptJWE(payload, &key.PublicKey, "kid", "A128GCM", nil)
+	jwe, _, err := wallet.EncryptJWE(payload, &key.PublicKey, "kid", "ECDH-ES", "A128GCM", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
