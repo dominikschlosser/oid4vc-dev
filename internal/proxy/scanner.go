@@ -15,6 +15,7 @@
 package proxy
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -130,6 +131,9 @@ func (s *OutputScanner) scanCredentials(line string) {
 		if len(m) < 50 {
 			continue
 		}
+		if isRequestObjectJWT(m) {
+			continue
+		}
 		// Determine label based on context
 		label := detectCredentialLabel(line, m)
 
@@ -141,6 +145,30 @@ func (s *OutputScanner) scanCredentials(line string) {
 		})
 		s.mu.Unlock()
 	}
+}
+
+// isRequestObjectJWT returns true if the JWT header has typ "oauth-authz-req+jwt".
+func isRequestObjectJWT(token string) bool {
+	dot := strings.IndexByte(token, '.')
+	if dot < 0 {
+		return false
+	}
+	headerB64 := token[:dot]
+	// Add padding if needed
+	if m := len(headerB64) % 4; m != 0 {
+		headerB64 += strings.Repeat("=", 4-m)
+	}
+	b, err := base64.URLEncoding.DecodeString(headerB64)
+	if err != nil {
+		return false
+	}
+	var hdr struct {
+		Typ string `json:"typ"`
+	}
+	if json.Unmarshal(b, &hdr) != nil {
+		return false
+	}
+	return strings.EqualFold(hdr.Typ, "oauth-authz-req+jwt")
 }
 
 // detectCredentialLabel tries to infer a label from the surrounding line context.

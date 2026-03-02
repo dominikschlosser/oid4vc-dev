@@ -151,6 +151,16 @@ func TestDrainCredentials(t *testing.T) {
 	}
 }
 
+func TestScanSkipsOAuthAuthzReqJWT(t *testing.T) {
+	// oauth-authz-req+jwt header: {"alg":"ES256","typ":"oauth-authz-req+jwt"}
+	reqObj := "eyJhbGciOiJFUzI1NiIsInR5cCI6Im9hdXRoLWF1dGh6LXJlcStqd3QifQ.eyJyZXNwb25zZV90eXBlIjoidnBfdG9rZW4iLCJjbGllbnRfaWQiOiJ4In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+	s := NewOutputScanner()
+	s.Scan("Request Object: " + reqObj)
+	if len(s.Credentials()) != 0 {
+		t.Error("oauth-authz-req+jwt should not be detected as a credential")
+	}
+}
+
 func TestScanShortTokenIgnored(t *testing.T) {
 	s := NewOutputScanner()
 	// eyJ followed by very short content — should be ignored

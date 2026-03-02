@@ -94,19 +94,13 @@ func TestPrintEntryIncludesDecodeHints(t *testing.T) {
 	if !strings.Contains(output, "oid4vc-dev decode") {
 		t.Error("expected decode hint in output")
 	}
-	if !strings.Contains(output, "eyJhbGciOiJFUzI1NiJ9.test.sig") {
-		t.Error("expected credential in decode hint")
-	}
-	if !strings.Contains(output, "vp_token") {
-		t.Error("expected credential label in decode hint")
-	}
 }
 
 func TestPrintDecodeHintWithLabel(t *testing.T) {
 	output := captureOutput(t, func() { printDecodeHint("cred-value", "id_token", 0) })
 
-	if !strings.Contains(output, "oid4vc-dev decode 'cred-value'") {
-		t.Errorf("expected decode command with credential, got %q", output)
+	if !strings.Contains(output, "oid4vc-dev decode") {
+		t.Errorf("expected decode command, got %q", output)
 	}
 	if !strings.Contains(output, "(id_token)") {
 		t.Errorf("expected label in output, got %q", output)
@@ -116,7 +110,7 @@ func TestPrintDecodeHintWithLabel(t *testing.T) {
 func TestPrintDecodeHintWithoutLabel(t *testing.T) {
 	output := captureOutput(t, func() { printDecodeHint("cred-value", "", 0) })
 
-	if !strings.Contains(output, "oid4vc-dev decode 'cred-value'") {
+	if !strings.Contains(output, "oid4vc-dev decode") {
 		t.Errorf("expected decode command, got %q", output)
 	}
 	if strings.Contains(output, "(") {
@@ -127,11 +121,12 @@ func TestPrintDecodeHintWithoutLabel(t *testing.T) {
 func TestPrintDecodeHintWithDashboardPort(t *testing.T) {
 	output := captureOutput(t, func() { printDecodeHint("cred-value", "vp_token", 9091) })
 
-	if !strings.Contains(output, "oid4vc-dev decode 'cred-value'") {
-		t.Errorf("expected decode command, got %q", output)
-	}
+	// Should contain OSC 8 hyperlink with the URL
 	if !strings.Contains(output, "http://localhost:9091/decode?credential=cred-value") {
-		t.Errorf("expected decode URL, got %q", output)
+		t.Errorf("expected decode URL in hyperlink, got %q", output)
+	}
+	if !strings.Contains(output, "View vp_token in Decoder") {
+		t.Errorf("expected labeled link text, got %q", output)
 	}
 }
 

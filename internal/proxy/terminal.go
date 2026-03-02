@@ -112,13 +112,20 @@ func printDecodedField(key string, val any, depth int) {
 }
 
 func printDecodeHint(credential, label string, dashboardPort int) {
-	hint := fmt.Sprintf("  → oid4vc-dev decode '%s'", credential)
-	if label != "" {
-		hint += fmt.Sprintf("  (%s)", label)
-	}
-	dimColor.Println(hint)
 	if dashboardPort > 0 {
-		dimColor.Printf("  → http://localhost:%d/decode?credential=%s\n", dashboardPort, credential)
+		url := fmt.Sprintf("http://localhost:%d/decode?credential=%s", dashboardPort, credential)
+		linkText := "View in Decoder"
+		if label != "" {
+			linkText = fmt.Sprintf("View %s in Decoder", label)
+		}
+		// OSC 8 hyperlink: \033]8;;URL\033\\TEXT\033]8;;\033\\
+		dimColor.Printf("  → \033]8;;%s\033\\%s\033]8;;\033\\\n", url, linkText)
+	} else {
+		dimColor.Printf("  → oid4vc-dev decode")
+		if label != "" {
+			dimColor.Printf("  (%s)", label)
+		}
+		dimColor.Println()
 	}
 }
 
