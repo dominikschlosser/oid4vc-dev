@@ -34,8 +34,8 @@ func NewDashboard(store *Store, port int) *Dashboard {
 	return &Dashboard{store: store, port: port}
 }
 
-// ListenAndServe starts the dashboard HTTP server.
-func (d *Dashboard) ListenAndServe() error {
+// Handler returns the dashboard HTTP handler.
+func (d *Dashboard) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/entries", d.handleEntries)
@@ -49,7 +49,12 @@ func (d *Dashboard) ListenAndServe() error {
 	sub, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
-	return http.ListenAndServe(fmt.Sprintf(":%d", d.port), mux)
+	return mux
+}
+
+// ListenAndServe starts the dashboard HTTP server.
+func (d *Dashboard) ListenAndServe() error {
+	return http.ListenAndServe(fmt.Sprintf(":%d", d.port), d.Handler())
 }
 
 func (d *Dashboard) handleEntries(w http.ResponseWriter, r *http.Request) {

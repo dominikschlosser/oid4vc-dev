@@ -15,7 +15,9 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -132,33 +134,72 @@ func runProxy(cmd *cobra.Command, args []string) error {
 	dim.Println("───────────────────────────────────────")
 	fmt.Println()
 
+	// Set up signal-driven shutdown context.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	var dashboardServer *http.Server
 	if !noDashboard {
 		dashboard := proxy.NewDashboard(srv.Store(), dashboardPort)
+		dashboardServer = &http.Server{
+			Addr:    fmt.Sprintf(":%d", dashboardPort),
+			Handler: dashboard.Handler(),
+		}
 		go func() {
-			if err := dashboard.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := dashboardServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				fmt.Printf("Dashboard error: %v\n", err)
 			}
 		}()
 	}
 
-	// Handle graceful shutdown: stop subprocess on SIGINT/SIGTERM
+	proxyServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", proxyPort),
+		Handler: srv,
+		BaseContext: func(_ net.Listener) context.Context {
+			return ctx
+		},
+	}
+
+	// When subprocess exits on its own, just log it (proxy keeps running).
 	if sub != nil {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		go func() {
-			select {
-			case <-sigCh:
-				fmt.Println("\nStopping service...")
-				sub.Stop()
-			case err := <-sub.Done():
-				if err != nil {
-					fmt.Printf("\nService exited: %v\n", err)
-				} else {
-					fmt.Println("\nService exited")
-				}
+			if err := <-sub.Done(); err != nil {
+				fmt.Printf("\nService exited: %v\n", err)
+			} else {
+				fmt.Println("\nService exited")
 			}
 		}()
 	}
 
-	return http.ListenAndServe(fmt.Sprintf(":%d", proxyPort), srv)
+	// Graceful shutdown goroutine.
+	go func() {
+		<-sigCh
+		fmt.Println("\nShutting down...")
+
+		if sub != nil {
+			sub.Stop()
+		}
+		if dashboardServer != nil {
+			dashboardServer.Close()
+		}
+		proxyServer.Close()
+
+		// A second signal force-exits immediately.
+		<-sigCh
+		fmt.Println("\nForce exit")
+		os.Exit(1)
+	}()
+
+	err = proxyServer.ListenAndServe()
+	if err == http.ErrServerClosed {
+		// Wait for subprocess to finish after SIGTERM.
+		if sub != nil {
+			sub.Wait()
+		}
+		return nil
+	}
+	return err
 }
