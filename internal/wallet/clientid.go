@@ -15,6 +15,8 @@
 package wallet
 
 import (
+	"crypto/ecdsa"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"fmt"
@@ -168,6 +170,41 @@ func ValidateRequestObject(clientID string, reqObj *oid4vc.RequestObjectJWT) str
 	}
 	if typ != "oauth-authz-req+jwt" {
 		return fmt.Sprintf("Request Object has typ %q but OID4VP 1.0 requires 'oauth-authz-req+jwt'", typ)
+	}
+
+	// Verify that the alg header matches the key type in the x5c certificate.
+	if warning := verifyAlgMatchesCert(reqObj); warning != "" {
+		return warning
+	}
+
+	return ""
+}
+
+// verifyAlgMatchesCert checks that the JWT "alg" header is compatible with the
+// public key type in the x5c leaf certificate. Returns a warning on mismatch,
+// or "" if OK or if x5c is not present.
+func verifyAlgMatchesCert(reqObj *oid4vc.RequestObjectJWT) string {
+	alg, _ := reqObj.Header["alg"].(string)
+	if alg == "" {
+		return ""
+	}
+
+	// Only check when x5c is present.
+	cert, warning := extractLeafCert(reqObj)
+	if warning != "" {
+		// No x5c — nothing to cross-check.
+		return ""
+	}
+
+	switch cert.PublicKey.(type) {
+	case *ecdsa.PublicKey:
+		if !strings.HasPrefix(alg, "ES") {
+			return fmt.Sprintf("Request Object alg %q is not compatible with EC key in x5c certificate", alg)
+		}
+	case *rsa.PublicKey:
+		if !strings.HasPrefix(alg, "RS") && !strings.HasPrefix(alg, "PS") {
+			return fmt.Sprintf("Request Object alg %q is not compatible with RSA key in x5c certificate", alg)
+		}
 	}
 
 	return ""

@@ -18,6 +18,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -41,6 +42,19 @@ func testCertDER(dnsNames []string) (string, []byte) {
 		NotAfter:     time.Now().Add(time.Hour),
 		DNSNames:     dnsNames,
 		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	return base64.StdEncoding.EncodeToString(der), der
+}
+
+func testRSACertDER() (string, []byte) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "test-rsa"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(time.Hour),
+		DNSNames:     []string{"example.com"},
 	}
 	der, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	return base64.StdEncoding.EncodeToString(der), der
@@ -212,5 +226,52 @@ func TestValidateRequestObject(t *testing.T) {
 				t.Errorf("expected warning containing %q, got: %s", tt.wantMsg, warning)
 			}
 		})
+	}
+}
+
+func TestVerifyAlgMatchesCert(t *testing.T) {
+	ecCertB64, _ := testCertDER([]string{"example.com"})
+	rsaCertB64, _ := testRSACertDER()
+
+	tests := []struct {
+		name      string
+		alg       string
+		certB64   string
+		wantEmpty bool
+	}{
+		{"ES256 with EC cert", "ES256", ecCertB64, true},
+		{"ES384 with EC cert", "ES384", ecCertB64, true},
+		{"RS256 with RSA cert", "RS256", rsaCertB64, true},
+		{"PS256 with RSA cert", "PS256", rsaCertB64, true},
+		{"RS256 with EC cert", "RS256", ecCertB64, false},
+		{"PS256 with EC cert", "PS256", ecCertB64, false},
+		{"ES256 with RSA cert", "ES256", rsaCertB64, false},
+		{"no alg header", "", ecCertB64, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reqObj := reqObjWithX5C(tt.certB64)
+			reqObj.Header["typ"] = "oauth-authz-req+jwt"
+			if tt.alg != "" {
+				reqObj.Header["alg"] = tt.alg
+			}
+			warning := verifyAlgMatchesCert(reqObj)
+			if tt.wantEmpty && warning != "" {
+				t.Errorf("expected no warning, got: %s", warning)
+			}
+			if !tt.wantEmpty && warning == "" {
+				t.Error("expected a warning, got empty string")
+			}
+		})
+	}
+}
+
+func TestVerifyAlgMatchesCert_NoX5C(t *testing.T) {
+	reqObj := &oid4vc.RequestObjectJWT{
+		Header: map[string]any{"alg": "ES256", "typ": "oauth-authz-req+jwt"},
+	}
+	if warning := verifyAlgMatchesCert(reqObj); warning != "" {
+		t.Errorf("expected no warning without x5c, got: %s", warning)
 	}
 }
