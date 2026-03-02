@@ -439,6 +439,64 @@ func TestEvaluateDCQL_CredentialSets_RequiredUnsatisfiable(t *testing.T) {
 	}
 }
 
+func TestEvaluateDCQL_PartialClaimMatch_Rejected(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+
+	// Request given_name (exists in SD-JWT) and a nonexistent claim.
+	// The credential should NOT match because the missing claim is required by default.
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "pid",
+				"format": "dc+sd-jwt",
+				"meta": map[string]any{
+					"vct_values": []any{mock.DefaultPIDVCT},
+				},
+				"claims": []any{
+					map[string]any{"path": []any{"given_name"}},
+					map[string]any{"path": []any{"nonexistent_claim"}},
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 0 {
+		t.Errorf("expected 0 matches for partial claim match, got %d", len(matches))
+	}
+}
+
+func TestEvaluateDCQL_OptionalClaimMissing_Accepted(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+
+	// Request given_name (exists) and an optional nonexistent claim.
+	// The credential should match because the missing claim is optional.
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "pid",
+				"format": "dc+sd-jwt",
+				"meta": map[string]any{
+					"vct_values": []any{mock.DefaultPIDVCT},
+				},
+				"claims": []any{
+					map[string]any{"path": []any{"given_name"}},
+					map[string]any{"path": []any{"nonexistent_claim"}, "required": false},
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 match with optional claim missing, got %d", len(matches))
+	}
+	if len(matches[0].SelectedKeys) != 1 {
+		t.Errorf("expected 1 selected key (only given_name), got %d: %v",
+			len(matches[0].SelectedKeys), matches[0].SelectedKeys)
+	}
+}
+
 func TestMatchesFormat(t *testing.T) {
 	tests := []struct {
 		name    string

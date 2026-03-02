@@ -227,6 +227,9 @@ func buildClaimByID(claimsQuery []any) map[string][]any {
 }
 
 // selectAllRequestedClaims returns all requested claims that exist in the credential.
+// Per DCQL (OID4VP 1.0 Section 6), claims without claim_sets are required by default
+// unless the individual claim entry has "required": false.
+// Returns nil if any required claim is missing.
 func selectAllRequestedClaims(cred StoredCredential, claimsQuery []any) []string {
 	var selected []string
 	for _, cq := range claimsQuery {
@@ -238,9 +241,18 @@ func selectAllRequestedClaims(cred StoredCredential, claimsQuery []any) []string
 		if !ok {
 			continue
 		}
+
+		// Per DCQL spec: claims are required by default.
+		required := true
+		if r, ok := cqMap["required"].(bool); ok {
+			required = r
+		}
+
 		key := claimKeyFromPath(cred, path)
 		if key != "" {
 			selected = append(selected, key)
+		} else if required {
+			return nil
 		}
 	}
 	if len(selected) == 0 {
