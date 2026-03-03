@@ -12,7 +12,8 @@ test.describe.configure({ mode: "serial" });
 // Docker build + container startup can exceed the default 30s timeout
 test.setTimeout(120_000);
 
-test.beforeAll(async () => {
+test.beforeAll(async ({ }, testInfo) => {
+  testInfo.setTimeout(120_000);
   // Build Docker image (can take a while in CI with cold cache)
   execSync(`docker build -t ${DOCKER_IMAGE} ..`, {
     cwd: __dirname,
