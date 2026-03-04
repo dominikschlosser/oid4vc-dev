@@ -10,42 +10,42 @@ coverage:
         target: auto
         threshold: 2%
 
-ignore:
-  # Application entry point — just calls cobra root command
-  - "main.go"
+  ignore:
+    # Application entry point — just calls cobra root command
+    - "main.go"
 
-  # CLI command wiring (cobra RunE handlers, flag setup, interactive prompts).
-  # These are integration-level concerns tested manually or via E2E.
-  - "cmd/**"
+    # CLI command wiring (cobra RunE handlers, flag setup, interactive prompts).
+    # These are integration-level concerns tested manually or via E2E.
+    - "cmd/**"
 
-  # Terminal-formatted output (color printing, tabwriter).
-  # Side-effect-only code writing to stdout/stderr.
-  - "internal/output/printer.go"
+    # Terminal-formatted output (color printing, tabwriter).
+    # Side-effect-only code writing to stdout/stderr.
+    - "internal/output/printer.go"
 
-  # OS process management (exec.Command, signal forwarding, process groups).
-  # Requires real subprocesses and OS-level interaction.
-  - "internal/proxy/subprocess*.go"
+    # OS process management (exec.Command, signal forwarding, process groups).
+    # Requires real subprocesses and OS-level interaction.
+    - "internal/proxy/subprocess*.go"
 
-  # Terminal raw-mode I/O and ANSI rendering.
-  # Requires a real TTY to exercise.
-  - "internal/proxy/terminal.go"
+    # Terminal raw-mode I/O and ANSI rendering.
+    # Requires a real TTY to exercise.
+    - "internal/proxy/terminal.go"
 
-  # Live dashboard with goroutines, tickers, and terminal rendering.
-  # Tightly coupled to real-time terminal state.
-  - "internal/proxy/dashboard.go"
+    # Live dashboard with goroutines, tickers, and terminal rendering.
+    # Tightly coupled to real-time terminal state.
+    - "internal/proxy/dashboard.go"
 
-  # macOS-specific Keychain integration (Security framework via cgo).
-  # Only runs on macOS with Keychain access.
-  - "internal/wallet/register_darwin.go"
+    # macOS-specific Keychain integration (Security framework via cgo).
+    # Only runs on macOS with Keychain access.
+    - "internal/wallet/register_darwin.go"
 
-  # HTTP server lifecycle (ListenAndServe, graceful Shutdown, OS signal handling).
-  - "internal/wallet/server.go"
+    # HTTP server lifecycle (ListenAndServe, graceful Shutdown, OS signal handling).
+    - "internal/wallet/server.go"
 
-  # QR code screen capture and display — requires display/camera hardware.
-  - "internal/qr/screen.go"
+    # QR code screen capture and display — requires display/camera hardware.
+    - "internal/qr/screen.go"
 
-  # Stdin reading and HTTP URL fetching — I/O boundary code.
-  - "internal/format/input.go"
+    # Stdin reading and HTTP URL fetching — I/O boundary code.
+    - "internal/format/input.go"
 
-  # Web server lifecycle (ListenAndServe, static file embedding, route setup).
-  - "internal/web/handler.go"
+    # Web server lifecycle (ListenAndServe, static file embedding, route setup).
+    - "internal/web/handler.go"
