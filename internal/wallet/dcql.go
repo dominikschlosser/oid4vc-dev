@@ -17,6 +17,12 @@ package wallet
 import (
 	"log"
 	"sort"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
+	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
+	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
+	"github.com/dominikschlosser/oid4vc-dev/internal/validate"
 )
 
 // EvaluateDCQL matches stored credentials against a DCQL query (OID4VP 1.0 Section 6).
@@ -57,6 +63,13 @@ func (w *Wallet) EvaluateDCQL(query map[string]any) []CredentialMatch {
 			if selectedKeys == nil {
 				log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: required claims not found", queryID, typeLabel, cred.Format)
 				continue
+			}
+
+			if taList, ok := cqMap["trusted_authorities"].([]any); ok && len(taList) > 0 {
+				if !checkTrustedAuthorities(cred, taList) {
+					log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: not trusted by any trusted_authority", queryID, typeLabel, cred.Format)
+					continue
+				}
 			}
 
 			log.Printf("[DCQL]   query=%s: credential %s (%s) matched, selected claims: %v", queryID, typeLabel, cred.Format, selectedKeys)
@@ -464,4 +477,86 @@ func optionMatchesFormat(opt any, queryFormat map[string]string, format string) 
 		}
 	}
 	return false
+}
+
+// checkTrustedAuthorities validates that the credential's issuer certificate chain
+// is trusted by at least one of the given trusted authorities.
+// Each entry must have "type" and "value" fields. Only "etsi_tl" type is supported.
+func checkTrustedAuthorities(cred StoredCredential, taList []any) bool {
+	for _, taRaw := range taList {
+		taMap, ok := taRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		taType, _ := taMap["type"].(string)
+		taValue, _ := taMap["value"].(string)
+
+		switch taType {
+		case "etsi_tl":
+			if taValue == "" {
+				log.Printf("[DCQL]   trusted_authorities: etsi_tl entry missing value")
+				continue
+			}
+			if checkETSITrustList(cred, taValue) {
+				return true
+			}
+		default:
+			log.Printf("[DCQL]   trusted_authorities: unsupported type %q", taType)
+		}
+	}
+	return false
+}
+
+// checkETSITrustList fetches an ETSI trust list and validates the credential's
+// issuer certificate chain against it.
+func checkETSITrustList(cred StoredCredential, trustListURL string) bool {
+	tlRaw, err := format.FetchURL(trustListURL)
+	if err != nil {
+		log.Printf("[DCQL]   trusted_authorities: failed to fetch trust list %s: %v", trustListURL, err)
+		return false
+	}
+
+	tl, err := trustlist.Parse(tlRaw)
+	if err != nil {
+		log.Printf("[DCQL]   trusted_authorities: failed to parse trust list: %v", err)
+		return false
+	}
+
+	tlCerts := trustlist.ExtractPublicKeys(tl)
+	if len(tlCerts) == 0 {
+		log.Printf("[DCQL]   trusted_authorities: trust list contains no certificates")
+		return false
+	}
+
+	switch cred.Format {
+	case "dc+sd-jwt":
+		token, err := sdjwt.Parse(cred.Raw)
+		if err != nil {
+			log.Printf("[DCQL]   trusted_authorities: failed to parse SD-JWT: %v", err)
+			return false
+		}
+		key, err := validate.ExtractAndValidateX5C(token.Header, tlCerts)
+		if err != nil {
+			log.Printf("[DCQL]   trusted_authorities: x5c chain validation failed: %v", err)
+			return false
+		}
+		return key != nil
+
+	case "mso_mdoc":
+		doc, err := mdoc.Parse(cred.Raw)
+		if err != nil {
+			log.Printf("[DCQL]   trusted_authorities: failed to parse mDoc: %v", err)
+			return false
+		}
+		key, err := validate.ExtractAndValidateMDOCX5Chain(doc, tlCerts)
+		if err != nil {
+			log.Printf("[DCQL]   trusted_authorities: x5chain validation failed: %v", err)
+			return false
+		}
+		return key != nil
+
+	default:
+		log.Printf("[DCQL]   trusted_authorities: unsupported credential format %q for chain validation", cred.Format)
+		return false
+	}
 }

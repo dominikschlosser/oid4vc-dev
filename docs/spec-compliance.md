@@ -22,7 +22,10 @@ Status of implemented features against the relevant specifications.
 | VP Token as JSON array | Implemented | Multiple credentials in a single response |
 | `fragment` response mode | Implemented | Builds redirect URL with vp_token/state as fragment params; not the default |
 | SIOPv2 self-issued `id_token` | Implemented | `response_type=vp_token id_token` or `id_token` alone |
+| Request object `typ` header | Validated | Warns if not `oauth-authz-req+jwt` per OID4VP §5.3 |
+| `trusted_authorities` (`etsi_tl`) | Implemented | Filters credentials by issuer certificate chain against ETSI trust list |
 | `transaction_data` | Accepted with warning | Spec requires wallets to reject if unsupported; this tool intentionally accepts it with a log warning to allow testing verifiers that send it |
+| `presentation_definition` | Not supported | OID4VP 1.0 Draft 28 uses DCQL; legacy PE queries are ignored |
 
 ## OID4VCI 1.0 (OpenID for Verifiable Credential Issuance)
 
@@ -57,6 +60,7 @@ Status of implemented features against the relevant specifications.
 | Signature verification (ES256/384/512) | Implemented | |
 | Signature verification (RS256/384/512, PS256) | Implemented | |
 | SHA-256/384/512 disclosure digests | Implemented | |
+| Disclosure digest integrity check | Implemented | Verifies each disclosure hash appears in `_sd` arrays |
 
 ## mDOC / ISO 18013-5
 
@@ -77,7 +81,7 @@ Status of implemented features against the relevant specifications.
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Trust list JWT generation | Implemented | Wallet generates its own |
-| Trust list JWT parsing | Implemented | |
+| Trust list JWT parsing | Implemented | Signature not verified (intentional for debugging) |
 | Certificate chain validation against trust list | Implemented | In `validate` command |
 
 ## Token Status List (RFC 9596)

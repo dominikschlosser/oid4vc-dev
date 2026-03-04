@@ -15,6 +15,9 @@
 package wallet
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
@@ -623,5 +626,154 @@ func TestCollectArrayDigests(t *testing.T) {
 	collectArrayDigests([]any{}, digests3)
 	if len(digests3) != 0 {
 		t.Errorf("expected no digests for empty array, got %d", len(digests3))
+	}
+}
+
+// serveTrustList creates an httptest.Server serving the given trust list JWT.
+func serveTrustList(t *testing.T, tlJWT string) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/jwt")
+		fmt.Fprint(w, tlJWT)
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestEvaluateDCQL_TrustedAuthorities_Match(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+
+	// Generate a trust list from the wallet's CA cert (same CA that signed the credentials)
+	tlJWT, err := GenerateTrustListJWT(w.IssuerKey, w.CertChain[len(w.CertChain)-1])
+	if err != nil {
+		t.Fatalf("generating trust list: %v", err)
+	}
+	ts := serveTrustList(t, tlJWT)
+
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "pid",
+				"format": "dc+sd-jwt",
+				"meta":   map[string]any{"vct_values": []any{mock.DefaultPIDVCT}},
+				"claims": []any{
+					map[string]any{"path": []any{"given_name"}},
+				},
+				"trusted_authorities": []any{
+					map[string]any{"type": "etsi_tl", "value": ts.URL},
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(matches))
+	}
+	if matches[0].QueryID != "pid" {
+		t.Errorf("expected query ID 'pid', got %s", matches[0].QueryID)
+	}
+}
+
+func TestEvaluateDCQL_TrustedAuthorities_NoMatch(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+
+	// Generate a trust list from a DIFFERENT CA — credentials should NOT match
+	otherKey, _ := mock.GenerateKey()
+	otherCACert, _ := mock.GenerateCACert(otherKey)
+	tlJWT, err := GenerateTrustListJWT(otherKey, otherCACert)
+	if err != nil {
+		t.Fatalf("generating trust list: %v", err)
+	}
+	ts := serveTrustList(t, tlJWT)
+
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "pid",
+				"format": "dc+sd-jwt",
+				"meta":   map[string]any{"vct_values": []any{mock.DefaultPIDVCT}},
+				"claims": []any{
+					map[string]any{"path": []any{"given_name"}},
+				},
+				"trusted_authorities": []any{
+					map[string]any{"type": "etsi_tl", "value": ts.URL},
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 0 {
+		t.Fatalf("expected 0 matches (untrusted issuer), got %d", len(matches))
+	}
+}
+
+func TestEvaluateDCQL_TrustedAuthorities_UnknownType(t *testing.T) {
+	w := generateTestWalletWithPID(t)
+
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "pid",
+				"format": "dc+sd-jwt",
+				"meta":   map[string]any{"vct_values": []any{mock.DefaultPIDVCT}},
+				"claims": []any{
+					map[string]any{"path": []any{"given_name"}},
+				},
+				"trusted_authorities": []any{
+					map[string]any{"type": "aki", "value": "some-value"},
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 0 {
+		t.Fatalf("expected 0 matches (unknown trusted_authority type), got %d", len(matches))
+	}
+}
+
+func TestEvaluateDCQL_TrustedAuthorities_NoCertChain(t *testing.T) {
+	// Create a wallet and import a credential WITHOUT x5c
+	w := generateTestWallet(t)
+
+	sdRaw, err := mock.GenerateSDJWT(mock.SDJWTConfig{
+		Issuer:    "https://issuer.example",
+		VCT:       mock.DefaultPIDVCT,
+		Claims:    mock.SDJWTPIDClaims,
+		Key:       w.IssuerKey,
+		CertChain: nil, // no x5c
+	})
+	if err != nil {
+		t.Fatalf("GenerateSDJWT: %v", err)
+	}
+	if _, err := w.ImportCredential(sdRaw); err != nil {
+		t.Fatalf("ImportCredential: %v", err)
+	}
+
+	// Even with a matching trust list, credential has no x5c → rejected
+	tlJWT, _ := GenerateTrustListJWT(w.IssuerKey, w.CertChain[len(w.CertChain)-1])
+	ts := serveTrustList(t, tlJWT)
+
+	query := map[string]any{
+		"credentials": []any{
+			map[string]any{
+				"id":     "pid",
+				"format": "dc+sd-jwt",
+				"meta":   map[string]any{"vct_values": []any{mock.DefaultPIDVCT}},
+				"claims": []any{
+					map[string]any{"path": []any{"given_name"}},
+				},
+				"trusted_authorities": []any{
+					map[string]any{"type": "etsi_tl", "value": ts.URL},
+				},
+			},
+		},
+	}
+
+	matches := w.EvaluateDCQL(query)
+	if len(matches) != 0 {
+		t.Fatalf("expected 0 matches (no x5c in credential), got %d", len(matches))
 	}
 }
