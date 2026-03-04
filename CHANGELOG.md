@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-03-04
+
+### Added
+
+- Display version in `wallet serve` and `proxy` startup banners
+
+## [1.0.2] - 2026-03-04
+
+### Fixed
+
+- DCQL `trusted_authorities` now reads `values` (array) per OID4VP 1.0 spec instead of `value` (string)
+- Codecov ignore patterns use regex syntax to match Go coverage paths
+
 ## [1.0.1] - 2026-03-04
 
 ### Added
@@ -50,5 +63,7 @@ OID4VP, OID4VCI, SD-JWT, mDoc, and related SSI/eIDAS 2.0 protocols.
 - RFC 9596 - Token status list generation and checking
 - SIOPv2 - Self-issued ID token with JWK thumbprint subject
 
+[1.0.3]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.0.3
+[1.0.2]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.0.2
 [1.0.1]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.0.1
 [1.0.0]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.0.0

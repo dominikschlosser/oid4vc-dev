@@ -125,7 +125,7 @@ func runProxy(cmd *cobra.Command, args []string) error {
 	cyan := color.New(color.FgCyan, color.Bold)
 	dim := color.New(color.Faint)
 
-	cyan.Printf("OID4VC Dev Proxy\n")
+	cyan.Printf("OID4VC Dev Proxy %s\n", Version)
 	dim.Println("───────────────────────────────────────")
 	fmt.Printf("  Target:    %s\n", proxyTarget)
 	fmt.Printf("  Proxy:     http://localhost:%d\n", proxyPort)
