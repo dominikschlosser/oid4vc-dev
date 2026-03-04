@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-03-04
+
+### Added
+
+- Version auto-detection from Go module info for `go install` builds (falls back to ldflags, then `dev`)
+
 ## [1.0.0] - 2026-03-04
 
 First stable release of oid4vc-dev, a developer toolkit for debugging and testing
@@ -23,6 +29,7 @@ OID4VP, OID4VCI, SD-JWT, mDoc, and related SSI/eIDAS 2.0 protocols.
   - HAIP 1.0 enforcement mode
   - SIOPv2 self-issued ID token (response_type "vp_token id_token")
   - OID4VCI pre-authorized code flow with tx_code support
+  - DCQL `trusted_authorities` (`etsi_tl`) filtering
   - Session transcript generation (OID4VP and ISO 18013-7 modes)
 - **Proxy** - Debugging reverse proxy that intercepts, classifies, and decodes OID4VP/VCI traffic with:
   - Live web dashboard with SSE streaming
@@ -32,7 +39,6 @@ OID4VP, OID4VCI, SD-JWT, mDoc, and related SSI/eIDAS 2.0 protocols.
 - **Web UI** - Browser-based credential decoder and validator
 - **QR Code** - Screen capture and decode support (macOS)
 - **Docker** - Multi-arch Docker image with HTTP API for integration testing (Testcontainers support)
-
 ### Spec Compliance
 
 - OID4VP 1.0 (Draft 28) - Authorization request parsing, DCQL, JAR, all response modes
@@ -44,4 +50,5 @@ OID4VP, OID4VCI, SD-JWT, mDoc, and related SSI/eIDAS 2.0 protocols.
 - RFC 9596 - Token status list generation and checking
 - SIOPv2 - Self-issued ID token with JWK thumbprint subject
 
+[1.0.1]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.0.1
 [1.0.0]: https://github.com/dominikschlosser/oid4vc-dev/releases/tag/v1.0.0
