@@ -145,13 +145,18 @@ func HasEncryptionKey(reqObj *oid4vc.RequestObjectJWT) bool {
 	return err == nil
 }
 
-// EncryptResponse encrypts vp_token and state as a JWE for direct_post.jwt response mode.
+// EncryptResponse encrypts vp_token, optional id_token, and state as a JWE for direct_post.jwt response mode.
 // Returns the JWE string and the derived content encryption key (CEK) for debugging.
-func (w *Wallet) EncryptResponse(vpToken any, state string, mdocNonce string, params PresentationParams) (string, []byte, error) {
+func (w *Wallet) EncryptResponse(vpToken any, idToken, state string, mdocNonce string, params PresentationParams) (string, []byte, error) {
 	log.Printf("[VP] Encrypting response: response_mode=direct_post.jwt")
 	payload := map[string]any{
-		"vp_token": vpToken,
-		"state":    state,
+		"state": state,
+	}
+	if vpToken != nil {
+		payload["vp_token"] = vpToken
+	}
+	if idToken != "" {
+		payload["id_token"] = idToken
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {

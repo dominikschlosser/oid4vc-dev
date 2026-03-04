@@ -203,7 +203,16 @@ func submitPresentation(w *wallet.Wallet, store *wallet.WalletStore, matches []w
 	}
 
 	// Submit to verifier (encrypts if direct_post.jwt with encryption key)
-	result, err := w.SubmitPresentation(vpResult, parsed.State, responseURI, params)
+	// Create self-issued id_token if requested
+	var idToken string
+	if wallet.ResponseTypeContains(parsed.ResponseType, "id_token") {
+		idToken, err = w.CreateSelfIssuedIDToken(parsed.Nonce, parsed.ClientID)
+		if err != nil {
+			return fmt.Errorf("creating self-issued id_token: %w", err)
+		}
+	}
+
+	result, err := w.SubmitPresentation(vpResult, idToken, parsed.State, responseURI, params)
 	if err != nil {
 		w.AddLog("presentation", fmt.Sprintf("Submission failed: %v", err), false)
 		if submissionCh != nil {

@@ -498,7 +498,7 @@ func TestEncryptResponse_UsesEncryptedResponseEncValuesSupported(t *testing.T) {
 		RequestObject: reqObj,
 	}
 
-	jweStr, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "state", "", params)
+	jweStr, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "", "state", "", params)
 	if err != nil {
 		t.Fatalf("EncryptResponse error: %v", err)
 	}
@@ -544,7 +544,7 @@ func TestEncryptResponse_DefaultsToA128GCMWhenNoEncValues(t *testing.T) {
 		RequestObject: reqObj,
 	}
 
-	jweStr, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "state", "", params)
+	jweStr, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "", "state", "", params)
 	if err != nil {
 		t.Fatalf("EncryptResponse error: %v", err)
 	}
@@ -583,7 +583,7 @@ func TestEncryptResponse_TopLevelJWKSNotUsed(t *testing.T) {
 		RequestObject: reqObj,
 	}
 
-	_, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "state", "", params)
+	_, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "", "state", "", params)
 	if err == nil {
 		t.Fatal("expected error when JWK is only in top-level jwks (not client_metadata.jwks)")
 	}
@@ -615,7 +615,7 @@ func TestEncryptResponse_LegacyFieldNamesIgnored(t *testing.T) {
 		RequestObject: reqObj,
 	}
 
-	jweStr, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "state", "", params)
+	jweStr, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "", "state", "", params)
 	if err != nil {
 		t.Fatalf("EncryptResponse error: %v", err)
 	}
@@ -729,7 +729,7 @@ func TestSubmitPresentation_DirectPostJWT_NoEncryptionKey(t *testing.T) {
 		},
 	}
 
-	_, err := w.SubmitPresentation(vpResult, "state", params.ResponseURI, params)
+	_, err := w.SubmitPresentation(vpResult, "", "state", params.ResponseURI, params)
 	if err == nil {
 		t.Fatal("expected error when direct_post.jwt is used without encryption key")
 	}
@@ -761,7 +761,7 @@ func TestEncryptResponse_UsesAlgFromJWK(t *testing.T) {
 		RequestObject: reqObj,
 	}
 
-	jweStr, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "state", "", params)
+	jweStr, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "", "state", "", params)
 	if err != nil {
 		t.Fatalf("EncryptResponse error: %v", err)
 	}
@@ -803,7 +803,7 @@ func TestEncryptResponse_ErrorWhenJWKMissingAlg(t *testing.T) {
 		RequestObject: reqObj,
 	}
 
-	_, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "state", "", params)
+	_, _, err := w.EncryptResponse(map[string]any{"test": "value"}, "", "state", "", params)
 	if err == nil {
 		t.Fatal("expected error when JWK is missing 'alg' field")
 	}

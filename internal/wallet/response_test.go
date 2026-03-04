@@ -78,7 +78,7 @@ func TestBuildFragmentRedirect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildFragmentRedirect(tt.redirectURI, tt.state, tt.vpToken)
+			got, err := BuildFragmentRedirect(tt.redirectURI, tt.state, tt.vpToken, "")
 			if err != nil {
 				t.Fatalf("BuildFragmentRedirect() error: %v", err)
 			}

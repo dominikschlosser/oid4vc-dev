@@ -1,0 +1,312 @@
+// Copyright 2026 Dominik Schlosser
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package wallet
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/sha256"
+	"encoding/json"
+	"io"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
+)
+
+func TestCreateSelfIssuedIDToken(t *testing.T) {
+	key, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &Wallet{HolderKey: key}
+
+	token, err := w.CreateSelfIssuedIDToken("test-nonce", "https://verifier.example")
+	if err != nil {
+		t.Fatalf("CreateSelfIssuedIDToken() error: %v", err)
+	}
+
+	header, payload, _, err := format.ParseJWTParts(token)
+	if err != nil {
+		t.Fatalf("parsing JWT: %v", err)
+	}
+
+	// Check header
+	if header["alg"] != "ES256" {
+		t.Errorf("expected alg=ES256, got %v", header["alg"])
+	}
+	if header["typ"] != "JWT" {
+		t.Errorf("expected typ=JWT, got %v", header["typ"])
+	}
+	if header["jwk"] == nil {
+		t.Error("expected jwk in header")
+	}
+
+	// Check payload
+	if payload["iss"] != "https://self-issued.me/v2" {
+		t.Errorf("expected iss=https://self-issued.me/v2, got %v", payload["iss"])
+	}
+	if payload["aud"] != "https://verifier.example" {
+		t.Errorf("expected aud=https://verifier.example, got %v", payload["aud"])
+	}
+	if payload["nonce"] != "test-nonce" {
+		t.Errorf("expected nonce=test-nonce, got %v", payload["nonce"])
+	}
+	if payload["sub"] == nil || payload["sub"] == "" {
+		t.Error("expected non-empty sub (JWK thumbprint)")
+	}
+	if payload["sub_jwk"] == nil {
+		t.Error("expected sub_jwk in payload")
+	}
+	if payload["iat"] == nil {
+		t.Error("expected iat in payload")
+	}
+	if payload["exp"] == nil {
+		t.Error("expected exp in payload")
+	}
+
+	// Verify exp > iat
+	iat, _ := payload["iat"].(float64)
+	exp, _ := payload["exp"].(float64)
+	if exp <= iat {
+		t.Errorf("expected exp > iat, got exp=%v iat=%v", exp, iat)
+	}
+
+	// Verify signature
+	if !verifyES256(t, token, &key.PublicKey) {
+		t.Error("signature verification failed")
+	}
+}
+
+func TestJWKThumbprint(t *testing.T) {
+	// Use a known key to verify thumbprint computation.
+	// RFC 7638 §3.1 example uses RSA, so we just verify our P-256 implementation
+	// produces a stable, deterministic result.
+	key, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tp1, err := jwkThumbprint(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tp2, err := jwkThumbprint(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if tp1 != tp2 {
+		t.Errorf("thumbprint not deterministic: %s != %s", tp1, tp2)
+	}
+	if tp1 == "" {
+		t.Error("thumbprint should not be empty")
+	}
+
+	// Verify it's a base64url-encoded SHA-256 (32 bytes → 43 chars in base64url without padding)
+	if len(tp1) != 43 {
+		t.Errorf("expected 43 char base64url thumbprint, got %d chars: %s", len(tp1), tp1)
+	}
+}
+
+func TestJWKThumbprint_KnownVector(t *testing.T) {
+	// Manually construct a key with known coordinates and verify the thumbprint
+	// matches the expected SHA-256 of the canonical JWK form.
+	x, _ := new(big.Int).SetString("60FED4BA255A9D31C961EB74C6356D68C049B8923B61FA6CE669622E60F29FB6", 16)
+	y, _ := new(big.Int).SetString("7903FE1008B8BC99A41AE9E95628BC64F2F1B20C2D7E9F5177A3C294D4462299", 16)
+
+	key := &ecdsa.PublicKey{
+		Curve: elliptic.P256(),
+		X:     x,
+		Y:     y,
+	}
+
+	tp, err := jwkThumbprint(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify by computing expected thumbprint manually
+	jwk := mock.PublicKeyJWKMap(key)
+	canonical := `{"crv":"` + jwk["crv"] + `","kty":"` + jwk["kty"] + `","x":"` + jwk["x"] + `","y":"` + jwk["y"] + `"}`
+	h := sha256.Sum256([]byte(canonical))
+	expected := format.EncodeBase64URL(h[:])
+
+	if tp != expected {
+		t.Errorf("thumbprint mismatch: got %s, expected %s", tp, expected)
+	}
+}
+
+func TestResponseTypeContains(t *testing.T) {
+	tests := []struct {
+		responseType string
+		target       string
+		want         bool
+	}{
+		{"vp_token", "vp_token", true},
+		{"vp_token", "id_token", false},
+		{"vp_token id_token", "vp_token", true},
+		{"vp_token id_token", "id_token", true},
+		{"id_token", "id_token", true},
+		{"id_token", "vp_token", false},
+		{"", "vp_token", false},
+		{"vp_token  id_token", "id_token", true}, // extra spaces
+	}
+
+	for _, tt := range tests {
+		got := ResponseTypeContains(tt.responseType, tt.target)
+		if got != tt.want {
+			t.Errorf("ResponseTypeContains(%q, %q) = %v, want %v", tt.responseType, tt.target, got, tt.want)
+		}
+	}
+}
+
+func verifyES256(t *testing.T, token string, pub *ecdsa.PublicKey) bool {
+	t.Helper()
+	_, _, sig, err := format.ParseJWTParts(token)
+	if err != nil {
+		t.Fatalf("parsing JWT for verification: %v", err)
+	}
+
+	// Extract signing input (everything before last dot)
+	parts := splitJWT(token)
+	sigInput := parts[0] + "." + parts[1]
+	h := sha256.Sum256([]byte(sigInput))
+
+	keySize := (pub.Curve.Params().BitSize + 7) / 8
+	if len(sig) != 2*keySize {
+		t.Fatalf("unexpected signature length: %d", len(sig))
+	}
+	r := new(big.Int).SetBytes(sig[:keySize])
+	s := new(big.Int).SetBytes(sig[keySize:])
+
+	return ecdsa.Verify(pub, h[:], r, s)
+}
+
+func splitJWT(token string) [3]string {
+	var parts [3]string
+	i := 0
+	for j := 0; j < len(token) && i < 3; j++ {
+		if token[j] == '.' && i < 2 {
+			parts[i] = token[:j]
+			token = token[j+1:]
+			j = -1
+			i++
+		}
+	}
+	parts[i] = token
+	return parts
+}
+
+func TestBuildFragmentRedirect_WithIDToken(t *testing.T) {
+	vpToken := map[string][]string{"pid": {"token1"}}
+	got, err := BuildFragmentRedirect("https://verifier.example/cb", "state1", vpToken, "eyJhbGciOiJFUzI1NiJ9.test.sig")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify all parts present
+	for _, want := range []string{"vp_token=", "id_token=", "state=state1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected URL to contain %q, got: %s", want, got)
+		}
+	}
+}
+
+func TestBuildFragmentRedirect_IDTokenOnly(t *testing.T) {
+	got, err := BuildFragmentRedirect("https://verifier.example/cb", "state1", nil, "eyJhbGciOiJFUzI1NiJ9.test.sig")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(got, "id_token=") {
+		t.Errorf("expected id_token in URL, got: %s", got)
+	}
+	if strings.Contains(got, "vp_token=") {
+		t.Errorf("expected no vp_token when nil, got: %s", got)
+	}
+}
+
+// TestServerIDTokenFlow tests the full SIOPv2 id_token flow through the server.
+func TestServerIDTokenFlow(t *testing.T) {
+	srv := newTestServer(t, true)
+
+	// Set up a verifier that checks for both vp_token and id_token
+	var receivedVPToken, receivedIDToken string
+	verifier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		form, _ := url.ParseQuery(string(body))
+		receivedVPToken = form.Get("vp_token")
+		receivedIDToken = form.Get("id_token")
+		w.WriteHeader(200)
+		w.Write([]byte(`{}`))
+	}))
+	defer verifier.Close()
+
+	dcqlQuery := pidDCQLQuery()
+	dcqlJSON, _ := json.Marshal(dcqlQuery)
+
+	qp := url.Values{
+		"client_id":     {"https://verifier.example"},
+		"response_type": {"vp_token id_token"},
+		"nonce":         {"nonce123"},
+		"state":         {"state456"},
+		"response_uri":  {verifier.URL},
+		"dcql_query":    {string(dcqlJSON)},
+	}
+
+	req := httptest.NewRequest("GET", "/authorize?"+qp.Encode(), nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decodeJSON(t, w)
+	if result["status"] != "submitted" {
+		t.Fatalf("expected submitted, got %v", result["status"])
+	}
+
+	if receivedVPToken == "" {
+		t.Error("expected vp_token in verifier request")
+	}
+	if receivedIDToken == "" {
+		t.Error("expected id_token in verifier request")
+	}
+
+	// Verify the id_token is a valid JWT
+	header, payload, _, err := format.ParseJWTParts(receivedIDToken)
+	if err != nil {
+		t.Fatalf("parsing id_token: %v", err)
+	}
+	if header["alg"] != "ES256" {
+		t.Errorf("expected alg=ES256, got %v", header["alg"])
+	}
+	if payload["iss"] != "https://self-issued.me/v2" {
+		t.Errorf("expected SIOPv2 issuer, got %v", payload["iss"])
+	}
+	if payload["aud"] != "https://verifier.example" {
+		t.Errorf("expected aud=https://verifier.example, got %v", payload["aud"])
+	}
+	if payload["nonce"] != "nonce123" {
+		t.Errorf("expected nonce=nonce123, got %v", payload["nonce"])
+	}
+}

@@ -113,6 +113,8 @@ oid4vc-dev wallet serve --register --port 9000
 Auto-detects the URI type and dispatches to the appropriate flow:
 
 - `openid4vp://`, `haip://`, `eudi-openid4vp://` → OID4VP presentation (evaluates DCQL, shows consent UI, submits VP token)
+  - Supports `response_type=vp_token id_token` (SIOPv2 + OID4VP combined flow) — generates a self-issued ID token alongside the VP token
+  - Supports `response_type=id_token` (SIOPv2 only) — generates a self-issued ID token without VP token
 - `openid-credential-offer://` → OID4VCI credential issuance (fetches credential from issuer)
 
 In interactive mode (default), OID4VP requests start a temporary consent UI server and auto-open it in the browser. With `--auto-accept`, auto-selects and submits the first matching credentials.

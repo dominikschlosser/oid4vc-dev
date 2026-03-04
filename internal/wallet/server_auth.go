@@ -225,6 +225,7 @@ func (s *Server) submitPresentation(w http.ResponseWriter, authReq *Authorizatio
 
 	s.log("  Submitting VP token to %s", responseURI)
 
+	var err error
 	// Create VP tokens
 	params := PresentationParams{
 		Nonce:         authReq.Nonce,
@@ -234,18 +235,33 @@ func (s *Server) submitPresentation(w http.ResponseWriter, authReq *Authorizatio
 		ResponseMode:  authReq.ResponseMode,
 		RequestObject: authReq.RequestObject,
 	}
-	vpResult, err := s.wallet.CreateVPTokenMap(matches, params)
-	if err != nil {
-		s.log("  ERROR: VP token creation failed: %v", err)
-		s.wallet.AddLog("presentation", fmt.Sprintf("VP token creation failed: %v", err), false)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return SubmissionResult{Error: err.Error()}
+	var vpResult *VPTokenMapResult
+	if ResponseTypeContains(authReq.ResponseType, "vp_token") || authReq.ResponseType == "" {
+		vpResult, err = s.wallet.CreateVPTokenMap(matches, params)
+		if err != nil {
+			s.log("  ERROR: VP token creation failed: %v", err)
+			s.wallet.AddLog("presentation", fmt.Sprintf("VP token creation failed: %v", err), false)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return SubmissionResult{Error: err.Error()}
+		}
+		s.log("  VP tokens:     %d created", len(vpResult.TokenMap))
 	}
 
-	s.log("  VP tokens:     %d created", len(vpResult.TokenMap))
+	// Create self-issued id_token if requested
+	var idToken string
+	if ResponseTypeContains(authReq.ResponseType, "id_token") {
+		idToken, err = s.wallet.CreateSelfIssuedIDToken(authReq.Nonce, authReq.ClientID)
+		if err != nil {
+			s.log("  ERROR: id_token creation failed: %v", err)
+			s.wallet.AddLog("presentation", fmt.Sprintf("id_token creation failed: %v", err), false)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return SubmissionResult{Error: err.Error()}
+		}
+		s.log("  id_token:      created (SIOPv2)")
+	}
 
 	// Submit to verifier (encrypts if direct_post.jwt with encryption key)
-	result, err := s.wallet.SubmitPresentation(vpResult, authReq.State, responseURI, params)
+	result, err := s.wallet.SubmitPresentation(vpResult, idToken, authReq.State, responseURI, params)
 	if err != nil {
 		s.log("  ERROR: Submission failed: %v", err)
 		s.wallet.AddLog("presentation", fmt.Sprintf("Submission failed: %v", err), false)

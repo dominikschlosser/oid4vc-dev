@@ -51,8 +51,8 @@ func classifyEntry(e *TrafficEntry) TrafficClass {
 		return ClassVCICredentialOffer
 	}
 
-	// VP Auth Request: client_id + response_type=vp_token
-	if query.Get("client_id") != "" && query.Get("response_type") == "vp_token" {
+	// VP Auth Request: client_id + response_type containing vp_token or id_token (SIOPv2)
+	if query.Get("client_id") != "" && containsResponseType(query.Get("response_type"), "vp_token", "id_token") {
 		return ClassVPAuthRequest
 	}
 
@@ -412,6 +412,18 @@ func extractJARMCredentials(payload map[string]any) ([]string, []string) {
 }
 
 // hasBodyField checks whether a field exists in either URL-encoded form data or JSON body.
+// containsResponseType checks if a space-separated response_type string contains any of the given values.
+func containsResponseType(responseType string, targets ...string) bool {
+	for _, part := range strings.Fields(responseType) {
+		for _, t := range targets {
+			if part == t {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func hasBodyField(body, field string) bool {
 	if values, err := url.ParseQuery(body); err == nil && values.Has(field) {
 		return true

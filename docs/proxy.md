@@ -27,7 +27,7 @@ Traffic is automatically classified into protocol steps:
 
 | Badge               | Detected when                                                     |
 |---------------------|-------------------------------------------------------------------|
-| VP Auth Request     | `client_id` + `response_type=vp_token` in query                  |
+| VP Auth Request     | `client_id` + `response_type` containing `vp_token` or `id_token` in query |
 | VP Request Object   | Response body is a JWT (request object fetch)                     |
 | VP Auth Response    | POST body contains `vp_token`, `presentation_submission`, `id_token`, or `response` (JARM) |
 | VCI Credential Offer| `credential_offer` / `credential_offer_uri` in query              |

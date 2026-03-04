@@ -228,15 +228,23 @@ func (r *VPTokenMapResult) QueryIDs() []string {
 }
 
 // SubmitPresentation builds the vp_token, optionally encrypts it, and submits to the verifier.
-func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, state, responseURI string, params PresentationParams) (*DirectPostResult, error) {
-	vpToken := vpResult.VPToken()
+// If idToken is non-empty, it is included alongside vp_token in the response.
+func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, idToken, state, responseURI string, params PresentationParams) (*DirectPostResult, error) {
+	var vpToken map[string][]string
+	if vpResult != nil {
+		vpToken = vpResult.VPToken()
+	}
+	var mdocNonce string
+	if vpResult != nil {
+		mdocNonce = vpResult.MDocNonce
+	}
 
 	switch params.ResponseMode {
 	case "direct_post.jwt":
 		if !HasEncryptionKey(params.RequestObject) {
 			return nil, fmt.Errorf("response_mode is direct_post.jwt but no encryption key found in client_metadata.jwks — verifier must provide JWK per OID4VP 1.0")
 		}
-		jwe, cek, err := w.EncryptResponse(vpToken, state, vpResult.MDocNonce, params)
+		jwe, cek, err := w.EncryptResponse(vpToken, idToken, state, mdocNonce, params)
 		if err != nil {
 			return nil, fmt.Errorf("encrypting response: %w", err)
 		}
@@ -247,7 +255,7 @@ func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, state, responseU
 		if redirectURI == "" {
 			redirectURI = responseURI
 		}
-		redirectURL, err := BuildFragmentRedirect(redirectURI, state, vpToken)
+		redirectURL, err := BuildFragmentRedirect(redirectURI, state, vpToken, idToken)
 		if err != nil {
 			return nil, fmt.Errorf("building fragment redirect: %w", err)
 		}
@@ -259,7 +267,7 @@ func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, state, responseU
 
 	default:
 		// direct_post (default)
-		return SubmitDirectPost(responseURI, state, vpToken)
+		return SubmitDirectPost(responseURI, state, vpToken, idToken)
 	}
 }
 

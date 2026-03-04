@@ -21,6 +21,7 @@ Status of implemented features against the relevant specifications.
 | `decentralized_identifier:` client_id | Validated | DID format validation, `kid` cross-check (full DID resolution not implemented) |
 | VP Token as JSON array | Implemented | Multiple credentials in a single response |
 | `fragment` response mode | Implemented | Builds redirect URL with vp_token/state as fragment params; not the default |
+| SIOPv2 self-issued `id_token` | Implemented | `response_type=vp_token id_token` or `id_token` alone |
 | `transaction_data` | Not implemented | Optional for verifiers to send; wallets MUST reject if unsupported |
 
 ## OID4VCI 1.0 (OpenID for Verifiable Credential Issuance)

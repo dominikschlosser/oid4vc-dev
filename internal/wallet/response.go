@@ -25,18 +25,23 @@ import (
 	"strings"
 )
 
-// SubmitDirectPost submits a VP token via direct_post to the response URI.
-func SubmitDirectPost(responseURI, state string, vpToken any) (*DirectPostResult, error) {
+// SubmitDirectPost submits a VP token and optional id_token via direct_post to the response URI.
+func SubmitDirectPost(responseURI, state string, vpToken any, idToken string) (*DirectPostResult, error) {
 	form := url.Values{}
 	if state != "" {
 		form.Set("state", state)
 	}
 
-	tokenJSON, err := json.Marshal(vpToken)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling vp_token: %w", err)
+	if vpToken != nil {
+		tokenJSON, err := json.Marshal(vpToken)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling vp_token: %w", err)
+		}
+		form.Set("vp_token", string(tokenJSON))
 	}
-	form.Set("vp_token", string(tokenJSON))
+	if idToken != "" {
+		form.Set("id_token", idToken)
+	}
 
 	resp, err := http.PostForm(responseURI, form)
 	if err != nil {
@@ -125,16 +130,20 @@ func SubmitDirectPostJWT(responseURI string, responseJWT string, cek []byte) (*D
 	return result, nil
 }
 
-// BuildFragmentRedirect constructs a redirect URL with vp_token and state as
+// BuildFragmentRedirect constructs a redirect URL with vp_token, optional id_token, and state as
 // fragment parameters per OID4VP 1.0 fragment response mode.
-func BuildFragmentRedirect(redirectURI, state string, vpToken any) (string, error) {
-	tokenJSON, err := json.Marshal(vpToken)
-	if err != nil {
-		return "", fmt.Errorf("marshaling vp_token: %w", err)
-	}
-
+func BuildFragmentRedirect(redirectURI, state string, vpToken any, idToken string) (string, error) {
 	fragment := url.Values{}
-	fragment.Set("vp_token", string(tokenJSON))
+	if vpToken != nil {
+		tokenJSON, err := json.Marshal(vpToken)
+		if err != nil {
+			return "", fmt.Errorf("marshaling vp_token: %w", err)
+		}
+		fragment.Set("vp_token", string(tokenJSON))
+	}
+	if idToken != "" {
+		fragment.Set("id_token", idToken)
+	}
 	if state != "" {
 		fragment.Set("state", state)
 	}
