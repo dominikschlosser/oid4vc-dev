@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 

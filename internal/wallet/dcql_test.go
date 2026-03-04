@@ -499,10 +499,10 @@ func TestEvaluateDCQL_OptionalClaimMissing_Accepted(t *testing.T) {
 
 func TestMatchesFormat(t *testing.T) {
 	tests := []struct {
-		name    string
-		format  string
-		query   string
-		want    bool
+		name   string
+		format string
+		query  string
+		want   bool
 	}{
 		{"exact match", "dc+sd-jwt", "dc+sd-jwt", true},
 		{"mismatch", "dc+sd-jwt", "mso_mdoc", false},

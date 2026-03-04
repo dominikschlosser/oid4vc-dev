@@ -129,7 +129,7 @@ func TestHandleEntriesEmpty(t *testing.T) {
 	var entries []map[string]any
 	json.NewDecoder(w.Result().Body).Decode(&entries)
 	// json.Decode on `null` returns nil for slices
-	if entries != nil && len(entries) != 0 {
+	if len(entries) != 0 {
 		t.Errorf("expected empty entries, got %d", len(entries))
 	}
 }

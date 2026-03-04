@@ -1,0 +1,249 @@
+// Copyright 2026 Dominik Schlosser
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package wallet
+
+import (
+	"crypto/rand"
+	"crypto/sha256"
+	"fmt"
+
+	"github.com/fxamacker/cbor/v2"
+	"github.com/veraison/go-cose"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+)
+
+// createMDocPresentation creates an mDoc DeviceResponse with selected data elements.
+func (w *Wallet) createMDocPresentation(cred StoredCredential, selectedKeys []string, params PresentationParams) (VPTokenResult, error) {
+	nonce := params.Nonce
+	clientID := params.ClientID
+	responseURI := params.ResponseURI
+	// Build set of selected namespace:element pairs
+	selected := make(map[string]bool, len(selectedKeys))
+	for _, k := range selectedKeys {
+		selected[k] = true
+	}
+
+	// Parse the raw credential to get the IssuerSigned structure
+	rawBytes, err := format.DecodeHexOrBase64URL(cred.Raw)
+	if err != nil {
+		return VPTokenResult{}, fmt.Errorf("decoding mDoc: %w", err)
+	}
+
+	var issuerSigned map[string]cbor.RawMessage
+	if err := cbor.Unmarshal(rawBytes, &issuerSigned); err != nil {
+		return VPTokenResult{}, fmt.Errorf("parsing IssuerSigned CBOR: %w", err)
+	}
+
+	// Filter namespaces to only include selected data elements
+	filteredNS := make(map[string][]cbor.RawMessage)
+	for ns, items := range cred.NameSpaces {
+		// Re-parse the raw namespace items from the original
+		var rawNSItems []cbor.RawMessage
+		var allNS map[string][]cbor.RawMessage
+		if nsRaw, ok := issuerSigned["nameSpaces"]; ok {
+			if err := cbor.Unmarshal(nsRaw, &allNS); err == nil {
+				rawNSItems = allNS[ns]
+			}
+		}
+
+		var filtered []cbor.RawMessage
+		for i, item := range items {
+			key := ns + ":" + item.ElementIdentifier
+			if selected[key] {
+				if i < len(rawNSItems) {
+					filtered = append(filtered, rawNSItems[i])
+				}
+			}
+		}
+		if len(filtered) > 0 {
+			filteredNS[ns] = filtered
+		}
+	}
+
+	docType := cred.DocType
+
+	// Build session transcript based on mode
+	mode := w.SessionTranscript
+	if mode == "" {
+		mode = SessionTranscriptOID4VP
+	}
+
+	var mdocNonce string
+	if mode == SessionTranscriptISO {
+		// ISO mode needs mdocGeneratedNonce
+		nonceBytes := make([]byte, 16)
+		if _, err := rand.Read(nonceBytes); err != nil {
+			return VPTokenResult{}, fmt.Errorf("generating nonce: %w", err)
+		}
+		mdocNonce = format.EncodeBase64URL(nonceBytes)
+	}
+
+	jwkThumbprint := extractJWKThumbprint(params.RequestObject)
+	sessionTranscriptBytes, err := w.buildSessionTranscript(clientID, responseURI, nonce, mdocNonce, jwkThumbprint)
+	if err != nil {
+		return VPTokenResult{}, fmt.Errorf("building SessionTranscript: %w", err)
+	}
+
+	// Create DeviceAuth using COSE_Sign1
+	deviceAuthBytes, err := w.createDeviceAuth(sessionTranscriptBytes, docType)
+	if err != nil {
+		return VPTokenResult{}, fmt.Errorf("creating DeviceAuth: %w", err)
+	}
+
+	// Build Document structure
+	document := map[string]any{
+		"docType": docType,
+		"issuerSigned": map[string]any{
+			"nameSpaces": filteredNS,
+			"issuerAuth": issuerSigned["issuerAuth"],
+		},
+		"deviceSigned": map[string]any{
+			"nameSpaces": map[string]any{},
+			"deviceAuth": map[string]any{
+				"deviceSignature": cbor.RawMessage(deviceAuthBytes),
+			},
+		},
+	}
+
+	deviceResponse := map[string]any{
+		"version":   "1.0",
+		"documents": []any{document},
+		"status":    0,
+	}
+
+	responseBytes, err := cbor.Marshal(deviceResponse)
+	if err != nil {
+		return VPTokenResult{}, fmt.Errorf("encoding DeviceResponse: %w", err)
+	}
+
+	return VPTokenResult{
+		Token:     format.EncodeBase64URL(responseBytes),
+		MDocNonce: mdocNonce,
+	}, nil
+}
+
+// buildSessionTranscript constructs the SessionTranscript CBOR bytes using the
+// configured mode (ISO 18013-7 or OID4VP).
+func (w *Wallet) buildSessionTranscript(clientID, responseURI, nonce, mdocNonce string, jwkThumbprint []byte) ([]byte, error) {
+	mode := w.SessionTranscript
+	if mode == "" {
+		mode = SessionTranscriptOID4VP // default
+	}
+
+	switch mode {
+	case SessionTranscriptISO:
+		return buildSessionTranscriptISO(clientID, responseURI, nonce, mdocNonce)
+	case SessionTranscriptOID4VP:
+		return buildSessionTranscriptOID4VP(clientID, nonce, jwkThumbprint, responseURI)
+	default:
+		return nil, fmt.Errorf("unknown session transcript mode: %s", mode)
+	}
+}
+
+// buildSessionTranscriptISO builds the ISO 18013-7 Annex B.4.4 session transcript.
+// Hash inputs are CBOR-encoded [value, mdocGeneratedNonce] arrays.
+func buildSessionTranscriptISO(clientID, responseURI, nonce, mdocNonce string) ([]byte, error) {
+	// clientIdToHash = CBOR_encode([clientId, mdocGeneratedNonce])
+	clientIDToHash, err := cbor.Marshal([]string{clientID, mdocNonce})
+	if err != nil {
+		return nil, fmt.Errorf("encoding clientIdToHash: %w", err)
+	}
+	clientIDHash := sha256.Sum256(clientIDToHash)
+
+	// responseUriToHash = CBOR_encode([responseUri, mdocGeneratedNonce])
+	responseURIToHash, err := cbor.Marshal([]string{responseURI, mdocNonce})
+	if err != nil {
+		return nil, fmt.Errorf("encoding responseUriToHash: %w", err)
+	}
+	responseURIHash := sha256.Sum256(responseURIToHash)
+
+	// Handover = [clientIdHash, responseUriHash, nonce]
+	handover := []any{
+		clientIDHash[:],
+		responseURIHash[:],
+		nonce,
+	}
+
+	// SessionTranscript = [null, null, Handover]
+	sessionTranscript := []any{nil, nil, handover}
+	return cbor.Marshal(sessionTranscript)
+}
+
+// buildSessionTranscriptOID4VP builds the OID4VP 1.0 session transcript.
+// HandoverInfo = CBOR([clientId, nonce, jwkThumbprint, responseUri])
+// OID4VPHandover = ["OpenID4VPHandover", SHA256(HandoverInfo)]
+// SessionTranscript = [null, null, OID4VPHandover]
+func buildSessionTranscriptOID4VP(clientID, nonce string, jwkThumbprint []byte, responseURI string) ([]byte, error) {
+	// HandoverInfo = CBOR([clientId, nonce, jwkThumbprint|null, responseUri])
+	var thumbprintValue any
+	if len(jwkThumbprint) > 0 {
+		thumbprintValue = jwkThumbprint
+	}
+	handoverInfo, err := cbor.Marshal([]any{clientID, nonce, thumbprintValue, responseURI})
+	if err != nil {
+		return nil, fmt.Errorf("encoding HandoverInfo: %w", err)
+	}
+	hash := sha256.Sum256(handoverInfo)
+
+	// OID4VPHandover = ["OpenID4VPHandover", hash]
+	oid4vpHandover := []any{"OpenID4VPHandover", hash[:]}
+
+	// SessionTranscript = [null, null, OID4VPHandover]
+	sessionTranscript := []any{nil, nil, oid4vpHandover}
+	return cbor.Marshal(sessionTranscript)
+}
+
+// createDeviceAuth creates a COSE_Sign1 DeviceAuth with proper DeviceAuthentication payload.
+// DeviceAuthentication = ["DeviceAuthentication", SessionTranscript, DocType, DeviceNameSpaces]
+// The payload is Tag24(CBOR(DeviceAuthentication)).
+func (w *Wallet) createDeviceAuth(sessionTranscriptBytes []byte, docType string) ([]byte, error) {
+	signer, err := cose.NewSigner(cose.AlgorithmES256, w.HolderKey)
+	if err != nil {
+		return nil, fmt.Errorf("creating COSE signer: %w", err)
+	}
+
+	// Decode sessionTranscriptBytes back to structured CBOR value
+	var sessionTranscript cbor.RawMessage = sessionTranscriptBytes
+
+	// DeviceAuthentication = ["DeviceAuthentication", SessionTranscript, DocType, {}]
+	deviceAuth := []any{
+		"DeviceAuthentication",
+		sessionTranscript,
+		docType,
+		map[string]any{}, // empty DeviceNameSpaces
+	}
+
+	deviceAuthBytes, err := cbor.Marshal(deviceAuth)
+	if err != nil {
+		return nil, fmt.Errorf("encoding DeviceAuthentication: %w", err)
+	}
+
+	// Wrap in Tag 24
+	tag24Payload, err := cbor.Marshal(cbor.Tag{Number: 24, Content: deviceAuthBytes})
+	if err != nil {
+		return nil, fmt.Errorf("encoding Tag24(DeviceAuthentication): %w", err)
+	}
+
+	msg := cose.NewSign1Message()
+	msg.Headers.Protected.SetAlgorithm(cose.AlgorithmES256)
+	msg.Payload = tag24Payload
+
+	if err := msg.Sign(rand.Reader, nil, signer); err != nil {
+		return nil, fmt.Errorf("COSE signing: %w", err)
+	}
+
+	return msg.MarshalCBOR()
+}

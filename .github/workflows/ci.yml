@@ -23,10 +23,52 @@ jobs:
         run: go build -v ./...
 
       - name: Vet
-        run: go vet ./...
+        run: |
+          echo '## `go vet`' >> "$GITHUB_STEP_SUMMARY"
+          if output=$(go vet ./... 2>&1); then
+            echo '✅ No issues found' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "$output" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "$output"
+            exit 1
+          fi
+
+      - name: Lint
+        if: matrix.go-version == '1.26'
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: Lint summary
+        if: matrix.go-version == '1.26' && always()
+        run: |
+          echo '## Lint (golangci-lint)' >> "$GITHUB_STEP_SUMMARY"
+          if output=$(golangci-lint run ./... 2>&1); then
+            echo '✅ No issues found' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            echo "$output" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Test
-        run: go test -v ./...
+        run: go test -coverprofile=coverage.out ./...
+
+      - name: Coverage summary
+        if: matrix.go-version == '1.26'
+        run: |
+          echo '## Coverage' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          go tool cover -func=coverage.out | tail -20 >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage
+        if: matrix.go-version == '1.26'
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
 
   e2e:
     runs-on: ubuntu-latest

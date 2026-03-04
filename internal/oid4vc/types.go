@@ -41,19 +41,19 @@ type OfferGrants struct {
 
 // AuthorizationRequest represents a parsed OID4VP authorization request.
 type AuthorizationRequest struct {
-	ClientID               string
-	ResponseType           string
-	ResponseMode           string
-	Nonce                  string
-	State                  string
-	RedirectURI            string
-	ResponseURI            string
-	Scope              string
-	RequestURIMethod   string // "get" (default) or "post" per OID4VP 1.0 §5.10
-	DCQLQuery          map[string]any
-	RequestObject      *RequestObjectJWT
-	FullParams         map[string]string
-	FullJSON           map[string]any
+	ClientID         string
+	ResponseType     string
+	ResponseMode     string
+	Nonce            string
+	State            string
+	RedirectURI      string
+	ResponseURI      string
+	Scope            string
+	RequestURIMethod string // "get" (default) or "post" per OID4VP 1.0 §5.10
+	DCQLQuery        map[string]any
+	RequestObject    *RequestObjectJWT
+	FullParams       map[string]string
+	FullJSON         map[string]any
 }
 
 // RequestObjectJWT holds the decoded header and payload of a JWT request object.

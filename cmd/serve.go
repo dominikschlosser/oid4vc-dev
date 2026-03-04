@@ -17,9 +17,11 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/config"
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/web"
-	"github.com/spf13/cobra"
 )
 
 var port int
@@ -33,7 +35,7 @@ var serveCmd = &cobra.Command{
 }
 
 func init() {
-	serveCmd.Flags().IntVar(&port, "port", 8080, "Port to listen on")
+	serveCmd.Flags().IntVar(&port, "port", config.DefaultServePort, "Port to listen on")
 	rootCmd.AddCommand(serveCmd)
 }
 

@@ -24,14 +24,14 @@ import (
 type TrafficClass int
 
 const (
-	ClassUnknown             TrafficClass = iota
-	ClassVPAuthRequest                    // GET with client_id, response_type=vp_token
-	ClassVPRequestObject                  // GET request_uri → JWT response
-	ClassVPAuthResponse                   // POST with vp_token to response_uri
-	ClassVCICredentialOffer               // credential_offer / credential_offer_uri
-	ClassVCIMetadata                      // .well-known/openid-credential-issuer
-	ClassVCITokenRequest                  // POST to token endpoint
-	ClassVCICredentialRequest             // POST to credential endpoint
+	ClassUnknown              TrafficClass = iota
+	ClassVPAuthRequest                     // GET with client_id, response_type=vp_token
+	ClassVPRequestObject                   // GET request_uri → JWT response
+	ClassVPAuthResponse                    // POST with vp_token to response_uri
+	ClassVCICredentialOffer                // credential_offer / credential_offer_uri
+	ClassVCIMetadata                       // .well-known/openid-credential-issuer
+	ClassVCITokenRequest                   // POST to token endpoint
+	ClassVCICredentialRequest              // POST to credential endpoint
 )
 
 var classLabels = map[TrafficClass]string{
@@ -55,25 +55,25 @@ func (c TrafficClass) Label() string {
 
 // TrafficEntry represents a single intercepted HTTP request/response pair.
 type TrafficEntry struct {
-	ID              int64          `json:"id"`
-	Timestamp       time.Time      `json:"timestamp"`
-	Method          string         `json:"method"`
-	URL             string         `json:"url"`
-	RequestHeaders  http.Header    `json:"requestHeaders"`
-	RequestBody     string         `json:"requestBody,omitempty"`
-	StatusCode      int            `json:"statusCode"`
-	ResponseHeaders http.Header    `json:"responseHeaders"`
-	ResponseBody    string         `json:"responseBody,omitempty"`
-	Class           TrafficClass   `json:"class"`
-	ClassLabel      string         `json:"classLabel"`
-	Decoded         map[string]any `json:"decoded,omitempty"`
+	ID               int64          `json:"id"`
+	Timestamp        time.Time      `json:"timestamp"`
+	Method           string         `json:"method"`
+	URL              string         `json:"url"`
+	RequestHeaders   http.Header    `json:"requestHeaders"`
+	RequestBody      string         `json:"requestBody,omitempty"`
+	StatusCode       int            `json:"statusCode"`
+	ResponseHeaders  http.Header    `json:"responseHeaders"`
+	ResponseBody     string         `json:"responseBody,omitempty"`
+	Class            TrafficClass   `json:"class"`
+	ClassLabel       string         `json:"classLabel"`
+	Decoded          map[string]any `json:"decoded,omitempty"`
 	Credentials      []string       `json:"credentials,omitempty"`      // raw credential strings found in this entry
 	CredentialLabels []string       `json:"credentialLabels,omitempty"` // human-readable label per credential (parallel to Credentials)
-	Duration        time.Duration  `json:"duration"`
-	DurationMS      int64          `json:"durationMs"`
-	FlowID          string         `json:"flowId,omitempty"`
-	DebugJWEKey     string         `json:"-"` // CEK from X-Debug-JWE-CEK header (internal, not serialized)
-	DebugJWK        string         `json:"-"` // JWK private key from scanner (internal, not serialized)
+	Duration         time.Duration  `json:"duration"`
+	DurationMS       int64          `json:"durationMs"`
+	FlowID           string         `json:"flowId,omitempty"`
+	DebugJWEKey      string         `json:"-"` // CEK from X-Debug-JWE-CEK header (internal, not serialized)
+	DebugJWK         string         `json:"-"` // JWK private key from scanner (internal, not serialized)
 }
 
 // EntryWriter is called for each intercepted traffic entry.

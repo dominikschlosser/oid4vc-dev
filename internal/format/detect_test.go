@@ -197,10 +197,10 @@ func TestIsHex(t *testing.T) {
 		{"abcdef01", true},
 		{"ABCDEF01", true},
 		{"0123456789abcdef", true},
-		{"abc", false},     // odd length
-		{"xyz123", false},  // non-hex chars
-		{"", false},        // empty
-		{"a", false},       // too short
+		{"abc", false},    // odd length
+		{"xyz123", false}, // non-hex chars
+		{"", false},       // empty
+		{"a", false},      // too short
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {

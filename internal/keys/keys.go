@@ -106,7 +106,7 @@ func parseECJWKPrivate(jwk map[string]any) (*ecdsa.PrivateKey, error) {
 	}
 	return &ecdsa.PrivateKey{
 		PublicKey: *pub,
-		D:        new(big.Int).SetBytes(dBytes),
+		D:         new(big.Int).SetBytes(dBytes),
 	}, nil
 }
 
@@ -125,7 +125,7 @@ func parseRSAJWKPrivate(jwk map[string]any) (*rsa.PrivateKey, error) {
 	}
 	key := &rsa.PrivateKey{
 		PublicKey: *pub,
-		D:        new(big.Int).SetBytes(dBytes),
+		D:         new(big.Int).SetBytes(dBytes),
 	}
 	// Parse optional CRT parameters
 	if pB64, ok := jwk["p"].(string); ok {

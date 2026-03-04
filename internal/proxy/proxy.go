@@ -144,7 +144,7 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 	start := time.Now()
 	if ts := resp.Request.Header.Get("X-Proxy-Start"); ts != "" {
 		var ns int64
-		fmt.Sscanf(ts, "%d", &ns)
+		_, _ = fmt.Sscanf(ts, "%d", &ns)
 		start = time.Unix(0, ns)
 	}
 	reqBody := resp.Request.Header.Get("X-Proxy-ReqBody")

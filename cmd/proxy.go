@@ -16,6 +16,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -25,9 +26,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/dominikschlosser/oid4vc-dev/internal/proxy"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/config"
+	"github.com/dominikschlosser/oid4vc-dev/internal/proxy"
 )
 
 var (
@@ -61,7 +64,7 @@ Examples:
 
 func init() {
 	proxyCmd.Flags().StringVar(&proxyTarget, "target", "", "URL of the verifier/issuer to proxy to (required)")
-	proxyCmd.Flags().IntVar(&proxyPort, "port", 9090, "Proxy listen port")
+	proxyCmd.Flags().IntVar(&proxyPort, "port", config.DefaultProxyPort, "Proxy listen port")
 	proxyCmd.Flags().IntVar(&dashboardPort, "dashboard", 9091, "Dashboard listen port")
 	proxyCmd.Flags().BoolVar(&noDashboard, "no-dashboard", false, "Disable web dashboard")
 	proxyCmd.Flags().BoolVar(&allTraffic, "all-traffic", false, "Show all traffic, not just OID4VP/VCI requests")
@@ -194,10 +197,10 @@ func runProxy(cmd *cobra.Command, args []string) error {
 	}()
 
 	err = proxyServer.ListenAndServe()
-	if err == http.ErrServerClosed {
+	if errors.Is(err, http.ErrServerClosed) {
 		// Wait for subprocess to finish after SIGTERM.
 		if sub != nil {
-			sub.Wait()
+			_ = sub.Wait()
 		}
 		return nil
 	}

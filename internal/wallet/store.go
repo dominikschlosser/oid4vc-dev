@@ -33,7 +33,7 @@ type WalletStore struct {
 
 // walletJSON is the on-disk format of wallet.json.
 type walletJSON struct {
-	Credentials       []StoredCredential   `json:"credentials"`
+	Credentials       []StoredCredential     `json:"credentials"`
 	StatusEntries     map[string]StatusEntry `json:"status_entries,omitempty"`
 	StatusListCounter int                    `json:"status_list_counter,omitempty"`
 	Port              int                    `json:"port,omitempty"`

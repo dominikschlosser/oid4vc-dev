@@ -25,9 +25,9 @@ import (
 type CredentialFormat string
 
 const (
-	FormatSDJWT   CredentialFormat = "dc+sd-jwt"
-	FormatJWT     CredentialFormat = "jwt"
-	FormatMDOC    CredentialFormat = "mso_mdoc"
+	FormatSDJWT     CredentialFormat = "dc+sd-jwt"
+	FormatJWT       CredentialFormat = "jwt"
+	FormatMDOC      CredentialFormat = "mso_mdoc"
 	FormatOID4VCI   CredentialFormat = "oid4vci"
 	FormatOID4VP    CredentialFormat = "oid4vp"
 	FormatTrustList CredentialFormat = "trustlist"

@@ -22,11 +22,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
+
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
-	"github.com/fxamacker/cbor/v2"
 )
 
 // testEncJWK creates a JWK map suitable for encryption tests, with the required "alg" field.
@@ -440,8 +441,8 @@ func TestCreateVPToken_ImportedSDJWT_PreservesDisclosures(t *testing.T) {
 	}
 
 	result, err := w.CreateVPToken(match, PresentationParams{
-		Nonce:    "test-nonce",
-		ClientID: "https://verifier.example",
+		Nonce:       "test-nonce",
+		ClientID:    "https://verifier.example",
 		ResponseURI: "https://verifier.example/callback",
 	})
 	if err != nil {

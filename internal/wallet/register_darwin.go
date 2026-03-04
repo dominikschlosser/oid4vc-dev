@@ -168,7 +168,7 @@ func UnregisterURLSchemes() error {
 	// Unregister from Launch Services
 	lsregister := "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 	cmd := exec.Command(lsregister, "-u", bundlePath)
-	cmd.CombinedOutput() // ignore errors if not registered
+	_, _ = cmd.CombinedOutput() // ignore errors if not registered
 
 	// Remove the app bundle
 	if err := os.RemoveAll(bundlePath); err != nil {

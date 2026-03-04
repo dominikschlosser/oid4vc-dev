@@ -7,6 +7,10 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 VERSION="${1:-dev}"
 LDFLAGS="-s -w -X github.com/dominikschlosser/oid4vc-dev/cmd.Version=${VERSION}"
 
+echo "Formatting..."
+go run golang.org/x/tools/cmd/goimports@latest -w -local github.com/dominikschlosser/oid4vc-dev .
+gofmt -w .
+
 echo "Building oid4vc-dev ${VERSION}..."
 go build -ldflags "$LDFLAGS" -o oid4vc-dev .
 echo "Done: ./oid4vc-dev"

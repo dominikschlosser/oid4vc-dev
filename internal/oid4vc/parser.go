@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/jsonutil"
 )
 
 // Parse detects and parses an OID4VCI credential offer or OID4VP authorization request.
@@ -124,11 +125,9 @@ func parseVCIJSON(data []byte) (RequestType, any, error) {
 
 	offer := &CredentialOffer{FullJSON: m}
 
-	if issuer, ok := m["credential_issuer"].(string); ok {
-		offer.CredentialIssuer = issuer
-	}
+	offer.CredentialIssuer = jsonutil.GetString(m, "credential_issuer")
 
-	if ids, ok := m["credential_configuration_ids"].([]any); ok {
+	if ids := jsonutil.GetArray(m, "credential_configuration_ids"); ids != nil {
 		for _, id := range ids {
 			if s, ok := id.(string); ok {
 				offer.CredentialConfigurationIDs = append(offer.CredentialConfigurationIDs, s)
@@ -136,22 +135,16 @@ func parseVCIJSON(data []byte) (RequestType, any, error) {
 		}
 	}
 
-	if grants, ok := m["grants"].(map[string]any); ok {
-		if preAuth, ok := grants["urn:ietf:params:oauth:grant-type:pre-authorized_code"].(map[string]any); ok {
-			if code, ok := preAuth["pre-authorized_code"].(string); ok {
-				offer.Grants.PreAuthorizedCode = code
-			}
-			if txCode, ok := preAuth["tx_code"].(map[string]any); ok {
+	if grants := jsonutil.GetMap(m, "grants"); grants != nil {
+		if preAuth := jsonutil.GetMap(grants, "urn:ietf:params:oauth:grant-type:pre-authorized_code"); preAuth != nil {
+			offer.Grants.PreAuthorizedCode = jsonutil.GetString(preAuth, "pre-authorized_code")
+			if txCode := jsonutil.GetMap(preAuth, "tx_code"); txCode != nil {
 				offer.Grants.TxCode = txCode
 			}
 		}
-		if authCode, ok := grants["authorization_code"].(map[string]any); ok {
-			if state, ok := authCode["issuer_state"].(string); ok {
-				offer.Grants.IssuerState = state
-			}
-			if code, ok := authCode["authorization_code"].(string); ok {
-				offer.Grants.AuthorizationCode = code
-			}
+		if authCode := jsonutil.GetMap(grants, "authorization_code"); authCode != nil {
+			offer.Grants.IssuerState = jsonutil.GetString(authCode, "issuer_state")
+			offer.Grants.AuthorizationCode = jsonutil.GetString(authCode, "authorization_code")
 		}
 	}
 
@@ -306,23 +299,16 @@ func buildVPFromJSON(m map[string]any) (RequestType, *AuthorizationRequest) {
 		FullParams: make(map[string]string),
 	}
 
-	getString := func(key string) string {
-		if v, ok := m[key].(string); ok {
-			return v
-		}
-		return ""
-	}
+	req.ClientID = jsonutil.GetString(m, "client_id")
+	req.ResponseType = jsonutil.GetString(m, "response_type")
+	req.ResponseMode = jsonutil.GetString(m, "response_mode")
+	req.Nonce = jsonutil.GetString(m, "nonce")
+	req.State = jsonutil.GetString(m, "state")
+	req.RedirectURI = jsonutil.GetString(m, "redirect_uri")
+	req.ResponseURI = jsonutil.GetString(m, "response_uri")
+	req.Scope = jsonutil.GetString(m, "scope")
 
-	req.ClientID = getString("client_id")
-	req.ResponseType = getString("response_type")
-	req.ResponseMode = getString("response_mode")
-	req.Nonce = getString("nonce")
-	req.State = getString("state")
-	req.RedirectURI = getString("redirect_uri")
-	req.ResponseURI = getString("response_uri")
-	req.Scope = getString("scope")
-
-	if dq, ok := m["dcql_query"].(map[string]any); ok {
+	if dq := jsonutil.GetMap(m, "dcql_query"); dq != nil {
 		req.DCQLQuery = dq
 	}
 

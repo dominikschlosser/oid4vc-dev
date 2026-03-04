@@ -47,23 +47,23 @@ type IssuerSignedItem struct {
 
 // IssuerAuth represents the COSE_Sign1 issuer authentication.
 type IssuerAuth struct {
-	RawCOSE          []byte
-	ProtectedHeader  map[any]any
+	RawCOSE           []byte
+	ProtectedHeader   map[any]any
 	UnprotectedHeader map[any]any
-	Payload          []byte
-	Signature        []byte
-	MSO              *MSO
+	Payload           []byte
+	Signature         []byte
+	MSO               *MSO
 }
 
 // MSO is the Mobile Security Object.
 type MSO struct {
-	Version          string
-	DigestAlgorithm  string
-	DocType          string
-	ValueDigests     map[string]map[uint64][]byte
-	ValidityInfo     *ValidityInfo
-	DeviceKeyInfo    map[string]any
-	Status           map[string]any
+	Version         string
+	DigestAlgorithm string
+	DocType         string
+	ValueDigests    map[string]map[uint64][]byte
+	ValidityInfo    *ValidityInfo
+	DeviceKeyInfo   map[string]any
+	Status          map[string]any
 }
 
 // ValidityInfo contains credential validity dates.

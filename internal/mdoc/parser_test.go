@@ -100,9 +100,9 @@ func TestParseIssuerAuth_TaggedInput(t *testing.T) {
 	// Build a minimal COSE_Sign1 array
 	coseArr := []any{
 		[]byte{0xa1, 0x01, 0x26}, // protected: {1: -7} (ES256)
-		map[any]any{},             // unprotected
-		[]byte("payload"),         // payload
-		make([]byte, 64),          // signature (64 bytes for ES256)
+		map[any]any{},            // unprotected
+		[]byte("payload"),        // payload
+		make([]byte, 64),         // signature (64 bytes for ES256)
 	}
 
 	tagged := cbor.Tag{Number: 18, Content: coseArr}
@@ -124,9 +124,9 @@ func TestParseIssuerAuth_UntaggedArrayInput(t *testing.T) {
 	// issuerAuth arrives as []any (tag stripped during decode→re-encode)
 	coseArr := []any{
 		[]byte{0xa1, 0x01, 0x26}, // protected: {1: -7} (ES256)
-		map[any]any{},             // unprotected
-		[]byte("payload"),         // payload
-		make([]byte, 64),          // signature
+		map[any]any{},            // unprotected
+		[]byte("payload"),        // payload
+		make([]byte, 64),         // signature
 	}
 
 	ia, err := parseIssuerAuth(coseArr)
@@ -217,7 +217,7 @@ func TestParseIssuerSignedItem_RawCBORContainsTag24(t *testing.T) {
 
 func TestParseIssuerAuth_ExtractsUnprotectedHeader(t *testing.T) {
 	coseArr := []any{
-		[]byte{0xa1, 0x01, 0x26},                        // protected
+		[]byte{0xa1, 0x01, 0x26},                         // protected
 		map[any]any{int64(33): []byte("cert-der-bytes")}, // unprotected with x5chain
 		[]byte("payload"),
 		make([]byte, 64),

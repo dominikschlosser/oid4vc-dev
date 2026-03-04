@@ -525,7 +525,6 @@ func ExtractCorrelationKey(entry *TrafficEntry) string {
 	return ""
 }
 
-
 // extractCredentials pulls raw credential strings from the entry so the
 // dashboard can offer "View in Decoder" links. Returns parallel slices of
 // credential values and human-readable labels.

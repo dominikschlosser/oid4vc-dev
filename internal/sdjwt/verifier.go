@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/jsonutil"
 )
 
 // VerifyResult contains the result of signature and validity verification.
@@ -44,28 +45,22 @@ type VerifyResult struct {
 func Verify(token *Token, pubKey crypto.PublicKey) *VerifyResult {
 	result := &VerifyResult{}
 
-	if kid, ok := token.Header["kid"].(string); ok {
-		result.KeyID = kid
-	}
-	if alg, ok := token.Header["alg"].(string); ok {
-		result.Algorithm = alg
-	}
-	if iss, ok := token.Payload["iss"].(string); ok {
-		result.Issuer = iss
-	}
+	result.KeyID = jsonutil.GetString(token.Header, "kid")
+	result.Algorithm = jsonutil.GetString(token.Header, "alg")
+	result.Issuer = jsonutil.GetString(token.Payload, "iss")
 
 	// Parse time claims
 	now := time.Now()
-	if exp, ok := token.Payload["exp"].(float64); ok {
+	if exp, ok := jsonutil.GetFloat64(token.Payload, "exp"); ok {
 		t := time.Unix(int64(exp), 0)
 		result.ExpiresAt = &t
 		result.Expired = now.After(t)
 	}
-	if iat, ok := token.Payload["iat"].(float64); ok {
+	if iat, ok := jsonutil.GetFloat64(token.Payload, "iat"); ok {
 		t := time.Unix(int64(iat), 0)
 		result.IssuedAt = &t
 	}
-	if nbf, ok := token.Payload["nbf"].(float64); ok {
+	if nbf, ok := jsonutil.GetFloat64(token.Payload, "nbf"); ok {
 		t := time.Unix(int64(nbf), 0)
 		result.NotBefore = &t
 		result.NotYetValid = now.Before(t)

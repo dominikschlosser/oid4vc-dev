@@ -22,10 +22,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/dominikschlosser/oid4vc-dev/internal/keys"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 	"github.com/dominikschlosser/oid4vc-dev/internal/wallet"
-	"github.com/spf13/cobra"
 )
 
 var (

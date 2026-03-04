@@ -1,0 +1,37 @@
+linters:
+  enable:
+    - errcheck
+    - errorlint
+    - gofmt
+    - goimports
+    - gosec
+    - govet
+    - staticcheck
+    - unused
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/dominikschlosser/oid4vc-dev
+  errcheck:
+    exclude-functions:
+      - (net/http.ResponseWriter).Write
+      - (*encoding/json.Encoder).Encode
+      - (io.Writer).Write
+  gosec:
+    excludes:
+      - G104  # unhandled errors (covered by errcheck)
+      - G107  # HTTP request with variable URL (CLI tool makes requests to user-provided URLs)
+      - G112  # Slowloris (local dev server, not exposed to untrusted networks)
+      - G114  # net/http.ListenAndServe without timeouts (local dev server)
+      - G115  # integer overflow conversion (CBOR/COSE use uint64<->int64 safely)
+      - G204  # subprocess with variable args (CLI tool runs user-specified commands)
+      - G304  # file path from variable (CLI tool reads user-provided paths)
+      - G306  # WriteFile permissions >0600 (handler script must be executable)
+      - G402  # TLS InsecureSkipVerify (dev tool)
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec

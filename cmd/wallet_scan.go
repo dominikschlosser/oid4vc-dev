@@ -1,0 +1,133 @@
+// Copyright 2026 Dominik Schlosser
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package cmd
+
+import (
+	"fmt"
+
+	"github.com/spf13/cobra"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/config"
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/qr"
+)
+
+func walletAcceptCmd() *cobra.Command {
+	var (
+		port              int
+		autoAccept        bool
+		sessionTranscript string
+		txCode            string
+		haip              bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "accept <uri>",
+		Short: "Accept and process an OID4VP presentation request or OID4VCI credential offer",
+		Long: `Auto-detects the URI type and dispatches to the appropriate flow:
+
+  - openid4vp://, haip://, eudi-openid4vp://  →  OID4VP presentation
+  - openid-credential-offer://                 →  OID4VCI credential issuance
+
+For OID4VP requests, the wallet evaluates the DCQL query, shows a consent UI
+(unless --auto-accept), and submits a VP token to the verifier.
+
+For OID4VCI offers, the wallet fetches the credential from the issuer and
+stores it locally. The --port, --auto-accept, and --session-transcript flags
+only apply to OID4VP flows.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return dispatchURI(args[0], dispatchOID4Opts{
+				port:              port,
+				autoAccept:        autoAccept,
+				sessionTranscript: sessionTranscript,
+				txCode:            txCode,
+				haip:              haip,
+			})
+		},
+	}
+
+	cmd.Flags().IntVar(&port, "port", config.DefaultWalletPort, "Server port for OID4VP (serves trust list and consent UI)")
+	cmd.Flags().BoolVar(&autoAccept, "auto-accept", false, "Auto-approve OID4VP presentations")
+	cmd.Flags().StringVar(&sessionTranscript, "session-transcript", "oid4vp", "mDoc session transcript mode: 'oid4vp' (OID4VP 1.0, default) or 'iso' (ISO 18013-7)")
+	cmd.Flags().StringVar(&txCode, "tx-code", "", "Transaction code for OID4VCI pre-authorized code flow")
+	cmd.Flags().BoolVar(&haip, "haip", false, "Enforce HAIP 1.0 compliance (x509_hash, direct_post.jwt, DCQL, JAR, ES256)")
+	return cmd
+}
+
+func walletScanCmd() *cobra.Command {
+	var (
+		port              int
+		screen            bool
+		autoAccept        bool
+		sessionTranscript string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "scan [image-file]",
+		Short: "Scan QR code and auto-detect flow (accept/import)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var content string
+			var err error
+
+			if screen {
+				content, err = qr.ScanScreen()
+			} else if len(args) > 0 {
+				content, err = qr.ScanFile(args[0])
+			} else {
+				return fmt.Errorf("provide an image file or use --screen")
+			}
+
+			if err != nil {
+				return fmt.Errorf("scanning QR: %w", err)
+			}
+
+			fmt.Printf("Scanned: %s\n\n", content)
+
+			detected := format.Detect(content)
+
+			// For credential formats, import directly
+			if detected == format.FormatSDJWT || detected == format.FormatMDOC || detected == format.FormatJWT {
+				w, store, err := loadWallet()
+				if err != nil {
+					return err
+				}
+				imported, err := w.ImportCredential(content)
+				if err != nil {
+					return fmt.Errorf("importing credential: %w", err)
+				}
+				if err := store.Save(w); err != nil {
+					return fmt.Errorf("saving wallet: %w", err)
+				}
+				fmt.Printf("Imported %s credential (%s)\n", imported.Format, credLabel(*imported))
+				return nil
+			}
+
+			// For OID4 URIs, use the shared dispatch
+			return dispatchURI(content, dispatchOID4Opts{
+				port:              port,
+				autoAccept:        autoAccept,
+				sessionTranscript: sessionTranscript,
+			})
+		},
+	}
+
+	cmd.Flags().IntVar(&port, "port", config.DefaultWalletPort, "Server port (serves trust list and consent UI)")
+	cmd.Flags().BoolVar(&screen, "screen", false, "Interactive screen capture (macOS)")
+	cmd.Flags().BoolVar(&autoAccept, "auto-accept", false, "Auto-approve presentations")
+	cmd.Flags().StringVar(&sessionTranscript, "session-transcript", "oid4vp", "mDoc session transcript mode: 'oid4vp' (OID4VP 1.0, default) or 'iso' (ISO 18013-7)")
+	return cmd
+}

@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/json"
 	"math/big"
 	"net"
 	"strings"
@@ -265,6 +266,129 @@ func TestVerifyAlgMatchesCert(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestVerifyClientID_VerifierAttestation(t *testing.T) {
+	// Create a minimal valid JWT (3 dot-separated parts) with a sub claim
+	attestationJWT := createTestJWT(t, map[string]any{"alg": "ES256", "typ": "JWT"}, map[string]any{"sub": "my-verifier"})
+
+	tests := []struct {
+		name      string
+		clientID  string
+		reqObj    *oid4vc.RequestObjectJWT
+		wantEmpty bool
+		wantMsg   string
+	}{
+		{
+			name:     "no request object",
+			clientID: "verifier_attestation:my-verifier",
+			reqObj:   nil,
+			wantMsg:  "requires a signed Request Object",
+		},
+		{
+			name:     "missing jwt header",
+			clientID: "verifier_attestation:my-verifier",
+			reqObj:   &oid4vc.RequestObjectJWT{Header: map[string]any{"alg": "ES256"}},
+			wantMsg:  "must contain 'jwt' header",
+		},
+		{
+			name:     "invalid jwt value",
+			clientID: "verifier_attestation:my-verifier",
+			reqObj:   &oid4vc.RequestObjectJWT{Header: map[string]any{"jwt": "not-a-jwt"}},
+			wantMsg:  "not a valid JWT",
+		},
+		{
+			name:      "valid attestation with matching sub",
+			clientID:  "verifier_attestation:my-verifier",
+			reqObj:    &oid4vc.RequestObjectJWT{Header: map[string]any{"jwt": attestationJWT}},
+			wantEmpty: true,
+		},
+		{
+			name:     "sub mismatch",
+			clientID: "verifier_attestation:other-verifier",
+			reqObj:   &oid4vc.RequestObjectJWT{Header: map[string]any{"jwt": attestationJWT}},
+			wantMsg:  "does not match",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warning := VerifyClientID(tt.clientID, tt.reqObj, "")
+			if tt.wantEmpty && warning != "" {
+				t.Errorf("expected no warning, got: %s", warning)
+			}
+			if tt.wantMsg != "" && !strings.Contains(warning, tt.wantMsg) {
+				t.Errorf("expected warning containing %q, got: %q", tt.wantMsg, warning)
+			}
+		})
+	}
+}
+
+func TestVerifyClientID_DecentralizedIdentifier(t *testing.T) {
+	tests := []struct {
+		name      string
+		clientID  string
+		reqObj    *oid4vc.RequestObjectJWT
+		wantEmpty bool
+		wantMsg   string
+	}{
+		{
+			name:     "invalid DID format",
+			clientID: "decentralized_identifier:not-a-did",
+			reqObj:   &oid4vc.RequestObjectJWT{Header: map[string]any{"alg": "ES256"}},
+			wantMsg:  "not a valid DID",
+		},
+		{
+			name:     "DID with empty method",
+			clientID: "decentralized_identifier:did::abc",
+			reqObj:   &oid4vc.RequestObjectJWT{Header: map[string]any{"alg": "ES256"}},
+			wantMsg:  "not a valid DID",
+		},
+		{
+			name:     "no request object",
+			clientID: "decentralized_identifier:did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+			reqObj:   nil,
+			wantMsg:  "requires a signed Request Object",
+		},
+		{
+			name:      "valid DID with matching kid",
+			clientID:  "decentralized_identifier:did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+			reqObj:    &oid4vc.RequestObjectJWT{Header: map[string]any{"kid": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#key-1"}},
+			wantEmpty: true,
+		},
+		{
+			name:     "kid does not reference DID",
+			clientID: "decentralized_identifier:did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+			reqObj:   &oid4vc.RequestObjectJWT{Header: map[string]any{"kid": "did:web:other.example#key-1"}},
+			wantMsg:  "does not reference DID",
+		},
+		{
+			name:      "valid DID without kid (no check)",
+			clientID:  "decentralized_identifier:did:web:example.com",
+			reqObj:    &oid4vc.RequestObjectJWT{Header: map[string]any{"alg": "ES256"}},
+			wantEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warning := VerifyClientID(tt.clientID, tt.reqObj, "")
+			if tt.wantEmpty && warning != "" {
+				t.Errorf("expected no warning, got: %s", warning)
+			}
+			if tt.wantMsg != "" && !strings.Contains(warning, tt.wantMsg) {
+				t.Errorf("expected warning containing %q, got: %q", tt.wantMsg, warning)
+			}
+		})
+	}
+}
+
+// createTestJWT creates a minimal unsigned JWT (for testing attestation parsing).
+func createTestJWT(t *testing.T, header, payload map[string]any) string {
+	t.Helper()
+	headerJSON, _ := json.Marshal(header)
+	payloadJSON, _ := json.Marshal(payload)
+	return format.EncodeBase64URL(headerJSON) + "." + format.EncodeBase64URL(payloadJSON) + ".fakesig"
 }
 
 func TestVerifyAlgMatchesCert_NoX5C(t *testing.T) {
