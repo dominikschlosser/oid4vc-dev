@@ -10,6 +10,10 @@ coverage:
         target: auto
         threshold: 2%
 
+# Strip Go module prefix so ignore patterns match relative paths.
+fixes:
+  - "github.com/dominikschlosser/oid4vc-dev/::"
+
 ignore:
   - "main.go"
   - "cmd/.*"
