@@ -1,6 +1,7 @@
 # oid4vc-dev
 
 [![CI](https://github.com/dominikschlosser/oid4vc-dev/actions/workflows/ci.yml/badge.svg)](https://github.com/dominikschlosser/oid4vc-dev/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/dominikschlosser/oid4vc-dev/graph/badge.svg)](https://codecov.io/gh/dominikschlosser/oid4vc-dev)
 [![Release](https://img.shields.io/github/v/release/dominikschlosser/oid4vc-dev)](https://github.com/dominikschlosser/oid4vc-dev/releases/latest)
 
 A developer toolkit for OpenID4VC — decode, issue, and present verifiable credentials, run a testing wallet, or proxy live wallet traffic for debugging.

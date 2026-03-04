@@ -33,8 +33,8 @@ func (s *Subprocess) Stop() {
 	}
 	pgid, err := syscall.Getpgid(s.cmd.Process.Pid)
 	if err == nil {
-		syscall.Kill(-pgid, syscall.SIGTERM)
+		_ = syscall.Kill(-pgid, syscall.SIGTERM)
 	} else {
-		s.cmd.Process.Signal(syscall.SIGTERM)
+		_ = s.cmd.Process.Signal(syscall.SIGTERM)
 	}
 }

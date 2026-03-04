@@ -18,13 +18,11 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
-	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"strings"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
@@ -194,9 +192,10 @@ func parseECPublicKeyFromMap(m map[string]any) (*ecdh.PublicKey, error) {
 	}
 
 	// Construct uncompressed point: 0x04 || x || y, then convert to ECDH
-	x := new(big.Int).SetBytes(xBytes)
-	y := new(big.Int).SetBytes(yBytes)
-	pub := elliptic.Marshal(elliptic.P256(), x, y)
+	pub := make([]byte, 1+32+32)
+	pub[0] = 0x04
+	copy(pub[1:33], padTo32(xBytes))
+	copy(pub[33:65], padTo32(yBytes))
 
 	ecdhPub, err := ecdh.P256().NewPublicKey(pub)
 	if err != nil {
@@ -249,4 +248,14 @@ func encKeyBitLen(enc string) (int, error) {
 	default:
 		return 0, fmt.Errorf("unsupported content encryption algorithm: %s", enc)
 	}
+}
+
+// padTo32 left-pads b with zeros to 32 bytes (P-256 coordinate size).
+func padTo32(b []byte) []byte {
+	if len(b) >= 32 {
+		return b[len(b)-32:]
+	}
+	padded := make([]byte, 32)
+	copy(padded[32-len(b):], b)
+	return padded
 }

@@ -1097,11 +1097,11 @@ func TestClassifyPOSTRequestObjectWithWalletMetadata(t *testing.T) {
 	})
 
 	e := &TrafficEntry{
-		Method:      "POST",
-		URL:         "http://example.com/request_uri",
-		RequestBody: "wallet_metadata=%7B%22vp_formats_supported%22%3A%7B%7D%7D&wallet_nonce=test-nonce",
+		Method:       "POST",
+		URL:          "http://example.com/request_uri",
+		RequestBody:  "wallet_metadata=%7B%22vp_formats_supported%22%3A%7B%7D%7D&wallet_nonce=test-nonce",
 		ResponseBody: jwt,
-		StatusCode:  200,
+		StatusCode:   200,
 	}
 	Classify(e)
 

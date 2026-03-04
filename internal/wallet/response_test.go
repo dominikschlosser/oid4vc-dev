@@ -15,6 +15,7 @@
 package wallet
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -48,5 +49,47 @@ func TestFormatDirectPostResult_Error(t *testing.T) {
 	got := FormatDirectPostResult(result)
 	if got != "Response: 400" {
 		t.Errorf("expected 'Response: 400', got %s", got)
+	}
+}
+
+func TestBuildFragmentRedirect(t *testing.T) {
+	tests := []struct {
+		name        string
+		redirectURI string
+		state       string
+		vpToken     any
+		wantContain []string
+	}{
+		{
+			name:        "basic redirect with state",
+			redirectURI: "https://verifier.example/callback",
+			state:       "abc123",
+			vpToken:     map[string][]string{"pid": {"token1"}},
+			wantContain: []string{"https://verifier.example/callback#", "state=abc123", "vp_token="},
+		},
+		{
+			name:        "redirect without state",
+			redirectURI: "https://verifier.example/callback",
+			state:       "",
+			vpToken:     map[string][]string{"pid": {"token1"}},
+			wantContain: []string{"https://verifier.example/callback#", "vp_token="},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildFragmentRedirect(tt.redirectURI, tt.state, tt.vpToken)
+			if err != nil {
+				t.Fatalf("BuildFragmentRedirect() error: %v", err)
+			}
+			for _, want := range tt.wantContain {
+				if !strings.Contains(got, want) {
+					t.Errorf("expected URL to contain %q, got: %s", want, got)
+				}
+			}
+			if tt.state == "" && strings.Contains(got, "state=") {
+				t.Errorf("expected no state parameter, got: %s", got)
+			}
+		})
 	}
 }

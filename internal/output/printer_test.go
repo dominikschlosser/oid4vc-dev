@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
+
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"

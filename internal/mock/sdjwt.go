@@ -22,7 +22,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"strings"
 	"time"
 
@@ -37,7 +36,7 @@ type SDJWTConfig struct {
 	NotBefore     *time.Time // optional: sets nbf claim
 	Claims        map[string]any
 	Key           *ecdsa.PrivateKey
-	HolderKey     *ecdsa.PublicKey // optional: adds cnf claim for holder binding
+	HolderKey     *ecdsa.PublicKey    // optional: adds cnf claim for holder binding
 	StatusListURI string              // optional: status list URI for revocation
 	StatusListIdx int                 // optional: index in the status list
 	CertChain     []*x509.Certificate // optional: x5c certificate chain [leaf, CA]
@@ -253,16 +252,4 @@ func padToSize(b []byte, size int) []byte {
 	padded := make([]byte, size)
 	copy(padded[size-len(b):], b)
 	return padded
-}
-
-// verifyRoundTrip is a helper to verify a generated signature is valid (used in tests).
-func verifyRoundTrip(key *ecdsa.PublicKey, sigInput []byte, sig []byte) bool {
-	h := sha256.Sum256(sigInput)
-	keySize := (key.Curve.Params().BitSize + 7) / 8
-	if len(sig) != 2*keySize {
-		return false
-	}
-	r := new(big.Int).SetBytes(sig[:keySize])
-	s := new(big.Int).SetBytes(sig[keySize:])
-	return ecdsa.Verify(key, h[:], r, s)
 }

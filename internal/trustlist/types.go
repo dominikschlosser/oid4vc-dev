@@ -19,10 +19,10 @@ import "crypto"
 
 // TrustList represents a parsed ETSI TS 119 602 trust list.
 type TrustList struct {
-	Raw       string
-	Header    map[string]any
+	Raw        string
+	Header     map[string]any
 	SchemeInfo *SchemeInfo
-	Entities  []TrustedEntity
+	Entities   []TrustedEntity
 }
 
 // SchemeInfo contains list metadata.
@@ -40,7 +40,7 @@ type TrustedEntity struct {
 
 // TrustedService represents a service provided by a trusted entity.
 type TrustedService struct {
-	ServiceType string
+	ServiceType  string
 	Certificates []CertInfo
 }
 

@@ -25,9 +25,9 @@ import (
 
 func TestOriginalURL(t *testing.T) {
 	tests := []struct {
-		name   string
-		setup  func() *http.Request
-		want   string
+		name  string
+		setup func() *http.Request
+		want  string
 	}{
 		{
 			name: "plain HTTP request",

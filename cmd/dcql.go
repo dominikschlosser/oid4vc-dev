@@ -17,12 +17,13 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/dominikschlosser/oid4vc-dev/internal/dcql"
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/output"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
-	"github.com/spf13/cobra"
 )
 
 var dcqlCmd = &cobra.Command{

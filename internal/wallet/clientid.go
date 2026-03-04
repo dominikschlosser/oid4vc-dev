@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
+	"github.com/dominikschlosser/oid4vc-dev/internal/jsonutil"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 )
 
@@ -37,6 +38,10 @@ func VerifyClientID(clientID string, reqObj *oid4vc.RequestObjectJWT, responseUR
 		return verifyX509Hash(clientID, reqObj)
 	case strings.HasPrefix(clientID, "redirect_uri:"):
 		return verifyRedirectURI(clientID, reqObj, responseURI)
+	case strings.HasPrefix(clientID, "verifier_attestation:"):
+		return verifyVerifierAttestation(clientID, reqObj)
+	case strings.HasPrefix(clientID, "decentralized_identifier:"):
+		return verifyDecentralizedIdentifier(clientID, reqObj)
 	default:
 		return ""
 	}
@@ -80,7 +85,7 @@ func verifyX509Hash(clientID string, reqObj *oid4vc.RequestObjectJWT) string {
 
 	actualHash := sha256.Sum256(cert.Raw)
 	if string(expectedBytes) != string(actualHash[:]) {
-		return fmt.Sprintf("x509_hash: SHA-256 of leaf certificate does not match client_id hash")
+		return "x509_hash: SHA-256 of leaf certificate does not match client_id hash"
 	}
 
 	return ""
@@ -102,6 +107,66 @@ func verifyRedirectURI(clientID string, reqObj *oid4vc.RequestObjectJWT, respons
 	return ""
 }
 
+// verifyVerifierAttestation validates the verifier_attestation: prefix per OID4VP 1.0.
+// The request object MUST contain a "jwt" header with a Verifier Attestation JWT.
+// The Verifier Attestation JWT must be a valid JWT (3 dot-separated parts) and
+// its payload must contain a "sub" claim matching the client_id value after the prefix.
+func verifyVerifierAttestation(clientID string, reqObj *oid4vc.RequestObjectJWT) string {
+	if reqObj == nil || reqObj.Header == nil {
+		return "verifier_attestation: requires a signed Request Object"
+	}
+
+	jwtStr := jsonutil.GetString(reqObj.Header, "jwt")
+	if jwtStr == "" {
+		return "verifier_attestation: Request Object must contain 'jwt' header with Verifier Attestation JWT"
+	}
+
+	// Basic JWT structure check (3 dot-separated parts)
+	parts := strings.SplitN(jwtStr, ".", 4)
+	if len(parts) != 3 || len(parts[0]) == 0 || len(parts[1]) == 0 {
+		return "verifier_attestation: 'jwt' header value is not a valid JWT (expected 3 dot-separated parts)"
+	}
+
+	// Parse the attestation JWT payload to check the sub claim
+	_, payload, _, err := format.ParseJWTParts(jwtStr)
+	if err != nil {
+		return fmt.Sprintf("verifier_attestation: failed to parse Verifier Attestation JWT: %v", err)
+	}
+
+	expected := strings.TrimPrefix(clientID, "verifier_attestation:")
+	sub, _ := payload["sub"].(string)
+	if sub != "" && sub != expected {
+		return fmt.Sprintf("verifier_attestation: Attestation JWT sub %q does not match client_id value %q", sub, expected)
+	}
+
+	return ""
+}
+
+// verifyDecentralizedIdentifier validates the decentralized_identifier: prefix per OID4VP 1.0.
+// The value must be a valid DID (did:method:identifier format) and a signed Request Object must be present.
+// Note: Full DID resolution is not implemented — only format validation is performed.
+func verifyDecentralizedIdentifier(clientID string, reqObj *oid4vc.RequestObjectJWT) string {
+	did := strings.TrimPrefix(clientID, "decentralized_identifier:")
+
+	// Validate DID format: must have at least 3 colon-separated parts (did:method:id)
+	didParts := strings.SplitN(did, ":", 3)
+	if len(didParts) < 3 || didParts[0] != "did" || didParts[1] == "" || didParts[2] == "" {
+		return fmt.Sprintf("decentralized_identifier: value %q is not a valid DID (expected did:method:identifier)", did)
+	}
+
+	if reqObj == nil || reqObj.Header == nil {
+		return "decentralized_identifier: requires a signed Request Object"
+	}
+
+	// Check that the request object's kid header references the DID
+	kid := jsonutil.GetString(reqObj.Header, "kid")
+	if kid != "" && !strings.HasPrefix(kid, did) {
+		return fmt.Sprintf("decentralized_identifier: Request Object kid %q does not reference DID %q", kid, did)
+	}
+
+	return ""
+}
+
 // extractLeafCert extracts and parses the leaf certificate from the request
 // object's x5c header. Returns a warning if extraction fails.
 func extractLeafCert(reqObj *oid4vc.RequestObjectJWT) (*x509.Certificate, string) {
@@ -109,14 +174,9 @@ func extractLeafCert(reqObj *oid4vc.RequestObjectJWT) (*x509.Certificate, string
 		return nil, "client_id uses x509 scheme but request object has no x5c header"
 	}
 
-	x5cRaw, ok := reqObj.Header["x5c"]
-	if !ok {
-		return nil, "client_id uses x509 scheme but request object has no x5c header"
-	}
-
-	x5cArr, ok := x5cRaw.([]any)
-	if !ok || len(x5cArr) == 0 {
-		return nil, "client_id uses x509 scheme but x5c header is empty"
+	x5cArr := jsonutil.GetArray(reqObj.Header, "x5c")
+	if len(x5cArr) == 0 {
+		return nil, "client_id uses x509 scheme but x5c header is empty or missing"
 	}
 
 	leafB64, ok := x5cArr[0].(string)
@@ -155,7 +215,7 @@ func prefixRequiresSigning(clientID string) bool {
 func ValidateRequestObject(clientID string, reqObj *oid4vc.RequestObjectJWT) string {
 	if reqObj == nil {
 		if prefixRequiresSigning(clientID) {
-			return fmt.Sprintf("client_id prefix requires a signed Request Object but none was provided")
+			return "client_id prefix requires a signed Request Object but none was provided"
 		}
 		return ""
 	}
@@ -164,7 +224,7 @@ func ValidateRequestObject(clientID string, reqObj *oid4vc.RequestObjectJWT) str
 		return "Request Object has no header"
 	}
 
-	typ, _ := reqObj.Header["typ"].(string)
+	typ := jsonutil.GetString(reqObj.Header, "typ")
 	if typ == "" {
 		return "Request Object missing 'typ' header (OID4VP 1.0 requires typ: oauth-authz-req+jwt)"
 	}
@@ -184,7 +244,7 @@ func ValidateRequestObject(clientID string, reqObj *oid4vc.RequestObjectJWT) str
 // public key type in the x5c leaf certificate. Returns a warning on mismatch,
 // or "" if OK or if x5c is not present.
 func verifyAlgMatchesCert(reqObj *oid4vc.RequestObjectJWT) string {
-	alg, _ := reqObj.Header["alg"].(string)
+	alg := jsonutil.GetString(reqObj.Header, "alg")
 	if alg == "" {
 		return ""
 	}

@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/keys"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
@@ -27,7 +29,6 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/statuslist"
 	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
 	"github.com/dominikschlosser/oid4vc-dev/internal/validate"
-	"github.com/spf13/cobra"
 )
 
 var (

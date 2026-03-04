@@ -125,6 +125,23 @@ func SubmitDirectPostJWT(responseURI string, responseJWT string, cek []byte) (*D
 	return result, nil
 }
 
+// BuildFragmentRedirect constructs a redirect URL with vp_token and state as
+// fragment parameters per OID4VP 1.0 fragment response mode.
+func BuildFragmentRedirect(redirectURI, state string, vpToken any) (string, error) {
+	tokenJSON, err := json.Marshal(vpToken)
+	if err != nil {
+		return "", fmt.Errorf("marshaling vp_token: %w", err)
+	}
+
+	fragment := url.Values{}
+	fragment.Set("vp_token", string(tokenJSON))
+	if state != "" {
+		fragment.Set("state", state)
+	}
+
+	return redirectURI + "#" + fragment.Encode(), nil
+}
+
 // FormatDirectPostResult formats a direct post result for terminal output.
 func FormatDirectPostResult(result *DirectPostResult) string {
 	var sb strings.Builder

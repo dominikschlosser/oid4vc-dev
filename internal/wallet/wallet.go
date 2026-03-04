@@ -21,17 +21,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/keys"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mock"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
-	"github.com/google/uuid"
 )
 
 // SessionTranscriptMode controls how the mDoc session transcript is constructed.
@@ -62,29 +59,30 @@ type NextErrorOverride struct {
 
 // Wallet holds credentials, keys, and manages presentation consent flows.
 type Wallet struct {
-	HolderKey              *ecdsa.PrivateKey
-	IssuerKey              *ecdsa.PrivateKey
-	CAKey                  *ecdsa.PrivateKey
-	CertChain              []*x509.Certificate // [leaf, CA] certificate chain
-	AutoAccept             bool
-	SessionTranscript      SessionTranscriptMode // "oid4vp" (default) or "iso"
-	PreferredFormat        string                // "" (no preference), "dc+sd-jwt", or "mso_mdoc"
-	RequireEncryptedRequest bool                 // when true, sends encryption keys in wallet_metadata
-	RequestEncryptionKey   *ecdsa.PrivateKey     // key for decrypting encrypted request objects
-	Credentials            []StoredCredential
-	StatusEntries          map[string]StatusEntry // credential ID → status entry
-	StatusListCounter      int                    // next available status list index
-	BaseURL                string                 // base URL for status list endpoint
-	Requests               map[string]*ConsentRequest
-	TxCode                 string `json:"-"` // one-shot tx_code for OID4VCI token request
-	Log                    []LogEntry
-	mu                     sync.RWMutex
-	nextError              *NextErrorOverride
-	subscribers            map[int64]chan *ConsentRequest
-	subID                  int64
-	errSubscribers         map[int64]chan WalletError
-	errSubID               int64
-	lastError              *WalletError
+	HolderKey               *ecdsa.PrivateKey
+	IssuerKey               *ecdsa.PrivateKey
+	CAKey                   *ecdsa.PrivateKey
+	CertChain               []*x509.Certificate // [leaf, CA] certificate chain
+	AutoAccept              bool
+	SessionTranscript       SessionTranscriptMode // "oid4vp" (default) or "iso"
+	PreferredFormat         string                // "" (no preference), "dc+sd-jwt", or "mso_mdoc"
+	RequireEncryptedRequest bool                  // when true, sends encryption keys in wallet_metadata
+	RequestEncryptionKey    *ecdsa.PrivateKey     // key for decrypting encrypted request objects
+	RequireHAIP             bool                  // when true, enforce HAIP 1.0 compliance checks
+	Credentials             []StoredCredential
+	StatusEntries           map[string]StatusEntry // credential ID → status entry
+	StatusListCounter       int                    // next available status list index
+	BaseURL                 string                 // base URL for status list endpoint
+	Requests                map[string]*ConsentRequest
+	TxCode                  string `json:"-"` // one-shot tx_code for OID4VCI token request
+	Log                     []LogEntry
+	mu                      sync.RWMutex
+	nextError               *NextErrorOverride
+	subscribers             map[int64]chan *ConsentRequest
+	subID                   int64
+	errSubscribers          map[int64]chan WalletError
+	errSubID                int64
+	lastError               *WalletError
 }
 
 // WalletError is an error event that can be displayed in the UI.
@@ -95,30 +93,30 @@ type WalletError struct {
 
 // StoredCredential is a credential stored in the wallet.
 type StoredCredential struct {
-	ID          string         `json:"id"`
-	Format      string         `json:"format"`       // "dc+sd-jwt", "mso_mdoc", or "jwt_vc_json"
-	Raw         string         `json:"raw"`           // original credential string
-	Claims      map[string]any `json:"claims"`        // decoded claims for display/matching
-	VCT         string         `json:"vct,omitempty"` // SD-JWT vct
-	DocType     string         `json:"doctype,omitempty"`
-	Disclosures []sdjwt.Disclosure `json:"-"`
+	ID          string                             `json:"id"`
+	Format      string                             `json:"format"`        // "dc+sd-jwt", "mso_mdoc", or "jwt_vc_json"
+	Raw         string                             `json:"raw"`           // original credential string
+	Claims      map[string]any                     `json:"claims"`        // decoded claims for display/matching
+	VCT         string                             `json:"vct,omitempty"` // SD-JWT vct
+	DocType     string                             `json:"doctype,omitempty"`
+	Disclosures []sdjwt.Disclosure                 `json:"-"`
 	NameSpaces  map[string][]mdoc.IssuerSignedItem `json:"-"`
 }
 
 // ConsentRequest represents a pending presentation or issuance consent.
 type ConsentRequest struct {
-	ID            string            `json:"id"`
-	Type          string            `json:"type"` // "presentation" or "issuance"
-	AuthRequest   *oid4vc.AuthorizationRequest `json:"-"`
-	MatchedCreds  []CredentialMatch `json:"matched_credentials"`
-	Status        string            `json:"status"` // "pending", "approved", "denied"
-	ResultCh      chan ConsentResult    `json:"-"`
-	SubmissionCh  chan SubmissionResult `json:"-"` // result of VP submission after approval
-	CreatedAt     time.Time         `json:"created_at"`
-	ClientID      string            `json:"client_id"`
-	Nonce         string            `json:"nonce,omitempty"`
-	ResponseURI   string            `json:"response_uri,omitempty"`
-	DCQLQuery     map[string]any    `json:"dcql_query,omitempty"`
+	ID           string                       `json:"id"`
+	Type         string                       `json:"type"` // "presentation" or "issuance"
+	AuthRequest  *oid4vc.AuthorizationRequest `json:"-"`
+	MatchedCreds []CredentialMatch            `json:"matched_credentials"`
+	Status       string                       `json:"status"` // "pending", "approved", "denied"
+	ResultCh     chan ConsentResult           `json:"-"`
+	SubmissionCh chan SubmissionResult        `json:"-"` // result of VP submission after approval
+	CreatedAt    time.Time                    `json:"created_at"`
+	ClientID     string                       `json:"client_id"`
+	Nonce        string                       `json:"nonce,omitempty"`
+	ResponseURI  string                       `json:"response_uri,omitempty"`
+	DCQLQuery    map[string]any               `json:"dcql_query,omitempty"`
 }
 
 // CredentialMatch links a credential to a DCQL query credential ID.
@@ -292,25 +290,6 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 	return nil
 }
 
-// nextStatusIndex returns the next status list index and increments the counter.
-func (w *Wallet) nextStatusIndex() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	idx := w.StatusListCounter
-	w.StatusListCounter++
-	return idx
-}
-
-// registerStatusEntry records a status entry for a credential.
-func (w *Wallet) registerStatusEntry(credID string, idx int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.StatusEntries == nil {
-		w.StatusEntries = make(map[string]StatusEntry)
-	}
-	w.StatusEntries[credID] = StatusEntry{Index: idx, Status: 0}
-}
-
 // removeByType removes credentials matching the given format and vct/doctype.
 func (w *Wallet) removeByType(format, vct, docType string) {
 	w.mu.Lock()
@@ -323,120 +302,6 @@ func (w *Wallet) removeByType(format, vct, docType string) {
 		filtered = append(filtered, c)
 	}
 	w.Credentials = filtered
-}
-
-// ImportCredential auto-detects and imports a credential string.
-// It returns a pointer to a copy of the newly imported credential, safe to
-// use even after further mutations to w.Credentials.
-func (w *Wallet) ImportCredential(raw string) (*StoredCredential, error) {
-	raw = strings.TrimSpace(raw)
-
-	// Try SD-JWT first (contains ~)
-	if strings.Contains(raw, "~") {
-		cred, err := w.importSDJWT(raw)
-		if err != nil {
-			return nil, err
-		}
-		log.Printf("[Wallet] Imported SD-JWT credential: vct=%s claims=%d disclosures=%d", cred.VCT, len(cred.Claims), len(cred.Disclosures))
-		return cred, nil
-	}
-
-	// Try mDoc (base64url or hex encoded CBOR)
-	detected := format.Detect(raw)
-	if detected == format.FormatMDOC {
-		cred, err := w.importMDoc(raw)
-		if err != nil {
-			return nil, err
-		}
-		log.Printf("[Wallet] Imported mDoc credential: docType=%s claims=%d", cred.DocType, len(cred.Claims))
-		return cred, nil
-	}
-
-	// Try as plain JWT VC (3-part JWT without ~)
-	if strings.Count(raw, ".") == 2 {
-		cred, err := w.importPlainJWT(raw)
-		if err != nil {
-			return nil, err
-		}
-		log.Printf("[Wallet] Imported plain JWT credential: vct=%s claims=%d", cred.VCT, len(cred.Claims))
-		return cred, nil
-	}
-
-	return nil, fmt.Errorf("unable to detect credential format (expected SD-JWT or mDoc)")
-}
-
-// appendCredential adds a credential to the wallet and returns a copy.
-func (w *Wallet) appendCredential(cred StoredCredential) *StoredCredential {
-	w.mu.Lock()
-	w.Credentials = append(w.Credentials, cred)
-	w.mu.Unlock()
-	return &cred
-}
-
-func (w *Wallet) importSDJWT(raw string) (*StoredCredential, error) {
-	token, err := sdjwt.Parse(raw)
-	if err != nil {
-		return nil, fmt.Errorf("parsing SD-JWT: %w", err)
-	}
-
-	cred := StoredCredential{
-		ID:          uuid.New().String(),
-		Format:      "dc+sd-jwt",
-		Raw:         raw,
-		Claims:      token.ResolvedClaims,
-		Disclosures: token.Disclosures,
-	}
-
-	if vct, ok := token.Payload["vct"].(string); ok {
-		cred.VCT = vct
-	}
-
-	return w.appendCredential(cred), nil
-}
-
-func (w *Wallet) importPlainJWT(raw string) (*StoredCredential, error) {
-	_, payload, _, err := format.ParseJWTParts(raw)
-	if err != nil {
-		return nil, fmt.Errorf("parsing JWT: %w", err)
-	}
-
-	cred := StoredCredential{
-		ID:     uuid.New().String(),
-		Format: "jwt_vc_json",
-		Raw:    raw,
-		Claims: payload,
-	}
-
-	if vct, ok := payload["vct"].(string); ok {
-		cred.VCT = vct
-	}
-
-	return w.appendCredential(cred), nil
-}
-
-func (w *Wallet) importMDoc(raw string) (*StoredCredential, error) {
-	doc, err := mdoc.Parse(raw)
-	if err != nil {
-		return nil, fmt.Errorf("parsing mDoc: %w", err)
-	}
-
-	claims := make(map[string]any)
-	for ns, items := range doc.NameSpaces {
-		for _, item := range items {
-			claims[ns+":"+item.ElementIdentifier] = item.ElementValue
-		}
-	}
-
-	cred := StoredCredential{
-		ID:         uuid.New().String(),
-		Format:     "mso_mdoc",
-		Raw:        raw,
-		Claims:     claims,
-		DocType:    doc.DocType,
-		NameSpaces: doc.NameSpaces,
-	}
-
-	return w.appendCredential(cred), nil
 }
 
 // RemoveCredential removes a credential by ID.
@@ -494,197 +359,6 @@ func (w *Wallet) GetLog() []LogEntry {
 	return out
 }
 
-// CreateConsentRequest creates a new consent request and notifies subscribers.
-func (w *Wallet) CreateConsentRequest(req *ConsentRequest) {
-	w.mu.Lock()
-	w.Requests[req.ID] = req
-	subs := make([]chan *ConsentRequest, 0, len(w.subscribers))
-	for _, ch := range w.subscribers {
-		subs = append(subs, ch)
-	}
-	w.mu.Unlock()
-
-	for _, ch := range subs {
-		select {
-		case ch <- req:
-		default:
-		}
-	}
-}
-
-// GetRequest returns a consent request by ID.
-func (w *Wallet) GetRequest(id string) (*ConsentRequest, bool) {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	req, ok := w.Requests[id]
-	return req, ok
-}
-
-// ResolveRequest atomically transitions a consent request from "pending" to
-// the given status. It returns false if the request was not found or was
-// already resolved.
-func (w *Wallet) ResolveRequest(id, status string) (*ConsentRequest, bool) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	req, ok := w.Requests[id]
-	if !ok || req.Status != "pending" {
-		return req, false
-	}
-	req.Status = status
-	return req, true
-}
-
-// GetPendingRequests returns all pending consent requests.
-func (w *Wallet) GetPendingRequests() []*ConsentRequest {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	var out []*ConsentRequest
-	for _, r := range w.Requests {
-		if r.Status == "pending" {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
-// Subscribe returns a channel for new consent requests and an unsubscribe function.
-func (w *Wallet) Subscribe() (<-chan *ConsentRequest, func()) {
-	ch := make(chan *ConsentRequest, 16)
-	w.mu.Lock()
-	w.subID++
-	id := w.subID
-	w.subscribers[id] = ch
-	w.mu.Unlock()
-
-	return ch, func() {
-		w.mu.Lock()
-		delete(w.subscribers, id)
-		w.mu.Unlock()
-		for {
-			select {
-			case <-ch:
-			default:
-				return
-			}
-		}
-	}
-}
-
-// SubscribeErrors returns a channel for error events and an unsubscribe function.
-func (w *Wallet) SubscribeErrors() (<-chan WalletError, func()) {
-	ch := make(chan WalletError, 16)
-	w.mu.Lock()
-	w.errSubID++
-	id := w.errSubID
-	if w.errSubscribers == nil {
-		w.errSubscribers = make(map[int64]chan WalletError)
-	}
-	w.errSubscribers[id] = ch
-	w.mu.Unlock()
-
-	return ch, func() {
-		w.mu.Lock()
-		delete(w.errSubscribers, id)
-		w.mu.Unlock()
-		for {
-			select {
-			case <-ch:
-			default:
-				return
-			}
-		}
-	}
-}
-
-// NotifyError sends an error event to all subscribers and stores it for polling.
-func (w *Wallet) NotifyError(err WalletError) {
-	w.mu.Lock()
-	w.lastError = &err
-	subs := make([]chan WalletError, 0, len(w.errSubscribers))
-	for _, ch := range w.errSubscribers {
-		subs = append(subs, ch)
-	}
-	w.mu.Unlock()
-
-	for _, ch := range subs {
-		select {
-		case ch <- err:
-		default:
-		}
-	}
-}
-
-// PopLastError returns and clears the last error, if any.
-func (w *Wallet) PopLastError() *WalletError {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	err := w.lastError
-	w.lastError = nil
-	return err
-}
-
-// SetNextError sets a one-shot error override for the next presentation request.
-func (w *Wallet) SetNextError(e *NextErrorOverride) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.nextError = e
-}
-
-// ConsumeNextError returns and clears the next error override, if any.
-func (w *Wallet) ConsumeNextError() *NextErrorOverride {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	e := w.nextError
-	w.nextError = nil
-	return e
-}
-
-// Rehydrate re-populates non-serializable fields (Disclosures, NameSpaces) from Raw.
-func (c *StoredCredential) Rehydrate() error {
-	if c.Raw == "" {
-		return nil
-	}
-
-	switch c.Format {
-	case "dc+sd-jwt":
-		token, err := sdjwt.Parse(c.Raw)
-		if err != nil {
-			return fmt.Errorf("parsing SD-JWT: %w", err)
-		}
-		c.Disclosures = token.Disclosures
-		if c.Claims == nil {
-			c.Claims = token.ResolvedClaims
-		}
-
-	case "jwt_vc_json":
-		if c.Claims == nil {
-			_, payload, _, err := format.ParseJWTParts(c.Raw)
-			if err != nil {
-				return fmt.Errorf("parsing JWT: %w", err)
-			}
-			c.Claims = payload
-		}
-
-	case "mso_mdoc":
-		doc, err := mdoc.Parse(c.Raw)
-		if err != nil {
-			return fmt.Errorf("parsing mDoc: %w", err)
-		}
-		c.NameSpaces = doc.NameSpaces
-		if c.Claims == nil {
-			claims := make(map[string]any)
-			for ns, items := range doc.NameSpaces {
-				for _, item := range items {
-					claims[ns+":"+item.ElementIdentifier] = item.ElementValue
-				}
-			}
-			c.Claims = claims
-		}
-	}
-
-	return nil
-}
-
 // LoadKeyFromFile loads a private key from a file path.
 func LoadKeyFromFile(path string) (*ecdsa.PrivateKey, error) {
 	privKey, err := keys.LoadPrivateKey(path)
@@ -717,11 +391,11 @@ func CredentialSummary(c StoredCredential) map[string]any {
 // MarshalConsentRequest returns a JSON-serializable view of a consent request.
 func MarshalConsentRequest(r *ConsentRequest) map[string]any {
 	m := map[string]any{
-		"id":         r.ID,
-		"type":       r.Type,
-		"status":     r.Status,
-		"client_id":  r.ClientID,
-		"created_at": r.CreatedAt.Format(time.RFC3339),
+		"id":                  r.ID,
+		"type":                r.Type,
+		"status":              r.Status,
+		"client_id":           r.ClientID,
+		"created_at":          r.CreatedAt.Format(time.RFC3339),
 		"matched_credentials": r.MatchedCreds,
 	}
 	if r.Nonce != "" {
@@ -734,60 +408,6 @@ func MarshalConsentRequest(r *ConsentRequest) map[string]any {
 		m["dcql_query"] = r.DCQLQuery
 	}
 	return m
-}
-
-// ImportCredentialFromFile reads a file and imports the credential.
-func (w *Wallet) ImportCredentialFromFile(path string) error {
-	raw, err := format.ReadInput(path)
-	if err != nil {
-		return fmt.Errorf("reading credential file: %w", err)
-	}
-	_, err = w.ImportCredential(raw)
-	return err
-}
-
-// SetCredentialStatus sets the status value for a credential.
-func (w *Wallet) SetCredentialStatus(credID string, status int) (StatusEntry, bool) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	entry, ok := w.StatusEntries[credID]
-	if !ok {
-		return StatusEntry{}, false
-	}
-	entry.Status = status
-	w.StatusEntries[credID] = entry
-	return entry, true
-}
-
-// BuildStatusBitstring builds a bitstring from status entries (1 bit per entry).
-func (w *Wallet) BuildStatusBitstring() []byte {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-
-	if w.StatusListCounter == 0 {
-		// Minimum 1 byte
-		return make([]byte, 1)
-	}
-
-	// Calculate number of bytes needed
-	numBytes := (w.StatusListCounter + 7) / 8
-	// Minimum 16 bytes as per RFC 9596
-	if numBytes < 16 {
-		numBytes = 16
-	}
-	bitstring := make([]byte, numBytes)
-
-	for _, entry := range w.StatusEntries {
-		if entry.Status != 0 {
-			byteIdx := entry.Index / 8
-			bitOffset := entry.Index % 8
-			if byteIdx < len(bitstring) {
-				bitstring[byteIdx] |= byte(1 << bitOffset)
-			}
-		}
-	}
-
-	return bitstring
 }
 
 // CredentialsJSON returns all credentials as JSON bytes.

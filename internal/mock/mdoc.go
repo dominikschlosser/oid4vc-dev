@@ -33,9 +33,9 @@ type MDOCConfig struct {
 	Namespace     string
 	Claims        map[string]any
 	Key           *ecdsa.PrivateKey
-	HolderKey     *ecdsa.PublicKey // optional: adds deviceKeyInfo to MSO
-	ExpiresIn     time.Duration   // validity duration; defaults to 30 days if zero
-	ValidFrom     *time.Time      // optional: override validFrom (defaults to now)
+	HolderKey     *ecdsa.PublicKey    // optional: adds deviceKeyInfo to MSO
+	ExpiresIn     time.Duration       // validity duration; defaults to 30 days if zero
+	ValidFrom     *time.Time          // optional: override validFrom (defaults to now)
 	StatusListURI string              // optional: status list URI for revocation
 	StatusListIdx int                 // optional: index in the status list
 	CertChain     []*x509.Certificate // optional: x5chain certificate chain [leaf, CA]

@@ -527,7 +527,7 @@ func TestRehydrate_SDJWT(t *testing.T) {
 	if len(cred.Disclosures) == 0 {
 		t.Error("expected disclosures after rehydrate")
 	}
-	if cred.Claims == nil || len(cred.Claims) == 0 {
+	if len(cred.Claims) == 0 {
 		t.Error("expected claims after rehydrate")
 	}
 }
@@ -554,10 +554,10 @@ func TestRehydrate_MDoc(t *testing.T) {
 		t.Fatalf("Rehydrate: %v", err)
 	}
 
-	if cred.NameSpaces == nil || len(cred.NameSpaces) == 0 {
+	if len(cred.NameSpaces) == 0 {
 		t.Error("expected namespaces after rehydrate")
 	}
-	if cred.Claims == nil || len(cred.Claims) == 0 {
+	if len(cred.Claims) == 0 {
 		t.Error("expected claims after rehydrate")
 	}
 }
@@ -603,13 +603,13 @@ func TestRehydrate_PreservesExistingClaims(t *testing.T) {
 func TestMarshalConsentRequest(t *testing.T) {
 	now := time.Now()
 	req := &ConsentRequest{
-		ID:       "req-1",
-		Type:     "presentation",
-		Status:   "pending",
-		ClientID: "https://verifier.example",
-		Nonce:    "nonce123",
+		ID:          "req-1",
+		Type:        "presentation",
+		Status:      "pending",
+		ClientID:    "https://verifier.example",
+		Nonce:       "nonce123",
 		ResponseURI: "https://verifier.example/callback",
-		CreatedAt: now,
+		CreatedAt:   now,
 		MatchedCreds: []CredentialMatch{
 			{QueryID: "pid", Format: "dc+sd-jwt"},
 		},

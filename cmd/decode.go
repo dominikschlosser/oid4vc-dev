@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/dominikschlosser/oid4vc-dev/internal/mdoc"
 	"github.com/dominikschlosser/oid4vc-dev/internal/oid4vc"
@@ -25,7 +27,6 @@ import (
 	"github.com/dominikschlosser/oid4vc-dev/internal/qr"
 	"github.com/dominikschlosser/oid4vc-dev/internal/sdjwt"
 	"github.com/dominikschlosser/oid4vc-dev/internal/trustlist"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -66,13 +67,13 @@ func init() {
 }
 
 var formatAliases = map[string]format.CredentialFormat{
-	"sdjwt":   format.FormatSDJWT,
-	"sd-jwt":  format.FormatSDJWT,
-	"jwt":     format.FormatJWT,
-	"mdoc":    format.FormatMDOC,
-	"mso_mdoc": format.FormatMDOC,
-	"vci":     format.FormatOID4VCI,
-	"oid4vci": format.FormatOID4VCI,
+	"sdjwt":     format.FormatSDJWT,
+	"sd-jwt":    format.FormatSDJWT,
+	"jwt":       format.FormatJWT,
+	"mdoc":      format.FormatMDOC,
+	"mso_mdoc":  format.FormatMDOC,
+	"vci":       format.FormatOID4VCI,
+	"oid4vci":   format.FormatOID4VCI,
 	"vp":        format.FormatOID4VP,
 	"oid4vp":    format.FormatOID4VP,
 	"trustlist": format.FormatTrustList,

@@ -19,8 +19,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 	"github.com/fatih/color"
+
+	"github.com/dominikschlosser/oid4vc-dev/internal/format"
 )
 
 var (

@@ -105,6 +105,7 @@ oid4vc-dev wallet serve --register --port 9000
 | `--status-list`         | `false`  | Embed status list references in generated credentials |
 | `--base-url`            | —        | Base URL for status list endpoint (default: `http://localhost:<port>`) |
 | `--docker`              | `false`  | Use `host.docker.internal` instead of `localhost` for `--base-url` |
+| `--haip`                      | `false`  | Enforce HAIP 1.0 compliance checks on incoming requests |
 | `--require-encrypted-request` | `false` | Require verifiers to encrypt request objects (sends encryption key in `wallet_metadata`) |
 
 ## `wallet accept <uri>`
@@ -128,6 +129,7 @@ oid4vc-dev wallet accept 'openid-credential-offer://...' --tx-code 123456
 | `--auto-accept`         | `false`  | Auto-approve OID4VP presentations                |
 | `--session-transcript`  | `oid4vp` | mDoc session transcript mode: `oid4vp` or `iso`  |
 | `--tx-code`             | —        | Transaction code for OID4VCI pre-authorized code flow |
+| `--haip`                | `false`  | Enforce HAIP 1.0 compliance checks on incoming requests |
 
 Note: only the pre-authorized code grant type is supported. Offers that only contain an `authorization_code` grant will be rejected with a clear error message.
 
@@ -181,6 +183,23 @@ oid4vc-dev wallet unregister             # Remove URL handlers
 | Flag     | Default | Description                                                    |
 |----------|---------|----------------------------------------------------------------|
 | `--port` | `8085`  | Listener port for handler script to try before falling back to CLI |
+
+## HAIP 1.0 Enforcement
+
+Use `--haip` with `wallet serve` or `wallet accept` to enforce [HAIP 1.0](https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0.html) compliance on incoming OID4VP requests. When enabled, the wallet rejects requests that violate any of:
+
+- `response_mode` must be `direct_post.jwt`
+- `client_id` must use the `x509_hash:` scheme
+- A signed request object (JAR) must be present
+- The query must use DCQL (not presentation definitions)
+- The request object signing algorithm must be `ES256`
+
+Non-compliant requests receive an HTTP 400 error with details about which checks failed.
+
+```bash
+oid4vc-dev wallet serve --haip --auto-accept --pid
+oid4vc-dev wallet accept --haip 'openid4vp://authorize?...'
+```
 
 ## Testing API
 
