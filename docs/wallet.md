@@ -6,6 +6,8 @@ The wallet has two validation modes:
 - `debug` (default) keeps processing requests when possible and logs spec findings for debugging
 - `strict` rejects requests that violate the latest final specs
 
+For OpenID Foundation conformance work, see [docs/conformance.md](./conformance.md).
+
 ## Subcommands
 
 | Subcommand     | Purpose                                                         |
@@ -217,7 +219,9 @@ oid4vc-dev wallet unregister             # Remove URL handlers
 
 ## HAIP 1.0 Enforcement
 
-Use `--haip` with `wallet serve` or `wallet accept` to enforce [HAIP 1.0](https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0.html) compliance on incoming OID4VP requests. When enabled, the wallet rejects requests that violate any of:
+This wallet currently enforces the implemented **OID4VP subset** of HAIP 1.0. It does not yet implement the full HAIP issuance profile, Wallet Attestation, Key Attestation, or PAR.
+
+Use `--haip` with `wallet serve` or `wallet accept` to enforce [HAIP 1.0 Final](https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0-final.html) compliance on incoming OID4VP requests. When enabled, the wallet rejects requests that violate any of:
 
 - `response_mode` must be `direct_post.jwt`
 - `client_id` must use the `x509_hash:` scheme

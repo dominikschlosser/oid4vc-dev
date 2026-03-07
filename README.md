@@ -46,6 +46,7 @@ docker run -p 8085:8085 ghcr.io/dominikschlosser/oid4vc-dev
 The default CMD starts the wallet server with pre-loaded PID credentials in headless mode — ready for automated verifier testing out of the box.
 
 → [Full Docker & verifier testing guide](docs/docker.md)
+→ [OIDF conformance notes](docs/conformance.md)
 
 ## Usage
 
@@ -214,7 +215,7 @@ The wallet evaluates `credential_sets` constraints when processing DCQL queries,
 
 ## Spec Compliance
 
-See [docs/spec-compliance.md](docs/spec-compliance.md) for detailed compliance status against OID4VP 1.0, OID4VCI 1.0, HAIP 1.0, SD-JWT, mDoc (ISO 18013-5), ETSI trust lists, and RFC 9596.
+See [docs/spec-compliance.md](docs/spec-compliance.md) for detailed compliance status against OID4VP 1.0, OID4VCI 1.0, the currently implemented HAIP subset, SD-JWT, mDoc (ISO 18013-5), ETSI trust lists, and RFC 9596.
 
 ## Global Flags
 

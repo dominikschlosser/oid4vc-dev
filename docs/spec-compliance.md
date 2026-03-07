@@ -39,7 +39,7 @@ Status of implemented features against the relevant specifications.
 | Batch credential issuance | Not implemented | Optional per spec |
 | Deferred credential issuance | Not implemented | Optional per spec |
 
-## HAIP 1.0 (High Assurance Interoperability Profile)
+## HAIP 1.0 (High Assurance Interoperability Profile, OID4VP subset only)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -48,6 +48,8 @@ Status of implemented features against the relevant specifications.
 | Signed request object (JAR) required | Enforced | With `--haip` flag |
 | DCQL query required | Enforced | With `--haip` flag |
 | Request object `alg` must be ES256 | Enforced | With `--haip` flag |
+
+The repository does not yet implement the full HAIP 1.0 profile for issuance, Wallet Attestation, Key Attestation, or PAR.
 
 ## SD-JWT (Selective Disclosure JWT)
 
