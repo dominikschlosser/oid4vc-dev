@@ -45,8 +45,11 @@ func VerifyRequestObjectSignature(reqObj *oid4vc.RequestObjectJWT) string {
 	}
 
 	alg := jsonutil.GetString(reqObj.Header, "alg")
-	if alg == "" || alg == "none" {
+	if alg == "" {
 		return fmt.Sprintf("Request Object has unsupported signing algorithm %q", alg)
+	}
+	if alg == "none" {
+		return ""
 	}
 
 	certs, warning := extractCertChain(reqObj)
@@ -143,7 +146,7 @@ func verifyX509Hash(clientID string, reqObj *oid4vc.RequestObjectJWT) string {
 func verifyRedirectURI(clientID string, reqObj *oid4vc.RequestObjectJWT, responseURI string) string {
 	expected := strings.TrimPrefix(clientID, "redirect_uri:")
 
-	if reqObj != nil && reqObj.Header != nil {
+	if reqObj != nil && reqObj.Header != nil && jsonutil.GetString(reqObj.Header, "alg") != "none" {
 		return "redirect_uri: prefix MUST NOT use signed request objects (OID4VP 1.0)"
 	}
 

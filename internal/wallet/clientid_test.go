@@ -450,3 +450,44 @@ func TestVerifyRequestObjectSignature(t *testing.T) {
 		t.Fatal("expected signature verification failure")
 	}
 }
+
+func TestVerifyRequestObjectSignature_AllowsAlgNone(t *testing.T) {
+	header := map[string]any{
+		"alg": "none",
+		"typ": "oauth-authz-req+jwt",
+	}
+	payload := map[string]any{
+		"client_id": "redirect_uri:https://verifier.example/cb",
+	}
+
+	headerJSON, _ := json.Marshal(header)
+	payloadJSON, _ := json.Marshal(payload)
+	raw := format.EncodeBase64URL(headerJSON) + "." + format.EncodeBase64URL(payloadJSON) + "."
+
+	reqObj := &oid4vc.RequestObjectJWT{
+		Raw:     raw,
+		Header:  header,
+		Payload: payload,
+	}
+	if warning := VerifyRequestObjectSignature(reqObj); warning != "" {
+		t.Fatalf("expected alg=none request object to bypass signature verification, got %s", warning)
+	}
+}
+
+func TestVerifyClientID_RedirectURIAllowsUnsignedRequestObject(t *testing.T) {
+	reqObj := &oid4vc.RequestObjectJWT{
+		Header: map[string]any{
+			"alg": "none",
+			"typ": "oauth-authz-req+jwt",
+		},
+	}
+
+	warning := VerifyClientID(
+		"redirect_uri:https://verifier.example/cb",
+		reqObj,
+		"https://verifier.example/cb",
+	)
+	if warning != "" {
+		t.Fatalf("expected redirect_uri client_id to allow unsigned request objects, got %s", warning)
+	}
+}
