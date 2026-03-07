@@ -66,6 +66,9 @@ so the wallet automatically receives incoming protocol requests.`,
 			if err != nil {
 				return fmt.Errorf("loading wallet: %w", err)
 			}
+			if err := applyValidationMode(w, walletValidationMode); err != nil {
+				return err
+			}
 
 			// Override keys if explicitly provided
 			if keyPath != "" {
@@ -152,6 +155,7 @@ so the wallet automatically receives incoming protocol requests.`,
 			dim.Printf("               http://host.docker.internal:%d/api/trustlist\n", port)
 			fmt.Printf("  Credentials: %d loaded\n", len(w.GetCredentials()))
 			fmt.Printf("  Storage:     %s\n", store.Dir)
+			fmt.Printf("  Validation:  %s\n", w.ValidationMode)
 			if w.AutoAccept {
 				fmt.Printf("  Mode:        auto-accept\n")
 			} else {

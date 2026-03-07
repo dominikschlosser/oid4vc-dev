@@ -36,6 +36,7 @@ type dispatchOID4Opts struct {
 	sessionTranscript string
 	txCode            string
 	haip              bool
+	mode              string
 }
 
 // dispatchURI detects the URI type and dispatches to the appropriate wallet flow.
@@ -46,6 +47,9 @@ func dispatchURI(uri string, opts dispatchOID4Opts) error {
 	case format.FormatOID4VP:
 		w, store, err := loadWallet()
 		if err != nil {
+			return err
+		}
+		if err := applyValidationMode(w, opts.mode); err != nil {
 			return err
 		}
 		if opts.autoAccept {

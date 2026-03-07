@@ -55,6 +55,7 @@ only apply to OID4VP flows.`,
 				sessionTranscript: sessionTranscript,
 				txCode:            txCode,
 				haip:              haip,
+				mode:              walletValidationMode,
 			})
 		},
 	}
@@ -121,6 +122,7 @@ func walletScanCmd() *cobra.Command {
 				port:              port,
 				autoAccept:        autoAccept,
 				sessionTranscript: sessionTranscript,
+				mode:              walletValidationMode,
 			})
 		},
 	}

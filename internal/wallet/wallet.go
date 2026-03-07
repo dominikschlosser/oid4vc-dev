@@ -69,6 +69,7 @@ type Wallet struct {
 	RequireEncryptedRequest bool                  // when true, sends encryption keys in wallet_metadata
 	RequestEncryptionKey    *ecdsa.PrivateKey     // key for decrypting encrypted request objects
 	RequireHAIP             bool                  // when true, enforce HAIP 1.0 compliance checks
+	ValidationMode          ValidationMode        `json:"-"`
 	Credentials             []StoredCredential
 	StatusEntries           map[string]StatusEntry // credential ID → status entry
 	StatusListCounter       int                    // next available status list index
@@ -155,11 +156,12 @@ type LogEntry struct {
 // It generates a CA key and certificate chain (CA → leaf) for realistic x5c chains.
 func New(holderKey, issuerKey *ecdsa.PrivateKey, autoAccept bool) *Wallet {
 	w := &Wallet{
-		HolderKey:   holderKey,
-		IssuerKey:   issuerKey,
-		AutoAccept:  autoAccept,
-		Requests:    make(map[string]*ConsentRequest),
-		subscribers: make(map[int64]chan *ConsentRequest),
+		HolderKey:      holderKey,
+		IssuerKey:      issuerKey,
+		AutoAccept:     autoAccept,
+		ValidationMode: ValidationModeDebug,
+		Requests:       make(map[string]*ConsentRequest),
+		subscribers:    make(map[int64]chan *ConsentRequest),
 	}
 
 	// Generate CA key and certificate chain

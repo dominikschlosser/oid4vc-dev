@@ -36,6 +36,7 @@ import (
 )
 
 var walletDir string
+var walletValidationMode string
 
 var walletCmd = &cobra.Command{
 	Use:   "wallet",
@@ -45,6 +46,7 @@ var walletCmd = &cobra.Command{
 
 func init() {
 	walletCmd.PersistentFlags().StringVar(&walletDir, "wallet-dir", "", "Wallet storage directory (default ~/.oid4vc-dev/wallet/)")
+	walletCmd.PersistentFlags().StringVar(&walletValidationMode, "mode", string(wallet.ValidationModeDebug), "Wallet validation mode: 'debug' (default) or 'strict'")
 	walletCmd.AddCommand(walletServeCmd())
 	walletCmd.AddCommand(walletListCmd())
 	walletCmd.AddCommand(walletShowCmd())
@@ -101,7 +103,19 @@ func loadWallet() (*wallet.Wallet, *wallet.WalletStore, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading wallet: %w", err)
 	}
+	if err := applyValidationMode(w, walletValidationMode); err != nil {
+		return nil, nil, err
+	}
 	return w, store, nil
+}
+
+func applyValidationMode(w *wallet.Wallet, raw string) error {
+	mode, err := wallet.ParseValidationMode(raw)
+	if err != nil {
+		return err
+	}
+	w.ValidationMode = mode
+	return nil
 }
 
 // --- wallet list ---

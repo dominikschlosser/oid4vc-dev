@@ -2,6 +2,10 @@
 
 A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR scanning, and OS URL scheme registration. Credentials and keys are stored in `~/.oid4vc-dev/wallet/` (configurable via `--wallet-dir`) and persist across invocations.
 
+The wallet has two validation modes:
+- `debug` (default) keeps processing requests when possible and logs spec findings for debugging
+- `strict` rejects requests that violate the latest final specs
+
 ## Subcommands
 
 | Subcommand     | Purpose                                                         |
@@ -119,6 +123,7 @@ oid4vc-dev wallet serve --register --port 9000
 | `--pid`                 | `false`  | Generate default EUDI PID credentials on start   |
 | `--key`                 | —        | Override holder key (PEM/JWK)                    |
 | `--issuer-key`          | —        | Override issuer key (PEM/JWK)                    |
+| `--mode`                | `debug`  | Validation mode: `debug` or `strict`             |
 | `--session-transcript`  | `oid4vp` | mDoc session transcript mode: `oid4vp` or `iso`  |
 | `--register`            | `false`  | Register OS URL scheme handlers                  |
 | `--no-register`         | `false`  | Skip URL scheme registration (overrides --register) |
@@ -150,6 +155,7 @@ oid4vc-dev wallet accept 'openid-credential-offer://...' --tx-code 123456
 |-------------------------|----------|--------------------------------------------------|
 | `--port`                | `8085`   | Server port for OID4VP                           |
 | `--auto-accept`         | `false`  | Auto-approve OID4VP presentations                |
+| `--mode`                | `debug`  | Validation mode: `debug` or `strict`             |
 | `--session-transcript`  | `oid4vp` | mDoc session transcript mode: `oid4vp` or `iso`  |
 | `--tx-code`             | —        | Transaction code for OID4VCI pre-authorized code flow |
 | `--haip`                | `false`  | Enforce HAIP 1.0 compliance checks on incoming requests |
@@ -169,6 +175,8 @@ oid4vc-dev wallet scan qr-image.png
 oid4vc-dev wallet scan --screen              # macOS interactive screen capture
 oid4vc-dev wallet scan --screen --auto-accept # auto-approve if it's a presentation
 ```
+
+`wallet scan` honors the persistent `wallet --mode` flag when it dispatches OID4VP/VCI flows.
 
 ## `wallet trust-list`
 

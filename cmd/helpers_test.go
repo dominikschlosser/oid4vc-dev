@@ -143,6 +143,32 @@ func TestApplySessionTranscriptMode(t *testing.T) {
 	}
 }
 
+func TestApplyValidationMode(t *testing.T) {
+	tests := []struct {
+		mode    string
+		want    wallet.ValidationMode
+		wantErr bool
+	}{
+		{"debug", wallet.ValidationModeDebug, false},
+		{"", wallet.ValidationModeDebug, false},
+		{"strict", wallet.ValidationModeStrict, false},
+		{"invalid", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run("mode="+tt.mode, func(t *testing.T) {
+			w := &wallet.Wallet{}
+			err := applyValidationMode(w, tt.mode)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("applyValidationMode(%q) error = %v, wantErr %v", tt.mode, err, tt.wantErr)
+			}
+			if !tt.wantErr && w.ValidationMode != tt.want {
+				t.Errorf("got validation mode %q, want %q", w.ValidationMode, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsHTTPURL(t *testing.T) {
 	tests := []struct {
 		input string
