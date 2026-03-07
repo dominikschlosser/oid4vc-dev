@@ -444,7 +444,8 @@ func TestVerifyRequestObjectSignature(t *testing.T) {
 		t.Fatalf("expected valid signature, got %s", warning)
 	}
 
-	reqObj.Raw = raw[:len(raw)-1] + "A"
+	parts := strings.Split(raw, ".")
+	reqObj.Raw = parts[0] + "." + parts[1] + ".AAAA"
 	if warning := VerifyRequestObjectSignature(reqObj); warning == "" {
 		t.Fatal("expected signature verification failure")
 	}
