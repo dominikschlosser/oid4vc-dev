@@ -14,7 +14,9 @@ module.exports = defineConfig({
     command: "go build -o /tmp/oid4vc-dev-e2e .. && /tmp/oid4vc-dev-e2e serve --port 18923",
     url: "http://localhost:18923",
     reuseExistingServer: true,
-    timeout: 15_000,
+    // CI runners frequently hit a cold Go build here, so allow enough time
+    // for the binary to compile and the HTTP server to become healthy.
+    timeout: 60_000,
   },
   projects: [
     { name: "chromium", use: { browserName: "chromium" } },

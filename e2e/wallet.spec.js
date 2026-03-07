@@ -10,6 +10,7 @@ const WALLET_URL = `http://localhost:${WALLET_PORT}`;
 let walletProcess;
 
 test.describe.configure({ mode: "serial" });
+test.setTimeout(60_000);
 
 test.beforeAll(async () => {
   // Build the binary
@@ -26,7 +27,7 @@ test.beforeAll(async () => {
   );
 
   // Wait for server to be ready
-  await waitForServer(WALLET_URL, 10000);
+  await waitForServer(WALLET_URL, 30_000);
 });
 
 test.afterAll(async () => {

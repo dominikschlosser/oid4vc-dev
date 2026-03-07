@@ -33,7 +33,7 @@ test.beforeAll(async ({ }, testInfo) => {
   );
 
   // Wait for server to be ready
-  await waitForServer(WALLET_URL, 15000);
+  await waitForServer(WALLET_URL, 30_000);
 });
 
 test.afterAll(async () => {
