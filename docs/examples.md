@@ -74,3 +74,14 @@ It includes:
 - an ngrok tunnel in front of the local Keycloak, since the public wallet fetches the request object and calls the token endpoint server side (or set `KEYCLOAK_PUBLIC_URL` to your own public URL)
 - the same admin-API step pointing the verifier's `walletScheme` / `trustListUrl` at the public wallet
 
+### Load test target
+
+Folder: [`examples/load-test`](../examples/load-test/README.md)
+
+Two wallet servers share one Postgres database behind an nginx ingress, so every request lands on either server and both serve the same wallet. The target for load and performance tests of verifiers, issuers and the wallet.
+
+It includes:
+
+- a compose file with Postgres, two wallet servers and nginx
+- an nginx config with round robin for API clients and a sticky session for browsers
+- the endpoints to drive and how to add servers

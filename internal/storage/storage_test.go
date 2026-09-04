@@ -192,6 +192,62 @@ func TestStore_WriteIfRefusesAStaleVersion(t *testing.T) {
 	}
 }
 
+// A counter moved with Stat, Read and WriteIf hands out every value once,
+// however many writers move it at the same time. The file backend has no
+// lock across processes and is not used for a shared counter.
+func TestStore_WriteIfSerialisesConcurrentIncrements(t *testing.T) {
+	for kind, store := range backends(t) {
+		if kind == KindFile {
+			continue
+		}
+		t.Run(kind, func(t *testing.T) {
+			key := scope(t) + "/counter"
+			defer store.Delete(key)
+			var mu sync.Mutex
+			seen := make(map[int]bool)
+			var wg sync.WaitGroup
+			for i := 0; i < 8; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for n := 0; n < 25; n++ {
+						for {
+							next, expected := 0, ""
+							if stamp, ok := store.Stat(key); ok {
+								expected = stamp.Version
+								data, err := store.Read(key)
+								if err != nil {
+									continue
+								}
+								next, _ = strconv.Atoi(string(data))
+							}
+							err := store.WriteIf(key, []byte(strconv.Itoa(next+1)), 0o600, expected)
+							if errors.Is(err, ErrConflict) {
+								continue
+							}
+							if err != nil {
+								t.Error(err)
+								return
+							}
+							mu.Lock()
+							if seen[next] {
+								t.Errorf("value %d handed out twice", next)
+							}
+							seen[next] = true
+							mu.Unlock()
+							break
+						}
+					}
+				}()
+			}
+			wg.Wait()
+			if len(seen) != 200 {
+				t.Fatalf("%d distinct values, want 200", len(seen))
+			}
+		})
+	}
+}
+
 func TestStore_RejectsEscapingKeys(t *testing.T) {
 	for kind, store := range backends(t) {
 		t.Run(kind, func(t *testing.T) {

@@ -1,0 +1,70 @@
+# Two wallet servers on one Postgres database behind an nginx ingress. The
+# target for load and performance tests: every request through the ingress
+# lands on either server, and both serve the same wallet state.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: wallet
+      POSTGRES_DB: wallet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  wallet-1: &wallet
+    image: ghcr.io/dominikschlosser/eudi-dev:${WALLET_TAG:-latest}
+    # docker compose build uses the working tree instead of the published
+    # image.
+    build:
+      context: ../..
+    environment:
+      EUDI_DEV_STORAGE: postgres://postgres:wallet@db:5432/wallet?sslmode=disable
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8085/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    # The base URL is the ingress as a verifier or issuer on the host sees
+    # it. The HTTPS issuer endpoints take its host and the wallet port plus
+    # one (8086), which the ingress passes through on that same host port.
+    command:
+      - wallet
+      - serve
+      - --auto-accept
+      - --pid
+      - --port
+      - "8085"
+      - --base-url
+      - http://localhost:${INGRESS_PORT:-8080}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # The second server starts after the first is healthy, so the PID baseline
+  # is generated once rather than by both at the same moment.
+  wallet-2:
+    <<: *wallet
+    depends_on:
+      db:
+        condition: service_healthy
+      wallet-1:
+        condition: service_healthy
+
+  ingress:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    # INGRESS_PORT moves the HTTP host port. The HTTPS issuer endpoints stay
+    # on 8086, the port the wallets advertise.
+    ports:
+      - "${INGRESS_PORT:-8080}:8080"
+      - "${INGRESS_TLS_PORT:-8086}:8081"
+    # The ingress opens once both servers answer, so no request meets a
+    # server that is still starting.
+    depends_on:
+      wallet-1:
+        condition: service_healthy
+      wallet-2:
+        condition: service_healthy

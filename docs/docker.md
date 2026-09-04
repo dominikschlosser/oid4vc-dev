@@ -45,32 +45,9 @@ Pass `-e EUDI_DEV_STORAGE=...` (or `--storage` on the command) to choose explici
 | `auto` | Files when a state directory is mounted or named, memory otherwise (the image default) |
 | `postgres://user:pass@host:5432/db` | One table (`eudi_dev_state`) in that database, created on first use |
 
-Several containers pointed at the same database serve one wallet: the same keys, the same CA, the same credentials. That is the setup for load testing a verifier or an issuer against many wallet servers. Docker resolves `wallet` to the replicas in turn:
+Several containers pointed at the same database serve one wallet: the same keys, the same CA, the same credentials. [examples/load-test](../examples/load-test/README.md) runs two wallet servers on one database behind an nginx ingress, the target for load and performance tests.
 
-```yaml
-services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_PASSWORD: wallet
-      POSTGRES_DB: wallet
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 2s
-  wallet:
-    image: ghcr.io/dominikschlosser/eudi-dev:latest
-    depends_on:
-      db:
-        condition: service_healthy
-    deploy:
-      replicas: 4
-    environment:
-      EUDI_DEV_STORAGE: postgres://postgres:wallet@db:5432/wallet?sslmode=disable
-    command: ["wallet", "serve", "--auto-accept", "--pid", "--port", "8085",
-              "--base-url", "http://wallet:8085"]
-```
-
-Each wallet server re-reads the shared state on every request and writes the whole wallet document on every change, so two servers saving in the same instant keep the later document. Presentations only add activity log entries, which a load test can lose. The database holds the keys and the CA in the clear, as the wallet directory does (see [SECURITY.md](../SECURITY.md)).
+Each wallet server re-reads the shared state on every request and writes only what it changed (a row per credential, log entry and status entry), so servers issuing and presenting at the same time keep each other's changes. The database holds the keys and the CA in the clear, as the wallet directory does (see [SECURITY.md](../SECURITY.md)).
 
 ## How it works
 

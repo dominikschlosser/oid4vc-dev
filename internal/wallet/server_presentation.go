@@ -230,6 +230,7 @@ func cloneWalletForPresentation(src *Wallet, opts presentationRequestOptions) (*
 		Credentials:             append([]StoredCredential(nil), src.Credentials...),
 		StatusEntries:           cloneStatusEntries(src.StatusEntries),
 		StatusListCounter:       src.StatusListCounter,
+		allocateStatusIndex:     src.allocateStatusIndex,
 		BaseURL:                 src.BaseURL,
 		IssuerURL:               src.IssuerURL,
 		ServingOrigin:           src.ServingOrigin,

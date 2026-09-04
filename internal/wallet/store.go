@@ -419,26 +419,10 @@ func (s *WalletStore) Save(w *Wallet) error {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
 
-	creds := w.GetCredentials()
-	// Move any embedded display image out of wallet.json into the assets,
-	// leaving a reference in its place. Done on the copy, so the in-memory
-	// wallet is untouched until a reload picks up the references.
-	for i := range creds {
-		if creds[i].Display == nil {
-			continue
-		}
-		logo, logoConverted := s.storeDisplayAsset(creds[i].Display.LogoURI)
-		background, backgroundConverted := s.storeDisplayAsset(creds[i].Display.BackgroundURI)
-		if logoConverted || backgroundConverted {
-			d := *creds[i].Display
-			d.LogoURI = logo
-			d.BackgroundURI = background
-			creds[i].Display = &d
-		}
-	}
 	if s.entityMode() {
-		return s.saveEntities(w, creds)
+		return s.saveEntities(w)
 	}
+	creds := s.withStoredAssets(w.GetCredentials())
 	w.mu.RLock()
 	issuedAttestations := dedupeIssuedAttestations(w.IssuedAttestations)
 	deferredIssuances := append([]DeferredIssuance(nil), w.DeferredIssuances...)
@@ -470,6 +454,27 @@ func (s *WalletStore) Save(w *Wallet) error {
 		return fmt.Errorf("writing wallet.json: %w", err)
 	}
 	return nil
+}
+
+// withStoredAssets moves any embedded display image out of the credentials
+// into the assets, leaving a reference in its place. It works on the copy
+// it is given, so the in-memory wallet is untouched until a reload picks up
+// the references.
+func (s *WalletStore) withStoredAssets(creds []StoredCredential) []StoredCredential {
+	for i := range creds {
+		if creds[i].Display == nil {
+			continue
+		}
+		logo, logoConverted := s.storeDisplayAsset(creds[i].Display.LogoURI)
+		background, backgroundConverted := s.storeDisplayAsset(creds[i].Display.BackgroundURI)
+		if logoConverted || backgroundConverted {
+			d := *creds[i].Display
+			d.LogoURI = logo
+			d.BackgroundURI = background
+			creds[i].Display = &d
+		}
+	}
+	return creds
 }
 
 // ClearLog removes all persisted wallet activity log entries.

@@ -15,6 +15,7 @@
 package wallet
 
 import (
+	"net/http"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -69,7 +70,7 @@ func TestEntities_RoundTrip(t *testing.T) {
 	}
 
 	keys, _ := backend.List(store.stateKey(credentialsSection))
-	if len(keys) != 2 || !strings.HasSuffix(keys[0], "-"+first) || !strings.HasSuffix(keys[1], "-"+second) {
+	if len(keys) != 2 {
 		t.Fatalf("credential entities = %v", keys)
 	}
 
@@ -224,5 +225,119 @@ func TestEntities_ResetClearsTheStore(t *testing.T) {
 	reloaded, _ := NewWalletStoreOn(store.Dir, backend).LoadOrCreate()
 	if len(reloaded.Credentials) != 0 || len(reloaded.Log) != 0 || reloaded.StatusListCounter != 0 {
 		t.Fatalf("reloaded after reset: %d credentials, %d log entries, counter %d", len(reloaded.Credentials), len(reloaded.Log), reloaded.StatusListCounter)
+	}
+}
+
+// A save whose snapshot a reload replaced in the meantime leaves the reload's
+// snapshot in place. The reload also replaced the wallet's state, so that
+// snapshot is the one that describes it, and nothing the reload dropped from
+// memory is deleted by the next save.
+func TestEntities_ReloadDuringSaveKeepsTheReloadedSnapshot(t *testing.T) {
+	store, backend := entityStore(t)
+	w, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(w); err != nil {
+		t.Fatal(err)
+	}
+	first := importTestCredential(t, w, "First")
+	// The reload lands after the save read the wallet and before it
+	// finished: the store's snapshot is what the reload put there.
+	other, err := NewWalletStoreOn(store.Dir, backend).LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloadedSnapshot := other.persisted
+	store.saveDelay = func() {
+		w.mu.Lock()
+		w.Credentials = nil
+		w.persisted = reloadedSnapshot
+		w.mu.Unlock()
+	}
+	if err := store.Save(w); err != nil {
+		t.Fatal(err)
+	}
+	if !w.persisted.is(reloadedSnapshot) {
+		t.Fatal("the save replaced the snapshot the reload put in place")
+	}
+	// The next save has nothing to delete, and the store still holds the
+	// credential the save wrote.
+	if err := store.Save(w); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.storedCredentialsFromEntities(); len(got) != 1 || got[0].ID != first {
+		t.Fatalf("stored credentials = %+v", got)
+	}
+}
+
+// Two servers on one store issuing at the same time never hand out the same
+// status list index, since the counter moves through the store.
+func TestEntities_ServersIssueWithDistinctStatusIndices(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "wallet")
+	backend := storage.NewMemory()
+	servers := []*Server{newTestServer(t, false), newTestServer(t, false)}
+	for _, srv := range servers {
+		srv.SetStore(NewWalletStoreOn(dir, backend))
+		srv.wallet.IssuerURL = "https://wallet.example:8086"
+	}
+	var mu sync.Mutex
+	seen := make(map[int]string)
+	var wg sync.WaitGroup
+	for _, srv := range servers {
+		wg.Add(1)
+		go func(srv *Server) {
+			defer wg.Done()
+			for i := 0; i < 15; i++ {
+				resp := serverRequest(t, srv, http.MethodPost, "/api/issue", `{"format":"sdjwt","template":"pid-sdjwt"}`)
+				if resp.Code != http.StatusCreated {
+					t.Errorf("issue: %d %s", resp.Code, resp.Body.String())
+					return
+				}
+				doc := decodeJSON(t, resp)
+				status, _ := doc["status"].(map[string]any)
+				idx := int(status["idx"].(float64))
+				mu.Lock()
+				if other, dup := seen[idx]; dup {
+					t.Errorf("index %d handed out to %s and %s", idx, other, doc["id"])
+				}
+				seen[idx] = doc["id"].(string)
+				mu.Unlock()
+			}
+		}(srv)
+	}
+	wg.Wait()
+	if len(seen) != 30 {
+		t.Fatalf("%d distinct indices, want 30", len(seen))
+	}
+}
+
+// The wallet's change stamp differs after every save, including saves by a
+// second opener, so a server never mistakes a changed store for an unchanged
+// one.
+func TestEntities_StampChangesWithEverySave(t *testing.T) {
+	store, backend := entityStore(t)
+	w, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[storage.Stamp]bool)
+	for i := 0; i < 3; i++ {
+		if err := store.Save(w); err != nil {
+			t.Fatal(err)
+		}
+		other, err := NewWalletStoreOn(store.Dir, backend).LoadOrCreate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		other.Log = append(other.Log, LogEntry{Time: time.Now(), Action: "other"})
+		if err := NewWalletStoreOn(store.Dir, backend).Save(other); err != nil {
+			t.Fatal(err)
+		}
+		stamp, ok := store.WalletStamp()
+		if !ok || seen[stamp] {
+			t.Fatalf("stamp %+v seen again (ok=%t)", stamp, ok)
+		}
+		seen[stamp] = true
 	}
 }

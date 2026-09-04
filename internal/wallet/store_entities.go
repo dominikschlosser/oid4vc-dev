@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,14 +39,17 @@ import (
 //
 // Sections under state/:
 //
-//	credentials/<seq>-<id>   one StoredCredential, seq keeps the order
+//	credentials/<id>         {"seq": n, "value": StoredCredential}, seq keeps the order
 //	log/<time>-<hash>        one LogEntry
-//	status/<credential id>   one StatusEntry
-//	deferred/<seq>-<id>      one DeferredIssuance
+//	status/<credential id>   one StatusEntry with its credential id
+//	deferred/<id>            {"seq": n, "value": DeferredIssuance}
 //	attestations/<hash>      one IssuedAttestationSpec
 //	settings                 base and issuer URL
 //	status-counter           the next status list index, moved with WriteIf
 //	revision                 rewritten on every save, its stamp is the wallet's
+//
+// Every key is derived from the entity's identity alone, so a server whose
+// view is behind rewrites the same row rather than adding a second one.
 const (
 	stateSection        = "state"
 	credentialsSection  = "credentials"
@@ -59,8 +63,8 @@ const (
 )
 
 // stateSnapshot is what the wallet knows to be stored: entity key to JSON. A
-// save compares the wallet against it and then replaces it. It is never
-// changed in place, so a save can read it without holding the wallet lock.
+// save compares the wallet against it. It is never changed in place, so a
+// save can read it without holding the wallet lock.
 type stateSnapshot map[string][]byte
 
 // walletSettings is the settings entity.
@@ -74,6 +78,12 @@ type walletSettings struct {
 type statusRecord struct {
 	CredentialID string `json:"credential_id"`
 	StatusEntry
+}
+
+// orderedEntity wraps an entity of an ordered section with its position.
+type orderedEntity struct {
+	Seq   int             `json:"seq"`
+	Value json.RawMessage `json:"value"`
 }
 
 // entityMode reports whether this store keeps the wallet as entities.
@@ -105,15 +115,21 @@ func (s *WalletStore) loadEntities(w *Wallet) error {
 	statusEntries := make(map[string]StatusEntry)
 	var log []LogEntry
 	var attestations []IssuedAttestationSpec
+	var credentials, deferred []orderedEntity
 	for _, key := range keys {
 		data := blobs[key]
 		section, _, _ := strings.Cut(strings.TrimPrefix(key, s.stateKey()+"/"), "/")
 		var err error
 		switch section {
 		case credentialsSection:
-			var cred StoredCredential
-			if err = json.Unmarshal(data, &cred); err == nil {
-				w.Credentials = append(w.Credentials, cred)
+			var entity orderedEntity
+			if err = json.Unmarshal(data, &entity); err == nil {
+				credentials = append(credentials, entity)
+			}
+		case deferredSection:
+			var entity orderedEntity
+			if err = json.Unmarshal(data, &entity); err == nil {
+				deferred = append(deferred, entity)
 			}
 		case logSection:
 			var entry LogEntry
@@ -124,11 +140,6 @@ func (s *WalletStore) loadEntities(w *Wallet) error {
 			var record statusRecord
 			if err = json.Unmarshal(data, &record); err == nil {
 				statusEntries[record.CredentialID] = record.StatusEntry
-			}
-		case deferredSection:
-			var deferred DeferredIssuance
-			if err = json.Unmarshal(data, &deferred); err == nil {
-				w.DeferredIssuances = append(w.DeferredIssuances, deferred)
 			}
 		case attestationsSection:
 			var spec IssuedAttestationSpec
@@ -144,6 +155,22 @@ func (s *WalletStore) loadEntities(w *Wallet) error {
 			return fmt.Errorf("parsing wallet state %s: %w", key, err)
 		}
 	}
+	sort.SliceStable(credentials, func(i, j int) bool { return credentials[i].Seq < credentials[j].Seq })
+	for _, entity := range credentials {
+		var cred StoredCredential
+		if err := json.Unmarshal(entity.Value, &cred); err != nil {
+			return fmt.Errorf("parsing a stored credential: %w", err)
+		}
+		w.Credentials = append(w.Credentials, cred)
+	}
+	sort.SliceStable(deferred, func(i, j int) bool { return deferred[i].Seq < deferred[j].Seq })
+	for _, entity := range deferred {
+		var d DeferredIssuance
+		if err := json.Unmarshal(entity.Value, &d); err != nil {
+			return fmt.Errorf("parsing a stored deferred issuance: %w", err)
+		}
+		w.DeferredIssuances = append(w.DeferredIssuances, d)
+	}
 	w.IssuedAttestations = dedupeIssuedAttestations(attestations)
 	w.Log = s.filterLogEntries(log)
 	if len(statusEntries) > 0 {
@@ -151,21 +178,28 @@ func (s *WalletStore) loadEntities(w *Wallet) error {
 	}
 	w.BaseURL = settings.BaseURL
 	w.IssuerURL = settings.IssuerURL
+	// The revision is not an entity a save compares: its version has to keep
+	// climbing for the reload's change check, so it is only ever rewritten.
+	delete(blobs, s.stateKey(revisionEntity))
 	w.persisted = stateSnapshot(blobs)
 	w.allocateStatusIndex = s.allocateStatusIndex
 	return nil
 }
 
 // saveEntities writes what changed since the snapshot and deletes what went
-// away. creds are the credentials to store, with display images already
-// moved to assets.
-func (s *WalletStore) saveEntities(w *Wallet, creds []StoredCredential) error {
+// away. The wallet state and the snapshot it is compared against are read
+// under one lock, so a reload between them cannot pair an older state with a
+// newer snapshot.
+func (s *WalletStore) saveEntities(w *Wallet) error {
 	w.mu.RLock()
 	snapshot := w.persisted
-	current, err := s.currentEntities(w, creds, snapshot)
+	current, err := s.currentEntities(w, snapshot)
 	w.mu.RUnlock()
 	if err != nil {
 		return err
+	}
+	if s.saveDelay != nil {
+		s.saveDelay()
 	}
 
 	for key, data := range current {
@@ -188,14 +222,20 @@ func (s *WalletStore) saveEntities(w *Wallet, creds []StoredCredential) error {
 		return fmt.Errorf("writing wallet state: %w", err)
 	}
 
+	// A reload may have replaced the snapshot (and the wallet's state)
+	// meanwhile. Then the reload's snapshot stands: it describes the state
+	// the wallet holds now, and what was written here is at worst written
+	// again by the next save.
 	w.mu.Lock()
-	w.persisted = current
+	if w.persisted.is(snapshot) {
+		w.persisted = current
+	}
 	w.mu.Unlock()
 	return nil
 }
 
 // currentEntities marshals the wallet into entities. Caller holds w.mu.
-func (s *WalletStore) currentEntities(w *Wallet, creds []StoredCredential, snapshot stateSnapshot) (stateSnapshot, error) {
+func (s *WalletStore) currentEntities(w *Wallet, snapshot stateSnapshot) (stateSnapshot, error) {
 	current := make(stateSnapshot)
 	put := func(key string, v any) error {
 		data, err := json.Marshal(v)
@@ -205,17 +245,25 @@ func (s *WalletStore) currentEntities(w *Wallet, creds []StoredCredential, snaps
 		current[key] = data
 		return nil
 	}
+	putOrdered := func(section, id string, seq int, v any) error {
+		value, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("encoding wallet state %s: %w", id, err)
+		}
+		return put(s.stateKey(section, entityName(id)), orderedEntity{Seq: seq, Value: value})
+	}
 
-	credentialKeys := s.orderedKeys(credentialsSection, snapshot, len(creds), func(i int) string { return creds[i].ID })
+	creds := s.withStoredAssets(append([]StoredCredential(nil), w.Credentials...))
+	credentialSeqs := s.orderedSeqs(credentialsSection, snapshot, len(creds), func(i int) string { return creds[i].ID })
 	for i, cred := range creds {
-		if err := put(credentialKeys[i], cred); err != nil {
+		if err := putOrdered(credentialsSection, cred.ID, credentialSeqs[i], cred); err != nil {
 			return nil, err
 		}
 	}
 	deferred := w.DeferredIssuances
-	deferredKeys := s.orderedKeys(deferredSection, snapshot, len(deferred), func(i int) string { return deferred[i].ID })
+	deferredSeqs := s.orderedSeqs(deferredSection, snapshot, len(deferred), func(i int) string { return deferred[i].ID })
 	for i, d := range deferred {
-		if err := put(deferredKeys[i], d); err != nil {
+		if err := putOrdered(deferredSection, d.ID, deferredSeqs[i], d); err != nil {
 			return nil, err
 		}
 	}
@@ -239,39 +287,48 @@ func (s *WalletStore) currentEntities(w *Wallet, creds []StoredCredential, snaps
 	if err := put(s.stateKey(settingsEntity), walletSettings{BaseURL: w.BaseURL, IssuerURL: w.IssuerURL}); err != nil {
 		return nil, err
 	}
-	current[s.stateKey(statusCounterEntity)] = []byte(strconv.Itoa(w.StatusListCounter))
+	// The counter is moved by the allocator alone, so a save with a counter
+	// behind the store's never sets it back. A reset to zero is written.
+	counterKey := s.stateKey(statusCounterEntity)
+	if w.StatusListCounter == 0 {
+		current[counterKey] = []byte("0")
+	} else if stored, ok := snapshot[counterKey]; ok {
+		current[counterKey] = stored
+	}
 	return current, nil
 }
 
-// orderedKeys returns the key of each item of an ordered section. An item
-// keeps the key it was stored under, a new one gets the next sequence
-// number, so a load returns the items in the order they were added.
-func (s *WalletStore) orderedKeys(section string, snapshot stateSnapshot, n int, idAt func(int) string) []string {
+// orderedSeqs returns the position of each item of an ordered section. An
+// item keeps the position it was stored under, a new one gets the next, so
+// a load returns the items in the order they were added.
+func (s *WalletStore) orderedSeqs(section string, snapshot stateSnapshot, n int, idAt func(int) string) []int {
 	prefix := s.sectionPrefix(section)
-	existing := make(map[string]string)
+	existing := make(map[string]int)
 	next := 0
-	for key := range snapshot {
+	for key, data := range snapshot {
 		name, ok := strings.CutPrefix(key, prefix)
 		if !ok {
 			continue
 		}
-		seqText, id, _ := strings.Cut(name, "-")
-		if seq, err := strconv.Atoi(seqText); err == nil && seq >= next {
-			next = seq + 1
-		}
-		existing[id] = key
-	}
-	keys := make([]string, n)
-	for i := range keys {
-		id := entityName(idAt(i))
-		if key, ok := existing[id]; ok {
-			keys[i] = key
+		var entity orderedEntity
+		if json.Unmarshal(data, &entity) != nil {
 			continue
 		}
-		keys[i] = prefix + fmt.Sprintf("%012d-%s", next, id)
+		existing[name] = entity.Seq
+		if entity.Seq >= next {
+			next = entity.Seq + 1
+		}
+	}
+	seqs := make([]int, n)
+	for i := range seqs {
+		if seq, ok := existing[entityName(idAt(i))]; ok {
+			seqs[i] = seq
+			continue
+		}
+		seqs[i] = next
 		next++
 	}
-	return keys
+	return seqs
 }
 
 // logEntryName keys a log entry by its time, so a load returns the log in
@@ -329,6 +386,11 @@ func (s *WalletStore) allocateStatusIndex(w *Wallet) (int, error) {
 	return 0, errors.New("the status counter kept changing under the allocation")
 }
 
+// is reports whether both are the same snapshot.
+func (snap stateSnapshot) is(other stateSnapshot) bool {
+	return reflect.ValueOf(snap).Pointer() == reflect.ValueOf(other).Pointer()
+}
+
 // with returns a copy of the snapshot with one entity replaced.
 func (snap stateSnapshot) with(key string, data []byte) stateSnapshot {
 	next := make(stateSnapshot, len(snap)+1)
@@ -365,8 +427,9 @@ func (s *WalletStore) storedCredentialsFromEntities() []StoredCredential {
 	}
 	creds := make([]StoredCredential, 0, len(blobs))
 	for _, data := range blobs {
+		var entity orderedEntity
 		var cred StoredCredential
-		if json.Unmarshal(data, &cred) == nil {
+		if json.Unmarshal(data, &entity) == nil && json.Unmarshal(entity.Value, &cred) == nil {
 			creds = append(creds, cred)
 		}
 	}
