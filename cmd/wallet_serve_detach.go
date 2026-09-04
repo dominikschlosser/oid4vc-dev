@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -46,9 +47,17 @@ func spawnDetachedServe(cmd *cobra.Command, port int, register, noRegister bool)
 	if noRegister {
 		flags = append(flags, "--no-register")
 	}
+	store, err := openStore()
+	if err != nil {
+		return err
+	}
+	// "auto" is decided by what the state directory holds, and the serve log
+	// below adds to it, so the child is told the parent's decision.
+	if strings.TrimSpace(resolvedStorageSpec()) == "auto" {
+		flags = append(flags, "--storage", store.Backend().Kind())
+	}
 	args := append([]string{"wallet", "serve"}, flags...)
 
-	store := loadStore()
 	if err := os.MkdirAll(store.Dir, 0o700); err != nil {
 		return fmt.Errorf("creating wallet dir: %w", err)
 	}

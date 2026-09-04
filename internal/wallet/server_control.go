@@ -25,7 +25,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -137,20 +136,19 @@ func (s *Server) handleClearLastError(w http.ResponseWriter, r *http.Request) {
 // Remote controllers use it to learn everything about an instance: identity
 // (pid, port, build), storage locations, URLs, and runtime behavior.
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
-	walletDir := ""
+	walletDir, storageKind := "", ""
 	if store := s.currentStore(); store != nil {
 		walletDir = store.Dir
+		storageKind = store.Backend().Kind()
 	}
-	templatesDir := s.wallet.TemplatesDir
-	if templatesDir == "" && walletDir != "" {
-		templatesDir = filepath.Join(walletDir, "templates")
-	}
+	templatesDir := s.wallet.Templates.String()
 	// Snapshot the runtime-mutable conformance fields together under the lock.
 	// A local PUT /api/config/conformance can be changing them concurrently.
 	mode, requireHAIP, requireEncrypted := s.wallet.ConformanceSettings()
 	config := map[string]any{
 		"port":                  s.port,
 		"build_id":              processBuildID(),
+		"storage":               storageKind,
 		"version":               s.version,
 		"imprint":               len(s.imprintHTML) > 0,
 		"base_url":              s.wallet.BaseURL,

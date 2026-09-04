@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dominikschlosser/eudi-dev/internal/credtemplate"
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
@@ -36,7 +37,7 @@ func newServingTestWallet(t *testing.T) *wallet.Wallet {
 		t.Fatal(err)
 	}
 	w := wallet.New(holderKey, issuerKey, false)
-	w.TemplatesDir = t.TempDir()
+	w.Templates = credtemplate.FileLocation(t.TempDir())
 	w.BaseURL = "http://localhost:8085"
 	w.IssuerURL = "https://localhost:8086"
 	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {

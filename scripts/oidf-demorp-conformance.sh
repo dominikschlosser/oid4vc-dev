@@ -146,6 +146,14 @@ until curl -fsS "$WALLET_URL/api/credentials" >/dev/null 2>&1 \
   fi
   sleep 1
 done
+# The shared CA is a file only on the file backend. The other backends
+# (EUDI_DEV_STORAGE) hand it out over the API.
+if [ ! -f "$WALLET_CA_CERT" ]; then
+  if ! curl -fsS "$WALLET_URL/api/certificates/ca" -o "$WALLET_CA_CERT"; then
+    echo "error: could not fetch the wallet CA from $WALLET_URL/api/certificates/ca" >&2
+    exit 1
+  fi
+fi
 
 echo "Running OIDF issuer + verifier plans against $CONFORMANCE_SERVER ($CONFORMANCE_MODE mode)"
 RUN_STATUS=0

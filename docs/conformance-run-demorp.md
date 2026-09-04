@@ -58,7 +58,7 @@ The generated configs also give the suite the wallet CA: as `credential.trust_an
 
 ## Environment Overrides
 
-The wallet runbook's suite and server overrides apply unchanged (`CONFORMANCE_MODE`, `CONFORMANCE_SERVER`, `OIDF_SUITE_DIR`, `OIDF_SUITE_TAG`, `OIDF_SUITE_URL`, `OIDF_RUN_DIR`, `OIDF_MODULE_IDLE_TIMEOUT`, `OIDF_KEEP_SUITE_DB`, `OIDF_REQUEST_TIMEOUT`, `PORT`). Set `OIDF_REQUEST_TIMEOUT=60` on a loaded machine, and leave `OIDF_KEEP_SUITE_DB` off for repeated runs (a suite database that holds several runs answers so slowly that modules stall). Specific to this wrapper:
+The wallet runbook's suite and server overrides apply unchanged (`CONFORMANCE_MODE`, `CONFORMANCE_SERVER`, `OIDF_SUITE_DIR`, `OIDF_SUITE_TAG`, `OIDF_SUITE_URL`, `OIDF_RUN_DIR`, `OIDF_MODULE_IDLE_TIMEOUT`, `OIDF_KEEP_SUITE_DB`, `OIDF_REQUEST_TIMEOUT`, `PORT`, `EUDI_DEV_STORAGE`). Set `OIDF_REQUEST_TIMEOUT=60` on a loaded machine, and leave `OIDF_KEEP_SUITE_DB` off for repeated runs (a suite database that holds several runs answers so slowly that modules stall). Specific to this wrapper:
 
 - `OIDF_DEMO_BASE_URL`: the https origin the demo issuer and verifier advertise. Defaults to `https://localhost:<port+1>`
 - `ONLY_SCENARIOS`: comma separated scenario slug substrings to run a subset

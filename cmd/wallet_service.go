@@ -348,23 +348,42 @@ func (l *localWallet) ClearLogs() error {
 }
 
 func (l *localWallet) Templates() ([]credtemplate.Template, error) {
-	return credtemplate.List(resolveTemplatesDir())
+	loc, err := resolveTemplates()
+	if err != nil {
+		return nil, err
+	}
+	return credtemplate.List(loc)
 }
 
 func (l *localWallet) Template(name string) (*credtemplate.Template, error) {
-	return credtemplate.Load(name, resolveTemplatesDir())
+	loc, err := resolveTemplates()
+	if err != nil {
+		return nil, err
+	}
+	return credtemplate.Load(name, loc)
 }
 
 func (l *localWallet) SaveTemplate(tpl credtemplate.Template) (string, error) {
-	return credtemplate.Save(resolveTemplatesDir(), tpl)
+	loc, err := resolveTemplates()
+	if err != nil {
+		return "", err
+	}
+	return credtemplate.Save(loc, tpl)
 }
 
 func (l *localWallet) DeleteTemplate(name string) error {
-	return credtemplate.Delete(resolveTemplatesDir(), name)
+	loc, err := resolveTemplates()
+	if err != nil {
+		return err
+	}
+	return credtemplate.Delete(loc, name)
 }
 
 func (l *localWallet) Certificate(kind, certFormat string, opts walletCertOptions) ([]byte, error) {
-	store := loadStore()
+	store, err := openStore()
+	if err != nil {
+		return nil, err
+	}
 	var certPEM []byte
 	switch kind {
 	case "ca":
@@ -396,10 +415,6 @@ func (l *localWallet) Config() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	templates := w.TemplatesDir
-	if templates == "" {
-		templates = store.Dir + "/templates"
-	}
 	// Mirrors the fields GET /api/config reports for a served wallet, so
 	// `wallet info` says the same thing about a local store as about a
 	// remote one. The conformance-relevant settings in particular have to be
@@ -407,7 +422,8 @@ func (l *localWallet) Config() (map[string]any, error) {
 	return map[string]any{
 		"remote_url":                "",
 		"wallet_dir":                store.Dir,
-		"templates_dir":             templates,
+		"storage":                   store.Backend().Kind(),
+		"templates_dir":             w.Templates.String(),
 		"base_url":                  w.BaseURL,
 		"issuer_url":                w.IssuerURL,
 		"status_list_url":           w.StatusListURL(),

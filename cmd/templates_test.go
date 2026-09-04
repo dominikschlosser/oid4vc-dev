@@ -24,6 +24,7 @@ import (
 
 	"github.com/dominikschlosser/eudi-dev/internal/credtemplate"
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
+	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
 // resetTemplateTestState resets the package-level flag variables and the
@@ -65,7 +66,7 @@ func TestTemplatesSaveListDelete_EndToEnd(t *testing.T) {
 		t.Fatalf("templates save: %v", err)
 	}
 
-	tpl, err := credtemplate.Load("employee-card", credtemplate.DirForWallet(dir))
+	tpl, err := credtemplate.Load("employee-card", wallet.NewWalletStore(dir).Templates())
 	if err != nil {
 		t.Fatalf("loading saved template: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestTemplatesSaveListDelete_EndToEnd(t *testing.T) {
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("templates delete: %v", err)
 	}
-	if _, err := credtemplate.Load("employee-card", credtemplate.DirForWallet(dir)); err == nil {
+	if _, err := credtemplate.Load("employee-card", wallet.NewWalletStore(dir).Templates()); err == nil {
 		t.Error("template still loadable after delete")
 	}
 }
@@ -92,7 +93,7 @@ func TestTemplatesSaveFromPredefined(t *testing.T) {
 		t.Fatalf("templates save --from: %v", err)
 	}
 
-	tpl, err := credtemplate.Load("my-pid", credtemplate.DirForWallet(dir))
+	tpl, err := credtemplate.Load("my-pid", wallet.NewWalletStore(dir).Templates())
 	if err != nil {
 		t.Fatalf("loading saved template: %v", err)
 	}
@@ -121,7 +122,7 @@ func TestTemplatesImport(t *testing.T) {
 		t.Fatalf("templates import: %v", err)
 	}
 
-	tpl, err := credtemplate.Load("shared-cred", credtemplate.DirForWallet(dir))
+	tpl, err := credtemplate.Load("shared-cred", wallet.NewWalletStore(dir).Templates())
 	if err != nil {
 		t.Fatalf("loading imported template: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestTemplatesImport(t *testing.T) {
 func TestIssueSDJWT_WithTemplateAndSaveTemplate(t *testing.T) {
 	dir := resetTemplateTestState(t)
 
-	if _, err := credtemplate.Save(credtemplate.DirForWallet(dir), credtemplate.Template{
+	if _, err := credtemplate.Save(wallet.NewWalletStore(dir).Templates(), credtemplate.Template{
 		Name:            "member-card",
 		Format:          "sdjwt",
 		VCT:             "urn:example:member",
@@ -152,7 +153,7 @@ func TestIssueSDJWT_WithTemplateAndSaveTemplate(t *testing.T) {
 		t.Fatalf("issue sdjwt --template: %v", err)
 	}
 
-	saved, err := credtemplate.Load("member-card-covered", credtemplate.DirForWallet(dir))
+	saved, err := credtemplate.Load("member-card-covered", wallet.NewWalletStore(dir).Templates())
 	if err != nil {
 		t.Fatalf("loading saved template: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestIssueSDJWT_WithTemplateAndSaveTemplate(t *testing.T) {
 func TestIssueMDOC_TemplateWithAlwaysDisclosedFails(t *testing.T) {
 	dir := resetTemplateTestState(t)
 
-	if _, err := credtemplate.Save(credtemplate.DirForWallet(dir), credtemplate.Template{
+	if _, err := credtemplate.Save(wallet.NewWalletStore(dir).Templates(), credtemplate.Template{
 		Name:            "bad-mdoc",
 		Format:          "mdoc",
 		Claims:          map[string]any{"family_name": "X"},

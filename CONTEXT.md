@@ -98,6 +98,15 @@ Whether normative findings are warnings that let a flow continue (`debug`) or re
 The hardened configuration for hosting a wallet publicly. A deployment setting, unrelated to validation mode and trust profile.
 _Avoid_: Demo mode, public mode
 
+### State
+
+**Storage backend**:
+Where the wallet state lives: `file` (the default, the wallet directory), `memory` (the process) or `postgres` (a shared database). Chosen by `--storage` or `EUDI_DEV_STORAGE`. Every backend holds the same keys in the same layout.
+_Avoid_: Database (for the layer as a whole), persistence provider
+
+**Wallet directory**:
+The path that identifies a wallet. On the file backend it is also where the files are. On every backend it is how a CLI finds the server serving that wallet.
+
 ### Diagnostics
 
 **Activity log**:

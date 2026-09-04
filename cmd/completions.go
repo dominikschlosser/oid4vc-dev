@@ -20,8 +20,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -58,7 +56,11 @@ func completeTemplateNames(cmd *cobra.Command, args []string, toComplete string)
 		return completions, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	templates, err := credtemplate.List(resolveTemplatesDir())
+	loc, err := resolveTemplates()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	templates, err := credtemplate.List(loc)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -89,8 +91,8 @@ func completeCredentialIDs(cmd *cobra.Command, args []string, toComplete string)
 
 	// Only complete from an existing wallet: loading would otherwise create
 	// one as a completion side effect.
-	store := loadStore()
-	if _, err := os.Stat(filepath.Join(store.Dir, "wallet.json")); err != nil {
+	store, err := openStore()
+	if err != nil || !store.Exists() {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	w, err := store.LoadOrCreate()

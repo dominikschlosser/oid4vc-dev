@@ -16,20 +16,25 @@
 // sets with per-format defaults (VCT, doc type, namespace, expiry) and the
 // claims embedded plainly instead of selectively disclosable. Pre-defined
 // templates compiled into the binary cover the EUDI PID and the German PID
-// that extends it. User templates are JSON files under the wallet directory's
-// templates/, and one with the same name replaces a pre-defined template.
+// that extends it. User templates are JSON documents under the wallet's
+// templates/ in the storage layer, and one with the same name replaces a
+// pre-defined template.
 package credtemplate
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/dominikschlosser/eudi-dev/internal/config"
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
+	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
 // Template describes a reusable credential template. All fields except Claims
@@ -85,19 +90,34 @@ type TemplateDisplay struct {
 // directory. Both hold the same JSON document format.
 var templateExtensions = []string{".json", ".template"}
 
-// DirForWallet returns the template directory inside the given wallet
-// directory. An empty walletDir selects the default wallet directory inside
-// the tool's state directory.
-func DirForWallet(walletDir string) string {
-	if walletDir == "" {
-		walletDir = filepath.Join(config.BaseDir(), "wallet")
-	}
-	return filepath.Join(walletDir, "templates")
+// Location is where user templates live: a prefix inside a store. The zero
+// Location is the default wallet's template directory.
+type Location struct {
+	Store  storage.Store
+	Prefix string
 }
 
-// DefaultDir returns the default user template directory.
-func DefaultDir() string {
-	return DirForWallet("")
+// FileLocation returns the Location of a template directory on disk.
+func FileLocation(dir string) Location {
+	return Location{Store: storage.NewFile(dir)}
+}
+
+func (l Location) orDefault() Location {
+	if l.Store == nil {
+		return FileLocation(filepath.Join(config.BaseDir(), "wallet", "templates"))
+	}
+	return l
+}
+
+// String describes the location for messages: the directory path on the file
+// backend.
+func (l Location) String() string {
+	l = l.orDefault()
+	return l.Store.Locate(l.Prefix)
+}
+
+func (l Location) key(name string) string {
+	return path.Join(l.Prefix, name)
 }
 
 // NormalizeFormat maps format aliases to "sdjwt", "jwt", or "mdoc". An empty
@@ -206,28 +226,26 @@ func PIDTemplateNames(vct string) (sdjwt, mdoc string, ok bool) {
 	}
 }
 
-// List returns all templates: pre-defined templates plus user templates from dir (the
-// default directory when dir is empty). A user template with the same name as
-// a built-in replaces it. The result is sorted by name.
-func List(dir string) ([]Template, error) {
-	if dir == "" {
-		dir = DefaultDir()
-	}
+// List returns all templates: pre-defined templates plus user templates from
+// loc (the default directory for the zero Location). A user template with the
+// same name as a built-in replaces it. The result is sorted by name.
+func List(loc Location) ([]Template, error) {
+	loc = loc.orDefault()
 
 	byName := make(map[string]Template)
 	for _, t := range PredefinedTemplates() {
 		byName[t.Name] = t
 	}
 
-	entries, err := os.ReadDir(dir)
-	if err != nil && !os.IsNotExist(err) {
+	stored, err := loc.Store.List(loc.Prefix)
+	if err != nil {
 		return nil, fmt.Errorf("reading template directory: %w", err)
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || !hasTemplateExtension(entry.Name()) {
+	for _, name := range stored {
+		if !hasTemplateExtension(name) {
 			continue
 		}
-		t, err := loadFile(filepath.Join(dir, entry.Name()))
+		t, err := loadStored(loc, name)
 		if err != nil {
 			return nil, err
 		}
@@ -247,26 +265,24 @@ func List(dir string) ([]Template, error) {
 	return templates, nil
 }
 
-// Load resolves a template by name or file path. Names are looked up in dir
-// (the default directory when dir is empty) first, then in the pre-defined templates.
-// Anything containing a path separator, or matching an existing file, is
-// loaded as a file path.
-func Load(nameOrPath, dir string) (*Template, error) {
+// Load resolves a template by name or file path. Names are looked up in loc
+// (the default directory for the zero Location) first, then in the
+// pre-defined templates. Anything containing a path separator or a template
+// extension is loaded as a file path.
+func Load(nameOrPath string, loc Location) (*Template, error) {
 	if strings.TrimSpace(nameOrPath) == "" {
 		return nil, fmt.Errorf("template name is required")
 	}
-	if dir == "" {
-		dir = DefaultDir()
-	}
+	loc = loc.orDefault()
 
 	if strings.ContainsRune(nameOrPath, os.PathSeparator) || strings.ContainsRune(nameOrPath, '/') || hasTemplateExtension(nameOrPath) {
 		return loadFile(nameOrPath)
 	}
 
 	for _, ext := range templateExtensions {
-		path := filepath.Join(dir, nameOrPath+ext)
-		if _, err := os.Stat(path); err == nil {
-			return loadFile(path)
+		tpl, err := loadStored(loc, nameOrPath+ext)
+		if err == nil || !errors.Is(err, fs.ErrNotExist) {
+			return tpl, err
 		}
 	}
 
@@ -277,12 +293,12 @@ func Load(nameOrPath, dir string) (*Template, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("template %q not found (looked in %s and the pre-defined templates, see `templates list`)", nameOrPath, dir)
+	return nil, fmt.Errorf("template %q not found (looked in %s and the pre-defined templates, see `templates list`)", nameOrPath, loc)
 }
 
-// Save writes a user template to dir (the default directory when dir is
-// empty) as <name>.json and returns the file path.
-func Save(dir string, t Template) (string, error) {
+// Save writes a user template to loc (the default directory for the zero
+// Location) as <name>.json and returns where it was written.
+func Save(loc Location, t Template) (string, error) {
 	name := strings.TrimSpace(t.Name)
 	if name == "" {
 		return "", fmt.Errorf("template name is required")
@@ -293,12 +309,7 @@ func Save(dir string, t Template) (string, error) {
 	if _, err := NormalizeFormat(t.Format); err != nil {
 		return "", err
 	}
-	if dir == "" {
-		dir = DefaultDir()
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("creating template directory: %w", err)
-	}
+	loc = loc.orDefault()
 
 	t.Name = name
 	t.Predefined = false
@@ -306,26 +317,26 @@ func Save(dir string, t Template) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("encoding template: %w", err)
 	}
-	path := filepath.Join(dir, name+".json")
-	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+	key := loc.key(name + ".json")
+	if err := loc.Store.Write(key, append(data, '\n'), 0o644); err != nil {
 		return "", fmt.Errorf("writing template: %w", err)
 	}
-	return path, nil
+	return loc.Store.Locate(key), nil
 }
 
-// Delete removes a user template from dir (the default directory when dir is
-// empty). Pre-defined templates cannot be deleted.
-func Delete(dir, name string) error {
-	if dir == "" {
-		dir = DefaultDir()
-	}
+// Delete removes a user template from loc (the default directory for the
+// zero Location). Pre-defined templates cannot be deleted.
+func Delete(loc Location, name string) error {
+	loc = loc.orDefault()
 	if name != filepath.Base(name) {
 		return fmt.Errorf("invalid template name %q", name)
 	}
 	for _, ext := range templateExtensions {
-		path := filepath.Join(dir, name+ext)
-		if _, err := os.Stat(path); err == nil {
-			return os.Remove(path)
+		key := loc.key(name + ext)
+		if _, err := loc.Store.Read(key); err == nil {
+			return loc.Store.Delete(key)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("reading template: %w", err)
 		}
 	}
 	for _, t := range PredefinedTemplates() {
@@ -333,7 +344,7 @@ func Delete(dir, name string) error {
 			return fmt.Errorf("template %q is pre-defined and cannot be deleted", name)
 		}
 	}
-	return fmt.Errorf("template %q not found in %s", name, dir)
+	return fmt.Errorf("template %q not found in %s", name, loc)
 }
 
 func hasTemplateExtension(name string) bool {
@@ -357,21 +368,39 @@ func IsBareName(s string) bool {
 		!hasTemplateExtension(s)
 }
 
-func loadFile(path string) (*Template, error) {
-	data, err := os.ReadFile(path)
+// loadFile reads a template file from the given path.
+func loadFile(file string) (*Template, error) {
+	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("reading template: %w", err)
 	}
+	return parse(data, file)
+}
+
+// loadStored reads a user template from its location. A missing template
+// returns an error satisfying errors.Is(err, fs.ErrNotExist).
+func loadStored(loc Location, name string) (*Template, error) {
+	key := loc.key(name)
+	data, err := loc.Store.Read(key)
+	if err != nil {
+		return nil, fmt.Errorf("reading template %s: %w", name, err)
+	}
+	return parse(data, loc.Store.Locate(key))
+}
+
+// parse decodes a template document. A document without a name is named
+// after its file.
+func parse(data []byte, file string) (*Template, error) {
 	var t Template
 	if err := json.Unmarshal(data, &t); err != nil {
-		return nil, fmt.Errorf("parsing template %s: %w", path, err)
+		return nil, fmt.Errorf("parsing template %s: %w", file, err)
 	}
 	if _, err := NormalizeFormat(t.Format); err != nil {
-		return nil, fmt.Errorf("template %s: %w", path, err)
+		return nil, fmt.Errorf("template %s: %w", file, err)
 	}
 	if strings.TrimSpace(t.Name) == "" {
-		base := filepath.Base(path)
-		t.Name = strings.TrimSuffix(base, filepath.Ext(base))
+		base := path.Base(filepath.ToSlash(file))
+		t.Name = strings.TrimSuffix(base, path.Ext(base))
 	}
 	t.Predefined = false
 	return &t, nil

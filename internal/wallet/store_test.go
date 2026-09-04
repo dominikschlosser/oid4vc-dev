@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
+	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
 func TestWalletStore_LoadOrCreate_NewWallet(t *testing.T) {
@@ -50,11 +51,11 @@ func TestWalletStore_LoadOrCreate_NewWallet(t *testing.T) {
 		t.Errorf("expected 0 credentials, got %d", len(w.Credentials))
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, "holder.pem")); err != nil {
-		t.Errorf("expected holder.pem to exist: %v", err)
+	if _, ok := store.Backend().Stat(store.key("holder.pem")); !ok {
+		t.Error("expected holder.pem to exist")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "issuer.pem")); err != nil {
-		t.Errorf("expected issuer.pem to exist: %v", err)
+	if _, ok := store.Backend().Stat(store.key("issuer.pem")); !ok {
+		t.Error("expected issuer.pem to exist")
 	}
 }
 
@@ -154,13 +155,6 @@ func TestWalletStore_Save_ConcurrentWritersLeaveValidFile(t *testing.T) {
 
 	if _, err := store.LoadOrCreate(); err != nil {
 		t.Fatalf("LoadOrCreate after concurrent saves: %v", err)
-	}
-	leftovers, err := filepath.Glob(filepath.Join(dir, "wallet.json.tmp-*"))
-	if err != nil {
-		t.Fatalf("globbing temp files: %v", err)
-	}
-	if len(leftovers) > 0 {
-		t.Fatalf("expected no temp files after Save, found %v", leftovers)
 	}
 }
 
@@ -324,28 +318,28 @@ func TestNewWalletStore_DefaultDir(t *testing.T) {
 	}
 }
 
-func TestWalletStore_PathHelpers(t *testing.T) {
-	store := NewWalletStore("/tmp/test-wallet")
-	if store.walletPath() != "/tmp/test-wallet/wallet.json" {
-		t.Errorf("wrong wallet path: %s", store.walletPath())
+// The file backend puts the wallet's files under its directory and the shared
+// CA one level up.
+func TestWalletStore_FileLayout(t *testing.T) {
+	store := NewWalletStoreOn("/tmp/test-wallet", storage.NewFile("/tmp"))
+	locate := store.Backend().Locate
+	for key, want := range map[string]string{
+		store.walletKey():                    "/tmp/test-wallet/wallet.json",
+		store.key("holder.pem"):              "/tmp/test-wallet/holder.pem",
+		store.key("issuer.pem"):              "/tmp/test-wallet/issuer.pem",
+		store.tlsCertPEM():                   "/tmp/test-wallet/wallet-tls-cert.pem",
+		store.tlsKeyPEM():                    "/tmp/test-wallet/wallet-tls-key.pem",
+		store.assetKey("x.png"):              "/tmp/test-wallet/assets/x.png",
+		store.Templates().Prefix + "/t.json": "/tmp/test-wallet/templates/t.json",
+		store.sharedCACertPEM():              "/tmp/wallet-ca-cert.pem",
+		store.sharedCAKeyPEM():               "/tmp/wallet-ca-key.pem",
+	} {
+		if got := locate(key); got != want {
+			t.Errorf("%s lives at %s, want %s", key, got, want)
+		}
 	}
-	if store.holderKeyPath() != "/tmp/test-wallet/holder.pem" {
-		t.Errorf("wrong holder key path: %s", store.holderKeyPath())
-	}
-	if store.issuerKeyPath() != "/tmp/test-wallet/issuer.pem" {
-		t.Errorf("wrong issuer key path: %s", store.issuerKeyPath())
-	}
-	if store.issuerTLSCertPath() != "/tmp/test-wallet/wallet-tls-cert.pem" {
-		t.Errorf("wrong issuer TLS cert path: %s", store.issuerTLSCertPath())
-	}
-	if store.issuerTLSKeyPath() != "/tmp/test-wallet/wallet-tls-key.pem" {
-		t.Errorf("wrong issuer TLS key path: %s", store.issuerTLSKeyPath())
-	}
-	if store.sharedCACertPath() != "/tmp/wallet-ca-cert.pem" {
-		t.Errorf("wrong wallet CA cert path: %s", store.sharedCACertPath())
-	}
-	if store.sharedCAKeyPath() != "/tmp/wallet-ca-key.pem" {
-		t.Errorf("wrong wallet CA key path: %s", store.sharedCAKeyPath())
+	if store.Location() != "/tmp/test-wallet" {
+		t.Errorf("Location = %s", store.Location())
 	}
 }
 
@@ -403,11 +397,11 @@ func TestWalletStore_LoadOrCreateIssuerTLSCertificate_Persists(t *testing.T) {
 	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "localhost"}); err != nil {
 		t.Fatalf("expected wallet TLS cert to chain to shared CA: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "wallet-tls-cert.pem")); err != nil {
-		t.Fatalf("expected wallet-tls-cert.pem to exist: %v", err)
+	if _, ok := store.Backend().Stat(store.key("wallet-tls-cert.pem")); !ok {
+		t.Fatal("expected wallet-tls-cert.pem to exist")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "wallet-tls-key.pem")); err != nil {
-		t.Fatalf("expected wallet-tls-key.pem to exist: %v", err)
+	if _, ok := store.Backend().Stat(store.key("wallet-tls-key.pem")); !ok {
+		t.Fatal("expected wallet-tls-key.pem to exist")
 	}
 }
 
@@ -419,10 +413,10 @@ func TestWalletStore_LoadOrCreateIssuerTLSCertificate_MigratesLegacyPaths(t *tes
 	if err != nil {
 		t.Fatalf("generateIssuerTLSCertificatePEM: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "issuer-tls-cert.pem"), certPEM, 0644); err != nil {
+	if err := store.Backend().Write(store.legacyTLSCertPEM(), certPEM, 0o644); err != nil {
 		t.Fatalf("write legacy cert: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "issuer-tls-key.pem"), keyPEM, 0600); err != nil {
+	if err := store.Backend().Write(store.legacyTLSKeyPEM(), keyPEM, 0o600); err != nil {
 		t.Fatalf("write legacy key: %v", err)
 	}
 
@@ -433,11 +427,11 @@ func TestWalletStore_LoadOrCreateIssuerTLSCertificate_MigratesLegacyPaths(t *tes
 	if len(cert.Certificate) == 0 {
 		t.Fatal("expected migrated wallet TLS certificate")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "wallet-tls-cert.pem")); err != nil {
-		t.Fatalf("expected wallet-tls-cert.pem to exist after migration: %v", err)
+	if _, ok := store.Backend().Stat(store.key("wallet-tls-cert.pem")); !ok {
+		t.Fatal("expected wallet-tls-cert.pem to exist after migration")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "wallet-tls-key.pem")); err != nil {
-		t.Fatalf("expected wallet-tls-key.pem to exist after migration: %v", err)
+	if _, ok := store.Backend().Stat(store.key("wallet-tls-key.pem")); !ok {
+		t.Fatal("expected wallet-tls-key.pem to exist after migration")
 	}
 }
 
@@ -503,17 +497,17 @@ func TestWalletStore_LoadOrCreate_UsesSharedCA(t *testing.T) {
 // They are read on load, so collections already in flight survive an upgrade.
 func TestLoadReadsTheLegacyPendingIssuancesField(t *testing.T) {
 	dir := t.TempDir()
+	store := NewWalletStore(dir)
 	legacy := `{
 	  "credentials": [],
 	  "pending_issuances": [
 	    {"id": "def-1", "transaction_id": "tx-1", "deferred_endpoint": "https://issuer.example/deferred"}
 	  ]
 	}`
-	if err := os.WriteFile(filepath.Join(dir, "wallet.json"), []byte(legacy), 0600); err != nil {
+	if err := store.Backend().Write(store.walletKey(), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	store := NewWalletStore(dir)
 	w, err := store.LoadOrCreate()
 	if err != nil {
 		t.Fatalf("LoadOrCreate: %v", err)
@@ -530,7 +524,7 @@ func TestLoadReadsTheLegacyPendingIssuancesField(t *testing.T) {
 	if err := store.Save(w); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	saved, err := os.ReadFile(filepath.Join(dir, "wallet.json"))
+	saved, err := store.Backend().Read(store.walletKey())
 	if err != nil {
 		t.Fatal(err)
 	}

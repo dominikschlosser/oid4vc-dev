@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/dominikschlosser/eudi-dev/internal/httpsec"
+	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
 const maxRequestBody = 1 << 20 // 1MB
@@ -37,6 +38,10 @@ type MuxOptions struct {
 	// short (a credential is kilobytes of base64url). Nil on a decoder
 	// without a wallet, which then answers 404.
 	CredentialByID func(id string) (string, bool)
+	// WalletStore is the store of the wallet this decoder is mounted on. Its
+	// CA and issuer key verify credentials that wallet issued. Nil opens the
+	// default wallet.
+	WalletStore *wallet.WalletStore
 }
 
 // ListenAndServe starts the HTTP server on the given port.
@@ -62,7 +67,7 @@ func NewMuxWithOptions(opts MuxOptions) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/decode", handleDecode)
-	mux.HandleFunc("POST /api/validate", handleValidate)
+	mux.HandleFunc("POST /api/validate", handleValidate(opts.WalletStore))
 	mux.HandleFunc("GET /api/prefill", handlePrefill(opts.Credential))
 	mux.HandleFunc("GET /api/credentials/{id}", handleCredentialByID(opts.CredentialByID))
 	mux.HandleFunc("GET /api/meta", func(w http.ResponseWriter, r *http.Request) {
@@ -169,36 +174,39 @@ type validateRequest struct {
 	Offline      bool   `json:"offline"`
 }
 
-func handleValidate(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+func handleValidate(store *wallet.WalletStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 
-	var req validateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
+		var req validateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		if req.Input == "" {
+			writeError(w, http.StatusBadRequest, "input is required")
+			return
+		}
+
+		result, err := Validate(req.Input, ValidateOpts{
+			Key:          req.Key,
+			TrustListURL: req.TrustListURL,
+			TrustListRaw: req.TrustListRaw,
+			CheckStatus:  req.CheckStatus,
+			Offline:      req.Offline,
+			WalletStore:  store,
+		})
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		enc := json.NewEncoder(w)
+		enc.SetEscapeHTML(false)
+		enc.Encode(result)
 	}
-
-	if req.Input == "" {
-		writeError(w, http.StatusBadRequest, "input is required")
-		return
-	}
-
-	result, err := Validate(req.Input, ValidateOpts{
-		Key:          req.Key,
-		TrustListURL: req.TrustListURL,
-		TrustListRaw: req.TrustListRaw,
-		CheckStatus:  req.CheckStatus,
-		Offline:      req.Offline,
-	})
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	enc.Encode(result)
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

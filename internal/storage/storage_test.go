@@ -1,0 +1,312 @@
+// Copyright 2026 Dominik Schlosser
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package storage
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+)
+
+// backends returns every backend the contract suite runs against. Keys are
+// prefixed per test so backends shared across tests (the Postgres table)
+// do not see each other's blobs.
+func backends(t *testing.T) map[string]Store {
+	t.Helper()
+	stores := map[string]Store{
+		KindFile:   NewFile(t.TempDir()),
+		KindMemory: NewMemory(),
+	}
+	// The Postgres backend runs when the suite as a whole runs on it.
+	if dsn := os.Getenv(EnvVar); isPostgresSpec(dsn) {
+		pg, err := openPostgres(dsn)
+		if err != nil {
+			t.Fatalf("opening postgres: %v", err)
+		}
+		stores[KindPostgres] = pg
+	}
+	return stores
+}
+
+func scope(t *testing.T) string {
+	return strings.ReplaceAll(t.Name(), "/", "-") + "-" + strconv.Itoa(os.Getpid())
+}
+
+func TestStore_ReadWriteDeleteRoundTrip(t *testing.T) {
+	for kind, store := range backends(t) {
+		t.Run(kind, func(t *testing.T) {
+			key := scope(t) + "/wallet/wallet.json"
+			defer store.Delete(key)
+
+			if _, err := store.Read(key); !errors.Is(err, fs.ErrNotExist) || !os.IsNotExist(err) {
+				t.Fatalf("missing key: got %v, want ErrNotExist for both errors.Is and os.IsNotExist", err)
+			}
+			if _, ok := store.Stat(key); ok {
+				t.Fatal("Stat reports a missing key")
+			}
+
+			if err := store.Write(key, []byte("one"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			data, err := store.Read(key)
+			if err != nil || string(data) != "one" {
+				t.Fatalf("Read = %q, %v", data, err)
+			}
+			first, ok := store.Stat(key)
+			if !ok || first.Size != 3 {
+				t.Fatalf("Stat = %+v, %v", first, ok)
+			}
+
+			if err := store.Write(key, []byte("second"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			second, _ := store.Stat(key)
+			if second == first {
+				t.Fatal("stamp did not change on rewrite")
+			}
+			if data, _ := store.Read(key); string(data) != "second" {
+				t.Fatalf("Read after rewrite = %q", data)
+			}
+			// A rewrite with the same size still changes the stamp. The file
+			// backend relies on the modification time, which coarse
+			// filesystems round, so the server bounds that case by time.
+			if kind != KindFile {
+				if err := store.Write(key, []byte("SECOND"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if third, _ := store.Stat(key); third == second {
+					t.Fatal("stamp did not change on a same-size rewrite")
+				}
+			}
+
+			if err := store.Delete(key); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Delete(key); err != nil {
+				t.Fatalf("deleting a missing key: %v", err)
+			}
+			if _, err := store.Read(key); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("after delete: %v", err)
+			}
+		})
+	}
+}
+
+func TestStore_ListNamesDirectChildrenOnly(t *testing.T) {
+	for kind, store := range backends(t) {
+		t.Run(kind, func(t *testing.T) {
+			root := scope(t)
+			keys := []string{root + "/assets/b.png", root + "/assets/a.png", root + "/assets/nested/c.png", root + "/wallet.json"}
+			for _, key := range keys {
+				if err := store.Write(key, []byte("x"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				defer store.Delete(key)
+			}
+			names, err := store.List(root + "/assets")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := []string{"a.png", "b.png"}; !reflect.DeepEqual(names, want) {
+				t.Fatalf("List = %v, want %v", names, want)
+			}
+			names, err = store.List(root + "/missing")
+			if err != nil || len(names) != 0 {
+				t.Fatalf("List of a missing prefix = %v, %v", names, err)
+			}
+		})
+	}
+}
+
+func TestStore_RejectsEscapingKeys(t *testing.T) {
+	for kind, store := range backends(t) {
+		t.Run(kind, func(t *testing.T) {
+			for _, key := range []string{"", "/abs", "../up", "a/../b", "a/./b", "a//b"} {
+				if err := store.Write(key, []byte("x"), 0o600); err == nil {
+					t.Errorf("Write(%q) accepted", key)
+				}
+				if _, err := store.Read(key); err == nil {
+					t.Errorf("Read(%q) accepted", key)
+				}
+			}
+		})
+	}
+}
+
+func TestStore_ConcurrentWritersLeaveWholeBlobs(t *testing.T) {
+	for kind, store := range backends(t) {
+		t.Run(kind, func(t *testing.T) {
+			key := scope(t) + "/wallet.json"
+			defer store.Delete(key)
+			var wg sync.WaitGroup
+			for i := 0; i < 8; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					body := []byte(fmt.Sprintf("{\"writer\":%d,\"pad\":\"%s\"}", i, strings.Repeat("x", 4096)))
+					for j := 0; j < 20; j++ {
+						if err := store.Write(key, body, 0o600); err != nil {
+							t.Error(err)
+							return
+						}
+						if got, err := store.Read(key); err != nil || len(got) != len(body) {
+							t.Errorf("read a torn blob: len %d, err %v", len(got), err)
+							return
+						}
+					}
+				}(i)
+			}
+			wg.Wait()
+		})
+	}
+}
+
+func TestFile_LayoutMatchesTheWalletDirectory(t *testing.T) {
+	root := t.TempDir()
+	store := NewFile(root)
+	if err := store.Write("wallet/wallet.json", []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Write("wallet/templates/t.json", []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if store.Locate("wallet/wallet.json") != filepath.Join(root, "wallet", "wallet.json") {
+		t.Fatalf("Locate = %s", store.Locate("wallet/wallet.json"))
+	}
+	walletInfo, err := os.Stat(filepath.Join(root, "wallet"))
+	if err != nil || walletInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("wallet dir mode = %v, %v", walletInfo.Mode(), err)
+	}
+	templatesInfo, err := os.Stat(filepath.Join(root, "wallet", "templates"))
+	if err != nil || templatesInfo.Mode().Perm() != 0o755 {
+		t.Fatalf("templates dir mode = %v, %v", templatesInfo.Mode(), err)
+	}
+	fileInfo, _ := os.Stat(filepath.Join(root, "wallet", "wallet.json"))
+	if fileInfo.Mode().Perm() != 0o600 {
+		t.Fatalf("wallet.json mode = %v", fileInfo.Mode())
+	}
+	leftovers, _ := filepath.Glob(filepath.Join(root, "wallet", ".tmp-*"))
+	if len(leftovers) != 0 {
+		t.Fatalf("temporary files left behind: %v", leftovers)
+	}
+}
+
+// A write in flight is not a blob yet, so a listing leaves it out.
+func TestFile_ListHidesInFlightWrites(t *testing.T) {
+	root := t.TempDir()
+	store := NewFile(root)
+	if err := store.Write("wallet/assets/a.png", []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "wallet", "assets", ".tmp-b.png-0a1b"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	names, err := store.List("wallet/assets")
+	if err != nil || !reflect.DeepEqual(names, []string{"a.png"}) {
+		t.Fatalf("List = %v, %v", names, err)
+	}
+}
+
+func TestMemory_IsSharedPerProcess(t *testing.T) {
+	key := scope(t) + "/shared"
+	first, _ := Open(KindMemory, Options{})
+	second, _ := Open(KindMemory, Options{})
+	defer first.Delete(key)
+	if err := first.Write(key, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.Read(key); err != nil {
+		t.Fatalf("second opener does not see the blob: %v", err)
+	}
+	if _, err := NewMemory().Read(key); err == nil {
+		t.Fatal("an isolated memory store sees the shared blob")
+	}
+}
+
+func TestOpen_SelectsBackends(t *testing.T) {
+	root := t.TempDir()
+	for spec, kind := range map[string]string{"": KindFile, "file": KindFile, "memory": KindMemory} {
+		store, err := Open(spec, Options{Root: root})
+		if err != nil || store.Kind() != kind {
+			t.Errorf("Open(%q) = %v, %v", spec, store, err)
+		}
+	}
+	if _, err := Open("h2", Options{Root: root}); err == nil {
+		t.Fatal("unknown spec accepted")
+	}
+}
+
+func TestOpen_AutoPicksFilesForANamedOrExistingRoot(t *testing.T) {
+	t.Cleanup(func() { autoOnce = sync.Once{} })
+	auto := func(opts Options) string {
+		autoOnce = sync.Once{}
+		store, err := Open("auto", opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store.Kind()
+	}
+
+	missing := filepath.Join(t.TempDir(), "missing")
+	if kind := auto(Options{Root: missing}); kind != KindMemory {
+		t.Fatalf("missing root: %s", kind)
+	}
+	if kind := auto(Options{Root: missing, RootRequested: true}); kind != KindFile {
+		t.Fatalf("requested root: %s", kind)
+	}
+	if kind := auto(Options{Root: t.TempDir()}); kind != KindFile {
+		t.Fatalf("empty root (a mounted volume): %s", kind)
+	}
+
+	// The instance registry of a memory-backed server is not wallet state, so
+	// the next start of the same container still picks memory.
+	bookkeeping := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(bookkeeping, "instances"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if kind := auto(Options{Root: bookkeeping}); kind != KindMemory {
+		t.Fatalf("root holding only the registry: %s", kind)
+	}
+	if err := os.MkdirAll(filepath.Join(bookkeeping, "wallet"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if kind := auto(Options{Root: bookkeeping}); kind != KindFile {
+		t.Fatalf("root holding a wallet: %s", kind)
+	}
+
+	// The decision holds for the process even after something created the root.
+	if kind := auto(Options{Root: missing}); kind != KindMemory {
+		t.Fatal("expected memory")
+	}
+	if err := os.MkdirAll(missing, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if store, _ := Open("auto", Options{Root: missing}); store.Kind() != KindMemory {
+		t.Fatal("auto changed within the process")
+	}
+}
+
+func TestPostgresLabelDropsCredentials(t *testing.T) {
+	if got := postgresLabel("postgres://user:secret@db.example:5432/eudi?sslmode=disable"); got != "postgres://db.example:5432/eudi" {
+		t.Fatalf("label = %s", got)
+	}
+}

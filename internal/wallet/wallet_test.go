@@ -39,7 +39,7 @@ func generateTestWallet(t *testing.T) *Wallet {
 	}
 	w := New(holderKey, issuerKey, false)
 	// Isolate tests from templates in the developer's real wallet directory.
-	w.TemplatesDir = t.TempDir()
+	w.Templates = NewWalletStore(t.TempDir()).Templates()
 	return w
 }
 

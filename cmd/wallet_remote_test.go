@@ -48,7 +48,7 @@ func startRemoteTestWallet(t *testing.T) (string, *wallet.Server) {
 	}
 	w := wallet.New(holderKey, issuerKey, false)
 	w.AutoAccept = true
-	w.TemplatesDir = t.TempDir()
+	w.Templates = credtemplate.FileLocation(t.TempDir())
 
 	srv := wallet.NewServer(w, 0, nil)
 	srv.ShutdownFunc = func() {} // never exit the test process
@@ -151,7 +151,7 @@ func TestAutoRouteThroughInstanceForSameWalletDir(t *testing.T) {
 	if len(creds) != 1 {
 		t.Fatalf("expected the credential on the running instance, got %d", len(creds))
 	}
-	if _, err := os.Stat(filepath.Join(walletDir, "wallet.json")); !os.IsNotExist(err) {
+	if wallet.NewWalletStore(walletDir).Exists() {
 		t.Error("auto-routed issue must not write the local store")
 	}
 
@@ -465,7 +465,7 @@ func TestRemoteTemplatesListShowUseRemoteStore(t *testing.T) {
 	if _, err := client.PutTemplate("remote-only", map[string]any{"format": "sdjwt", "claims": map[string]any{"a": 1}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := credtemplate.Save(credtemplate.DirForWallet(walletDir), credtemplate.Template{
+	if _, err := credtemplate.Save(wallet.NewWalletStore(walletDir).Templates(), credtemplate.Template{
 		Name: "local-only", Format: "sdjwt", Claims: map[string]any{"b": 2},
 	}); err != nil {
 		t.Fatal(err)
@@ -507,7 +507,7 @@ func TestCompletionFunctions(t *testing.T) {
 	if len(ids) != 0 {
 		t.Errorf("expected no completions without a wallet, got %v", ids)
 	}
-	if _, err := os.Stat(filepath.Join(walletDir, "wallet.json")); !os.IsNotExist(err) {
+	if wallet.NewWalletStore(walletDir).Exists() {
 		t.Error("completion must not create a wallet store")
 	}
 
@@ -587,7 +587,7 @@ func TestTrustListFollowsTheRemoteWallet(t *testing.T) {
 		t.Fatal(err)
 	}
 	local := wallet.New(localHolder, localIssuer, false)
-	if err := loadStore().Save(local); err != nil {
+	if err := wallet.NewWalletStore(walletDir).Save(local); err != nil {
 		t.Fatal(err)
 	}
 

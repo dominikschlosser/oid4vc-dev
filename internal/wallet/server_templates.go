@@ -34,7 +34,7 @@ import (
 // including their claims so clients can pre-fill issuance forms without a
 // second request.
 func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {
-	templates, err := credtemplate.List(s.wallet.TemplatesDir)
+	templates, err := credtemplate.List(s.wallet.Templates)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -53,7 +53,7 @@ func (s *Server) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tpl, err := credtemplate.Load(name, s.wallet.TemplatesDir)
+	tpl, err := credtemplate.Load(name, s.wallet.Templates)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
@@ -70,11 +70,11 @@ func (s *Server) handlePutTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tpl.Name = strings.TrimSpace(r.PathValue("name"))
-	if _, err := credtemplate.Save(s.wallet.TemplatesDir, tpl); err != nil {
+	if _, err := credtemplate.Save(s.wallet.Templates, tpl); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	saved, err := credtemplate.Load(tpl.Name, s.wallet.TemplatesDir)
+	saved, err := credtemplate.Load(tpl.Name, s.wallet.Templates)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -86,7 +86,7 @@ func (s *Server) handlePutTemplate(w http.ResponseWriter, r *http.Request) {
 // deleted. Deleting a user template that overrides a pre-defined one restores the
 // pre-defined version.
 func (s *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
-	if err := credtemplate.Delete(s.wallet.TemplatesDir, r.PathValue("name")); err != nil {
+	if err := credtemplate.Delete(s.wallet.Templates, r.PathValue("name")); err != nil {
 		status := http.StatusBadRequest
 		if strings.Contains(err.Error(), "not found") {
 			status = http.StatusNotFound

@@ -67,7 +67,11 @@ func walletLogsCmd() *cobra.Command {
 			if !follow {
 				return nil
 			}
-			return followWalletLogs(cmd.Context(), out, loadStore(), len(entries), walletLogPrintOptions{Verbose: verbose})
+			store, err := openStore()
+			if err != nil {
+				return err
+			}
+			return followWalletLogs(cmd.Context(), out, store, len(entries), walletLogPrintOptions{Verbose: verbose})
 		},
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow wallet logs and print new entries as they are persisted")

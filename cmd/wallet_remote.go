@@ -62,7 +62,7 @@ func remoteClientIfConfigured() (*remote.Client, error) {
 	if strings.EqualFold(strings.TrimSpace(remoteFlag), "local") || templatesDir != "" {
 		return nil, nil
 	}
-	if inst := remote.InstanceForWalletDir(loadStore().Dir, 500*time.Millisecond); inst != nil {
+	if inst := remote.InstanceForWalletDir(resolvedWalletDir(), 500*time.Millisecond); inst != nil {
 		version := inst.Version
 		if version == "" {
 			version = "unknown version"
@@ -338,7 +338,7 @@ func managedInstanceURL(instances []remote.DiscoveredInstance) string {
 	if strings.EqualFold(strings.TrimSpace(remoteFlag), "local") || templatesDir != "" {
 		return ""
 	}
-	localDir := loadStore().Dir
+	localDir := resolvedWalletDir()
 	for _, inst := range instances {
 		if inst.WalletDir != "" && remote.SamePath(inst.WalletDir, localDir) {
 			return strings.TrimRight(inst.URL, "/")
@@ -492,8 +492,8 @@ func warnServingConfigDivergence(cfg map[string]any) {
 	if instanceDir == "" {
 		return
 	}
-	store := loadStore()
-	if !remote.SamePath(instanceDir, store.Dir) {
+	store, err := openStore()
+	if err != nil || !remote.SamePath(instanceDir, store.Dir) {
 		return
 	}
 	w, err := store.LoadOrCreate()

@@ -17,8 +17,6 @@ package wallet
 import (
 	"encoding/base64"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -54,7 +52,7 @@ func TestDisplayImagesStoredAsAssetsBesideWallet(t *testing.T) {
 	if err := store.Save(srv.wallet); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	walletJSON, err := os.ReadFile(filepath.Join(store.Dir, "wallet.json"))
+	walletJSON, err := store.Backend().Read(store.walletKey())
 	if err != nil {
 		t.Fatalf("reading wallet.json: %v", err)
 	}
@@ -64,7 +62,7 @@ func TestDisplayImagesStoredAsAssetsBesideWallet(t *testing.T) {
 	if !strings.Contains(string(walletJSON), "asset:") {
 		t.Error("wallet.json does not reference the image as an asset")
 	}
-	if entries, _ := os.ReadDir(store.assetsDir()); len(entries) == 0 {
+	if entries, _ := store.Backend().List(store.key("assets")); len(entries) == 0 {
 		t.Error("no asset file was written beside wallet.json")
 	}
 
@@ -103,7 +101,7 @@ func TestStoreDisplayAssetDedupes(t *testing.T) {
 	if !okA || !okB || refA != refB {
 		t.Fatalf("expected one shared reference, got %q and %q", refA, refB)
 	}
-	entries, _ := os.ReadDir(store.assetsDir())
+	entries, _ := store.Backend().List(store.key("assets"))
 	if len(entries) != 1 {
 		t.Fatalf("expected a single asset file, got %d", len(entries))
 	}
@@ -151,7 +149,7 @@ func TestPruneUnreferencedAssets(t *testing.T) {
 	if !ok1 || !ok2 || usedRef == orphanRef {
 		t.Fatalf("expected two distinct assets, got %q and %q", usedRef, orphanRef)
 	}
-	if entries, _ := os.ReadDir(store.assetsDir()); len(entries) != 2 {
+	if entries, _ := store.Backend().List(store.key("assets")); len(entries) != 2 {
 		t.Fatalf("expected 2 asset files, got %d", len(entries))
 	}
 
@@ -164,10 +162,10 @@ func TestPruneUnreferencedAssets(t *testing.T) {
 
 	store.PruneUnreferencedAssets()
 
-	if _, err := os.Stat(filepath.Join(store.assetsDir(), strings.TrimPrefix(usedRef, "asset:"))); err != nil {
+	if _, _, ok := store.ReadDisplayAsset(usedRef); !ok {
 		t.Error("the referenced asset was pruned")
 	}
-	if _, err := os.Stat(filepath.Join(store.assetsDir(), strings.TrimPrefix(orphanRef, "asset:"))); err == nil {
+	if _, _, ok := store.ReadDisplayAsset(orphanRef); ok {
 		t.Error("the orphaned asset was not pruned")
 	}
 }

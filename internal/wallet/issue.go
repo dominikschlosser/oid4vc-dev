@@ -365,7 +365,7 @@ func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 	// operator also sets a name or a color.
 	displaySource := tpl
 	if opts.DisplayTemplate != "" {
-		dt, err := credtemplate.Load(opts.DisplayTemplate, w.TemplatesDir)
+		dt, err := credtemplate.Load(opts.DisplayTemplate, w.Templates)
 		if err != nil {
 			return nil, fmt.Errorf("loading the display template %q: %w", opts.DisplayTemplate, err)
 		}
@@ -470,7 +470,7 @@ func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 		default:
 			saved.VCT = vct
 		}
-		path, err := credtemplate.Save(w.TemplatesDir, saved)
+		path, err := credtemplate.Save(w.Templates, saved)
 		if err != nil {
 			return nil, fmt.Errorf("saving template: %w", err)
 		}
@@ -488,7 +488,7 @@ func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 // from opts.PID, which the caller asked for by claim set rather than by name.
 func (w *Wallet) resolveIssueTemplate(opts IssueOptions) (tpl *credtemplate.Template, pidTemplate bool, err error) {
 	if name := strings.TrimSpace(opts.Template); name != "" {
-		tpl, err = credtemplate.Load(name, w.TemplatesDir)
+		tpl, err = credtemplate.Load(name, w.Templates)
 		return tpl, false, err
 	}
 	if opts.PID && opts.Claims == nil {
@@ -497,7 +497,7 @@ func (w *Wallet) resolveIssueTemplate(opts IssueOptions) (tpl *credtemplate.Temp
 		if format, _ := normalizeIssueFormat(opts.Format); format == "mdoc" {
 			name = mdocName
 		}
-		tpl, err = credtemplate.Load(name, w.TemplatesDir)
+		tpl, err = credtemplate.Load(name, w.Templates)
 		return tpl, true, err
 	}
 	return nil, false, nil

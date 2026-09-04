@@ -111,10 +111,12 @@ type Wallet struct {
 	// --base-url was given, so the wallet can tell that its own /callback is
 	// reachable.
 	ServingOrigin string `json:"-"`
-	TemplatesDir  string `json:"-"` // credential template directory; empty selects the default
-	Log           []LogEntry
-	mu            sync.RWMutex
-	logSink       func(LogEntry)
+	// Templates is where the wallet's user templates live. The zero value
+	// selects the default directory.
+	Templates credtemplate.Location `json:"-"`
+	Log       []LogEntry
+	mu        sync.RWMutex
+	logSink   func(LogEntry)
 	// credentialSink forwards imports to the wallet a clone was made from.
 	credentialSink func(StoredCredential)
 	// batchPresentedSink forwards a batch copy's use to the wallet a clone was
@@ -620,11 +622,11 @@ func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct s
 // issued (see GenerateProtectedDefaults).
 func (w *Wallet) generateDefaultCredentials(claimOverrides map[string]any, vct string, dropExisting bool) error {
 	sdName, mdocName, _ := credtemplate.PIDTemplateNames(vct)
-	sdTpl, err := credtemplate.Load(sdName, w.TemplatesDir)
+	sdTpl, err := credtemplate.Load(sdName, w.Templates)
 	if err != nil {
 		return fmt.Errorf("loading %s template: %w", sdName, err)
 	}
-	mdocTpl, err := credtemplate.Load(mdocName, w.TemplatesDir)
+	mdocTpl, err := credtemplate.Load(mdocName, w.Templates)
 	if err != nil {
 		return fmt.Errorf("loading %s template: %w", mdocName, err)
 	}

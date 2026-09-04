@@ -1,0 +1,23 @@
+# State goes through one storage layer
+
+Everything the tool keeps between runs (the wallet document, the holder and issuer keys, the TLS leaf, the shared CA, display assets, user templates) is written and read through `internal/storage`. A `Store` holds blobs under slash-separated keys. The wallet is a named subtree, laid out as the wallet directory, and the CA sits one level above it. Only the process bookkeeping below stays outside the layer.
+
+Three backends implement the store. `file` is the default and writes the wallet directory tree, so an existing wallet directory is a file store and the `--wallet-dir` contract holds. `memory` keeps the blobs in one store per process. Every opener in the process shares it. `postgres` keeps one row per key in one table, so several wallet servers pointed at the same database serve one wallet state.
+
+The backend is chosen by `--storage` or `EUDI_DEV_STORAGE`, and every opener that takes no explicit spec follows the variable. That includes the test suites, so one variable moves a whole test run onto a backend. The container image sets `auto`: files when a state directory was named or holds state (a mounted volume, empty or not), memory otherwise. A container that mounts a volume keeps its state in files. One that mounts nothing holds its state in memory and runs on a read-only filesystem. The instance registry a memory-backed server writes does not count as state, so the next start of that container picks memory again.
+
+## What stays outside the layer
+
+The instance registry (`instances/*.json`), the active remote target and the detached server log describe processes on this machine. They stay files in the state directory, because older CLIs read the registry directly and route to a running server by its wallet directory. A served wallet therefore keeps its directory as its name on every backend, and reports it in `/api/config`.
+
+Files the user points at by path (a credential, a template, a key PEM) are read from the filesystem. The layer holds only the tool's own state.
+
+## Consequences
+
+The blob is the unit of storage, so a save writes the whole wallet document. Two servers on a shared database that save at the same moment keep the later document. A load test that presents credentials writes activity log entries and tolerates that. A workload that needs concurrent writers to merge needs a finer schema behind the same interface.
+
+The keys, the CA and every credential are stored in the clear on every backend (ADR-0003). A shared database holding the CA key is a trust anchor.
+
+Postgres is the only external backend. Another engine is another `Store` implementation behind the same keys.
+
+The per-request reload (ADR-0005) compares the change stamp the backend reports.

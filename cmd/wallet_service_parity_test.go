@@ -51,7 +51,7 @@ func parityWallets(t *testing.T, seed func(*wallet.Wallet)) (local walletService
 			t.Fatal(err)
 		}
 		w.AutoAccept = true
-		w.TemplatesDir = t.TempDir()
+		w.Templates = credtemplate.FileLocation(t.TempDir())
 		seed(w)
 		if err := store.Save(w); err != nil {
 			t.Fatal(err)

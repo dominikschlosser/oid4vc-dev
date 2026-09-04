@@ -6,23 +6,50 @@ on:
   pull_request:
     branches: [main]
 
+# Every suite runs once per storage backend. EUDI_DEV_STORAGE moves every
+# store the tests, the served wallets and the CLI commands open onto that
+# backend, so the same tests cover files, memory and Postgres.
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        go-version: ["1.26"]
+        storage:
+          - name: file
+            spec: ""
+          - name: memory
+            spec: memory
+          - name: postgres
+            spec: postgres://postgres:postgres@localhost:5432/eudi?sslmode=disable
+    name: build-and-test (${{ matrix.storage.name }})
+    env:
+      EUDI_DEV_STORAGE: ${{ matrix.storage.spec }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: eudi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -h 127.0.0.1"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: "1.26"
 
       - name: Build
         run: go build -v ./...
 
       - name: Vet
+        if: matrix.storage.name == 'file'
         run: |
           echo '## `go vet`' >> "$GITHUB_STEP_SUMMARY"
           if output=$(go vet ./... 2>&1); then
@@ -36,11 +63,11 @@ jobs:
           fi
 
       - name: Install golangci-lint
-        if: matrix.go-version == '1.26'
+        if: matrix.storage.name == 'file'
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.0.2
 
       - name: Lint
-        if: matrix.go-version == '1.26'
+        if: matrix.storage.name == 'file'
         run: |
           echo '## Lint (golangci-lint)' >> "$GITHUB_STEP_SUMMARY"
           if output=$(golangci-lint run ./... 2>&1); then
@@ -60,11 +87,10 @@ jobs:
       # deferred poller) mutates the same state, and a race there corrupts a
       # signature rather than crashing.
       - name: Test with the race detector
-        if: matrix.go-version == '1.26'
         run: go test -race ./...
 
       - name: Coverage summary
-        if: matrix.go-version == '1.26'
+        if: matrix.storage.name == 'file'
         run: |
           echo '## Coverage' >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -72,12 +98,12 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Filter coverage
-        if: matrix.go-version == '1.26'
+        if: matrix.storage.name == 'file'
         run: |
           grep -v -E '/(cmd/|main\.go:|internal/output/printer\.go:|internal/proxy/(subprocess|terminal|dashboard)\.go:|internal/wallet/(register_darwin|server)\.go:|internal/qr/screen\.go:|internal/format/input\.go:|internal/web/handler\.go:)' coverage.out > coverage-filtered.out || true
 
       - name: Upload coverage
-        if: matrix.go-version == '1.26'
+        if: matrix.storage.name == 'file'
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -85,6 +111,32 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        storage:
+          - name: file
+            spec: ""
+          - name: memory
+            spec: memory
+          - name: postgres
+            spec: postgres://postgres:postgres@localhost:5432/eudi?sslmode=disable
+    name: e2e (${{ matrix.storage.name }})
+    env:
+      EUDI_DEV_STORAGE: ${{ matrix.storage.spec }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: eudi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -h 127.0.0.1"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
 
@@ -109,5 +161,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: e2e-test-results
+          name: e2e-test-results-${{ matrix.storage.name }}
           path: e2e/test-results/

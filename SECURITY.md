@@ -6,8 +6,8 @@
 
 ## Key Considerations
 
-- **Plaintext storage**: Wallet credentials and private keys are stored unencrypted on disk (`~/.eudi-dev/wallet/`). Do not store real credentials.
-- **Test CA on disk**: The wallet's CA key is stored unprotected at `~/.eudi-dev/wallet-ca-key.pem` and shared by every wallet under the same base directory, so trust lists stay stable across restarts. Anyone who can read that file can issue credentials your verifiers will accept.
+- **Plaintext storage**: Wallet credentials and private keys are stored unencrypted, on disk (`~/.eudi-dev/wallet/`) or in whichever storage backend is selected (memory, a Postgres database). Do not store real credentials.
+- **Test CA on disk**: The wallet's CA key is stored unprotected at `~/.eudi-dev/wallet-ca-key.pem` and shared by every wallet under the same base directory, so trust lists stay stable across restarts. Anyone who can read that file can issue credentials your verifiers will accept. On the Postgres backend the same key is a row in the shared database, and anyone who can read the database holds it.
 - **Unauthenticated HTTP**: The wallet server, web UI, and proxy expose unauthenticated HTTP endpoints. Anyone who can reach the port controls the wallet, so keep them on localhost or an isolated network. The only supported exception is the `--demo` profile for a public demo. It disables the process and filesystem endpoints, blocks server-side fetches into private networks, and resets state periodically. Everything in such a wallet is public and disposable (see [docs/public-demo.md](docs/public-demo.md)).
 - **Browser pages reach localhost**: Every page a developer visits can send requests to localhost. The `/api/` endpoints therefore refuse a request carrying an `Origin` from another site. A CLI, a curl invocation, or a test harness sends no `Origin` and is unaffected. The protocol endpoints (`/authorize`, `/credential-offer`, `/callback`) are reached by browser navigation and stay open.
 - **Proxy captures all traffic**: The reverse proxy logs and shows every request and response on its dashboard, tokens and credentials included.

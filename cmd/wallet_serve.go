@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/dominikschlosser/eudi-dev/internal/config"
+	"github.com/dominikschlosser/eudi-dev/internal/credtemplate"
 	"github.com/dominikschlosser/eudi-dev/internal/demorp"
 	"github.com/dominikschlosser/eudi-dev/internal/format"
 	"github.com/dominikschlosser/eudi-dev/internal/imprint"
@@ -312,7 +313,7 @@ func serializeWalletServeArgs(cmd *cobra.Command) ([]string, error) {
 
 	visitChangedPersistentFlags(cmd, func(flag *pflag.Flag) {
 		switch flag.Name {
-		case "wallet-dir", "mode", "templates-dir":
+		case "wallet-dir", "mode", "templates-dir", "storage":
 			args = append(args, "--"+flag.Name, flag.Value.String())
 		}
 	})
@@ -383,13 +384,16 @@ func runWalletServe(cmd *cobra.Command, opts *walletServeOptions) error {
 	if err != nil {
 		return fmt.Errorf("--demo-verifier-trust-anchor: %w", err)
 	}
-	store := loadStore()
+	store, err := openStore()
+	if err != nil {
+		return err
+	}
 	w, err := store.LoadOrCreate()
 	if err != nil {
 		return fmt.Errorf("loading wallet: %w", err)
 	}
 	if templatesDir != "" {
-		w.TemplatesDir = templatesDir
+		w.Templates = credtemplate.FileLocation(templatesDir)
 	}
 	if err := applyValidationMode(w, walletValidationMode); err != nil {
 		return err
@@ -585,7 +589,7 @@ func runWalletServe(cmd *cobra.Command, opts *walletServeOptions) error {
 	}
 	fmt.Printf("  Metadata:    %s/.well-known/jwt-vc-issuer\n", httpsURL)
 	fmt.Printf("  Credentials: %d loaded\n", len(w.GetCredentials()))
-	fmt.Printf("  Storage:     %s\n", store.Dir)
+	fmt.Printf("  Storage:     %s\n", store.Location())
 	fmt.Printf("  Validation:  %s\n", w.ValidationMode)
 	if opts.Demo {
 		if schedule := demoResetDescription(demoOpts); schedule != "" {
@@ -675,6 +679,7 @@ func runWalletServe(cmd *cobra.Command, opts *walletServeOptions) error {
 		Version:     Version,
 		ImprintHTML: imprintHTML,
 		Demo:        opts.Demo,
+		WalletStore: store,
 		CredentialByID: func(id string) (string, bool) {
 			cred, ok := w.GetCredential(id)
 			if !ok {

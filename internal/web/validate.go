@@ -28,6 +28,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/statuslist"
 	"github.com/dominikschlosser/eudi-dev/internal/trustlist"
 	"github.com/dominikschlosser/eudi-dev/internal/validate"
+	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
 // ValidateOpts holds the options for credential validation.
@@ -41,6 +42,9 @@ type ValidateOpts struct {
 	// skipped and marked NeedsNetwork, so the decoder can show a credential
 	// before those answers are in.
 	Offline bool
+	// WalletStore is the wallet whose CA and issuer key verify credentials it
+	// issued. Nil opens the default wallet.
+	WalletStore *wallet.WalletStore
 }
 
 // Validate decodes a credential and runs validation checks.
@@ -213,7 +217,7 @@ func checkSDJWTSignature(token *sdjwt.Token, opts ValidateOpts) CheckResult {
 	// Without explicit keys, credentials issued by the local wallet validate
 	// against its CA with a full chain.
 	if len(pubKeys) == 0 && len(tlCerts) == 0 {
-		if anchors := localWalletTrustAnchors(); len(anchors) > 0 {
+		if anchors := localWalletTrustAnchors(opts.WalletStore); len(anchors) > 0 {
 			if caKey, err := validate.ExtractAndValidateX5C(token.Header, anchors); err == nil && caKey != nil {
 				result := sdjwt.Verify(token, caKey)
 				if result.SignatureValid {
@@ -234,7 +238,7 @@ func checkSDJWTSignature(token *sdjwt.Token, opts ValidateOpts) CheckResult {
 	result, source, err := validate.VerifyJWTSignature(token, pubKeys, tlCerts)
 	if err != nil {
 		if len(pubKeys) == 0 && len(tlCerts) == 0 {
-			if localResult, localSource := verifyWithLocalWalletIssuerKey(token); localResult != nil {
+			if localResult, localSource := verifyWithLocalWalletIssuerKey(token, opts.WalletStore); localResult != nil {
 				result = localResult
 				source = localSource
 				err = nil
@@ -257,7 +261,7 @@ func checkSDJWTSignature(token *sdjwt.Token, opts ValidateOpts) CheckResult {
 	}
 	if result == nil {
 		if len(pubKeys) == 0 && len(tlCerts) == 0 {
-			if localResult, localSource := verifyWithLocalWalletIssuerKey(token); localResult != nil {
+			if localResult, localSource := verifyWithLocalWalletIssuerKey(token, opts.WalletStore); localResult != nil {
 				result = localResult
 				source = localSource
 			}
@@ -312,7 +316,7 @@ func offlineSDJWTSignature(token *sdjwt.Token, pubKeys []crypto.PublicKey, tlCer
 		}
 	}
 	if result == nil && len(pubKeys) == 0 && len(tlCerts) == 0 {
-		if localResult, localSource := verifyWithLocalWalletIssuerKey(token); localResult != nil {
+		if localResult, localSource := verifyWithLocalWalletIssuerKey(token, opts.WalletStore); localResult != nil {
 			result = localResult
 			source = localSource
 		}
@@ -380,7 +384,7 @@ func checkMDOCSignature(doc *mdoc.Document, opts ValidateOpts) CheckResult {
 	if len(pubKeys) == 0 && len(tlCerts) == 0 {
 		// Credentials issued by the local wallet validate against its CA
 		// with a full chain.
-		if anchors := localWalletTrustAnchors(); len(anchors) > 0 {
+		if anchors := localWalletTrustAnchors(opts.WalletStore); len(anchors) > 0 {
 			if caKey, err := validate.ExtractAndValidateMDOCX5Chain(doc, anchors); err == nil && caKey != nil {
 				result := mdoc.Verify(doc, caKey)
 				if result.SignatureValid {

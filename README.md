@@ -23,7 +23,7 @@ An unofficial developer toolkit for the EUDI and OpenID4VC ecosystem. Decode, is
 
 ## Highlights
 
-- **Testing Wallet**: stateful CLI wallet with file persistence, OID4VP/VCI flows, QR scanning, and OS URL scheme registration ([wallet](#wallet))
+- **Testing Wallet**: stateful CLI wallet persisted to files, memory or Postgres, OID4VP/VCI flows, QR scanning, and OS URL scheme registration ([wallet](#wallet))
 - **Reverse Proxy**: intercept, classify, and decode OID4VP/VCI wallet traffic in real time ([proxy](#proxy))
 - **Web UI**: paste, decode, and validate credentials in a split-pane browser interface ([serve](#serve))
 - **Unified Decode**: a single `decode` command handles SD-JWT, JWT VC, JWT, mDOC, OID4VCI offers, OID4VP requests, and ETSI trust lists
@@ -136,7 +136,7 @@ eudi completion install
 
 ### Wallet
 
-A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR scanning, and OS URL scheme registration.
+A stateful testing wallet with CLI-driven OID4VP/VCI flows, QR scanning, and OS URL scheme registration. State lives in files by default, or in memory or Postgres with `--storage`.
 
 ```bash
 eudi issue sdjwt --wallet --template pid-sdjwt         # Issue a PID into the wallet

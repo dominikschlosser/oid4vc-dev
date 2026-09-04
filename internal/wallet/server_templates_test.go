@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dominikschlosser/eudi-dev/internal/credtemplate"
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
@@ -198,7 +199,7 @@ func TestIssuePIDUsesTemplateOverride(t *testing.T) {
 func TestGetTemplate_RefusesAPathInsteadOfAName(t *testing.T) {
 	srv := newTestServer(t, false)
 	dir := t.TempDir()
-	srv.wallet.TemplatesDir = filepath.Join(dir, "templates")
+	srv.wallet.Templates = credtemplate.FileLocation(filepath.Join(dir, "templates"))
 
 	secret := filepath.Join(dir, "secret.json")
 	if err := os.WriteFile(secret, []byte(`{"name":"internal","format":"sdjwt","claims":{"api_key":"SECRET"}}`), 0o600); err != nil {
@@ -226,7 +227,7 @@ func TestGetTemplate_RefusesAPathInsteadOfAName(t *testing.T) {
 // The endpoint serves an ordinary template by name.
 func TestGetTemplate_StillServesABareName(t *testing.T) {
 	srv := newTestServer(t, false)
-	srv.wallet.TemplatesDir = t.TempDir()
+	srv.wallet.Templates = credtemplate.FileLocation(t.TempDir())
 
 	rec := serverRequest(t, srv, "GET", "/api/templates/german-pid-sdjwt", "")
 	if rec.Code != http.StatusOK {

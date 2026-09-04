@@ -30,15 +30,20 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/dominikschlosser/eudi-dev/internal/config"
+	"github.com/dominikschlosser/eudi-dev/internal/credtemplate"
 	"github.com/dominikschlosser/eudi-dev/internal/format"
 	"github.com/dominikschlosser/eudi-dev/internal/keys"
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 	"github.com/dominikschlosser/eudi-dev/internal/remote"
+	"github.com/dominikschlosser/eudi-dev/internal/storage"
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
 var walletDir string
 var templatesDir string
+
+// storageSpec is the --storage flag.
+var storageSpec string
 var walletValidationMode string
 
 // noOpen suppresses the browser this CLI opens on the user's behalf. The URL
@@ -48,7 +53,7 @@ var noOpen bool
 var walletCmd = &cobra.Command{
 	Use:   "wallet",
 	Short: "Manage a testing wallet for OID4VP/OID4VCI flows",
-	Long: "Stateful wallet with file persistence. Supports credential management, OID4VP presentations, OID4VCI issuance, " +
+	Long: "Stateful wallet, persisted to files by default. Supports credential management, OID4VP presentations, OID4VCI issuance, " +
 		"QR scanning, and URL scheme registration. The management commands operate on the local store, on the remote " +
 		"instance selected by `wallet use` or --remote, or through a running server for the same wallet directory.",
 }
@@ -57,6 +62,7 @@ func init() {
 	walletCmd.PersistentFlags().StringVar(&walletDir, "wallet-dir", "", "Wallet storage directory (default ~/.eudi-dev/wallet/, or an existing ~/.oid4vc-dev/wallet/)")
 	walletCmd.PersistentFlags().StringVar(&remoteFlag, "remote", "", "Manage a remote wallet server at this URL for this invocation (\"local\" forces the local store)")
 	walletCmd.PersistentFlags().StringVar(&templatesDir, "templates-dir", "", "Credential template directory (default <wallet-dir>/templates/)")
+	walletCmd.PersistentFlags().StringVar(&storageSpec, "storage", "", storageFlagUsage)
 	walletCmd.PersistentFlags().StringVar(&walletValidationMode, "mode", string(wallet.ValidationModeDebug), "Wallet validation mode: 'debug' (default) or 'strict'")
 	walletCmd.PersistentFlags().BoolVar(&noOpen, "no-open", false, "Never open a browser, only print the URL")
 	walletCmd.AddCommand(walletServeCmd())
@@ -118,20 +124,39 @@ func init() {
 	rootCmd.AddCommand(walletCmd)
 }
 
-// loadStore creates a WalletStore from the --wallet-dir flag.
-func loadStore() *wallet.WalletStore {
-	return wallet.NewWalletStore(walletDir)
+const storageFlagUsage = "Where the wallet state lives: 'file', 'memory', 'auto' (files when a state directory was given or exists, memory otherwise) or a postgres:// URL (default $EUDI_DEV_STORAGE, else file)"
+
+// resolvedStorageSpec returns the --storage flag, else EUDI_DEV_STORAGE.
+func resolvedStorageSpec() string {
+	if storageSpec != "" {
+		return storageSpec
+	}
+	return os.Getenv(storage.EnvVar)
+}
+
+// openStore opens the wallet store for --wallet-dir on the --storage backend.
+func openStore() (*wallet.WalletStore, error) {
+	return wallet.OpenWalletStore(walletDir, resolvedStorageSpec())
+}
+
+// resolvedWalletDir returns the absolute --wallet-dir, which identifies the
+// wallet to the instance registry on every backend.
+func resolvedWalletDir() string {
+	return wallet.ResolveWalletDir(walletDir)
 }
 
 // loadWallet loads the wallet from the store, creating it if needed.
 func loadWallet() (*wallet.Wallet, *wallet.WalletStore, error) {
-	store := loadStore()
+	store, err := openStore()
+	if err != nil {
+		return nil, nil, err
+	}
 	w, err := store.LoadOrCreate()
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading wallet: %w", err)
 	}
 	if templatesDir != "" {
-		w.TemplatesDir = templatesDir
+		w.Templates = credtemplate.FileLocation(templatesDir)
 	}
 	if err := applyValidationMode(w, walletValidationMode); err != nil {
 		return nil, nil, err

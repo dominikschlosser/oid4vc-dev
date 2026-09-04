@@ -29,6 +29,7 @@ import (
 
 	"github.com/dominikschlosser/eudi-dev/internal/config"
 	"github.com/dominikschlosser/eudi-dev/internal/oid4vc"
+	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
 type Server struct {
@@ -46,14 +47,13 @@ type Server struct {
 	parseOpts        oid4vc.ParseOptions
 	store            *WalletStore
 	storeSyncMu      sync.Mutex
-	// lastWalletMod and lastWalletSize let a per-request reload skip reparsing a
-	// wallet.json that has not changed since the last load. lastReloadAt bounds
-	// how long that skip may hide a change a coarse-resolution filesystem reports
-	// with the same mtime and size (some container and network volumes), so a
-	// stale in-memory view self-corrects within reloadMaxStale. Guarded by
+	// lastWalletStamp lets a per-request reload skip reparsing a wallet.json
+	// that has not changed since the last load. lastReloadAt bounds how long
+	// that skip may hide a change a coarse-resolution filesystem reports with
+	// the same mtime and size (some container and network volumes), so a stale
+	// in-memory view self-corrects within reloadMaxStale. Guarded by
 	// storeSyncMu.
-	lastWalletMod   time.Time
-	lastWalletSize  int64
+	lastWalletStamp storage.Stamp
 	lastReloadAt    time.Time
 	staleClientOnce sync.Once
 	demo            *demoState
@@ -335,12 +335,12 @@ func (s *Server) reloadFromStore() error {
 	}
 
 	// The store is reloaded per request so several visitors of a shared demo
-	// see each other's changes. The parse is skipped when the file has not
-	// changed since the last load, and repeated at least every reloadMaxStale
-	// so a change a coarse-mtime filesystem hides (same mtime and size) still
-	// surfaces.
-	mod, size, ok := s.store.WalletFileState()
-	if ok && size == s.lastWalletSize && mod.Equal(s.lastWalletMod) && time.Since(s.lastReloadAt) < reloadMaxStale {
+	// see each other's changes. The parse is skipped when the stored document
+	// has not changed since the last load, and repeated at least every
+	// reloadMaxStale so a change a coarse-mtime filesystem hides (same mtime
+	// and size) still surfaces.
+	stamp, ok := s.store.WalletStamp()
+	if ok && stamp == s.lastWalletStamp && time.Since(s.lastReloadAt) < reloadMaxStale {
 		return nil
 	}
 
@@ -351,8 +351,7 @@ func (s *Server) reloadFromStore() error {
 	s.applyPersistedWalletState(reloaded)
 	s.lastReloadAt = time.Now()
 	if ok {
-		s.lastWalletMod = mod
-		s.lastWalletSize = size
+		s.lastWalletStamp = stamp
 	}
 	return nil
 }

@@ -27,12 +27,14 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/dominikschlosser/eudi-dev/internal/credtemplate"
 )
 
 func newDemoTestServer(t *testing.T) *Server {
 	t.Helper()
 	srv := newTestServer(t, true)
-	srv.wallet.TemplatesDir = t.TempDir()
+	srv.wallet.Templates = credtemplate.FileLocation(t.TempDir())
 	srv.SetDemo(DemoOptions{ResetInterval: time.Hour})
 	return srv
 }
@@ -608,7 +610,7 @@ func TestProtectedDefaultsFollowTemplateOverrides(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "pid-sdjwt.json"), []byte(override), 0600); err != nil {
 		t.Fatalf("writing template override: %v", err)
 	}
-	w.TemplatesDir = dir
+	w.Templates = credtemplate.FileLocation(dir)
 
 	if err := w.GenerateProtectedDefaults(); err != nil {
 		t.Fatalf("generating protected defaults: %v", err)

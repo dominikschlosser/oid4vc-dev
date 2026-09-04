@@ -22,36 +22,53 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/dominikschlosser/eudi-dev/internal/config"
+	"github.com/dominikschlosser/eudi-dev/internal/credtemplate"
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
+	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
-// WalletStore handles file-based persistence for the wallet.
+// WalletStore persists the wallet through the storage layer: wallet.json,
+// the key and certificate PEMs, assets/ and templates/ under the wallet's
+// prefix, and the shared CA one level up.
 type WalletStore struct {
+	// Dir is the wallet's directory. On the file backend it is where the
+	// files are. On every backend it identifies the wallet: the instance
+	// registry and the remote CLI find a served wallet by it.
 	Dir string
 
+	backend storage.Store
+	// prefix is the wallet's key prefix (Dir's base name on the file backend,
+	// Dir relative to the state directory elsewhere, see walletKeyPrefix).
+	// sharedPrefix is the prefix one level up, where the CA lives.
+	prefix       string
+	sharedPrefix string
+
 	// saveMu orders the writers of wallet.json. Save snapshots the wallet and
-	// then renames the file, and without the mutex a save that snapshotted
-	// earlier can rename later, so the file silently loses whatever only the
+	// then writes the blob, and without the mutex a save that snapshotted
+	// earlier can write later, so the blob silently loses whatever only the
 	// newer snapshot had. The next reload then makes the loss permanent. The
 	// server's own lock does not cover every writer: the log sink and the
 	// demo issuer save through their own callbacks.
 	saveMu sync.Mutex
 
-	// saveDelay widens the snapshot-to-rename window in tests. Nil otherwise.
+	// saveDelay widens the snapshot-to-write window in tests. Nil otherwise.
 	saveDelay func()
 }
 
 var walletRuntimeRegistry sync.Map
 
-// walletJSON is the on-disk format of wallet.json.
+// walletJSON is the stored format of wallet.json.
 type walletJSON struct {
 	Credentials        []StoredCredential      `json:"credentials"`
 	IssuedAttestations []IssuedAttestationSpec `json:"issued_attestations,omitempty"`
@@ -75,64 +92,127 @@ func DefaultWalletDir() string {
 	return filepath.Join(config.BaseDir(), "wallet")
 }
 
-// NewWalletStore creates a new WalletStore for the given directory.
-func NewWalletStore(dir string) *WalletStore {
+// ResolveWalletDir returns the absolute wallet directory, the default when
+// dir is empty.
+func ResolveWalletDir(dir string) string {
 	if dir == "" {
 		dir = DefaultWalletDir()
 	}
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	return &WalletStore{Dir: dir}
+	return dir
+}
+
+// NewWalletStore returns the store for a wallet directory (the default
+// directory when dir is empty). The backend comes from EUDI_DEV_STORAGE,
+// files when the variable is unset.
+func NewWalletStore(dir string) *WalletStore {
+	return NewWalletStoreOn(dir, storage.FromEnv(storageOptions(dir)))
+}
+
+// OpenWalletStore returns the store for a wallet directory on the backend
+// given by spec (see storage.Open).
+func OpenWalletStore(dir, spec string) (*WalletStore, error) {
+	backend, err := storage.Open(spec, storageOptions(dir))
+	if err != nil {
+		return nil, err
+	}
+	return NewWalletStoreOn(dir, backend), nil
+}
+
+// storageOptions describes the wallet directory for storage.Open. An explicit
+// dir, or a state directory set through the environment, counts as a
+// requested location for "auto".
+func storageOptions(dir string) storage.Options {
+	requested := dir != "" || os.Getenv("EUDI_DEV_HOME") != "" || os.Getenv("OID4VC_DEV_HOME") != ""
+	return storage.Options{Root: filepath.Dir(ResolveWalletDir(dir)), RootRequested: requested}
+}
+
+// NewWalletStoreOn returns the store for a wallet directory inside the given
+// backend.
+func NewWalletStoreOn(dir string, backend storage.Store) *WalletStore {
+	dir = ResolveWalletDir(dir)
+	prefix := filepath.Base(dir)
+	if backend.Kind() != storage.KindFile {
+		prefix = walletKeyPrefix(dir)
+	}
+	sharedPrefix := path.Dir(prefix)
+	if sharedPrefix == "." {
+		sharedPrefix = ""
+	}
+	return &WalletStore{Dir: dir, backend: backend, prefix: prefix, sharedPrefix: sharedPrefix}
+}
+
+// walletKeyPrefix is the key prefix of a wallet in a backend without
+// directories: the wallet directory relative to the state directory when it
+// lies inside it, else its absolute path in slash form without the leading
+// separator. The default wallet is "wallet" on every machine.
+func walletKeyPrefix(dir string) string {
+	base := filepath.Dir(ResolveWalletDir(""))
+	if rel, err := filepath.Rel(base, dir); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, "../") {
+		return filepath.ToSlash(rel)
+	}
+	slash := filepath.ToSlash(dir)
+	if volume := filepath.VolumeName(dir); volume != "" {
+		slash = strings.TrimPrefix(slash, filepath.ToSlash(volume))
+	}
+	return strings.TrimPrefix(slash, "/")
+}
+
+// Backend returns the storage layer this store writes through.
+func (s *WalletStore) Backend() storage.Store {
+	return s.backend
+}
+
+// Location describes where the wallet lives, for messages: the directory on
+// the file backend, the backend and the prefix otherwise.
+func (s *WalletStore) Location() string {
+	return s.backend.Locate(s.prefix)
+}
+
+// Templates returns where this wallet's user templates live.
+func (s *WalletStore) Templates() credtemplate.Location {
+	return credtemplate.Location{Store: s.backend, Prefix: s.key("templates")}
+}
+
+// Exists reports whether the wallet has been saved at least once.
+func (s *WalletStore) Exists() bool {
+	_, ok := s.backend.Stat(s.walletKey())
+	return ok
 }
 
 func (s *WalletStore) runtime() *WalletRuntime {
-	key := s.Dir
-	if key == "" {
-		key = DefaultWalletDir()
-	}
-	if abs, err := filepath.Abs(key); err == nil {
-		key = abs
-	}
-	runtime, _ := walletRuntimeRegistry.LoadOrStore(key, newWalletRuntime())
+	runtime, _ := walletRuntimeRegistry.LoadOrStore(s.Dir, newWalletRuntime())
 	return runtime.(*WalletRuntime)
 }
 
-// ensureDir creates the wallet directory if it doesn't exist.
-func (s *WalletStore) ensureDir() error {
-	return os.MkdirAll(s.Dir, 0700)
+// key returns the store key of a blob inside the wallet.
+func (s *WalletStore) key(parts ...string) string {
+	return path.Join(append([]string{s.prefix}, parts...)...)
 }
 
-// walletPath returns the path to wallet.json.
-func (s *WalletStore) walletPath() string {
-	return filepath.Join(s.Dir, "wallet.json")
+func (s *WalletStore) walletKey() string { return s.key("wallet.json") }
+
+// WalletStamp returns wallet.json's change stamp, or ok=false when the wallet
+// has not been saved.
+func (s *WalletStore) WalletStamp() (storage.Stamp, bool) {
+	return s.backend.Stat(s.walletKey())
 }
 
-// WalletFileState returns wallet.json's modification time and size, or ok=false
-// when it cannot be stat'd. A per-request reload uses it to skip reparsing a
-// file that has not changed since the last load.
-func (s *WalletStore) WalletFileState() (modTime time.Time, size int64, ok bool) {
-	info, err := os.Stat(s.walletPath())
-	if err != nil {
-		return time.Time{}, 0, false
-	}
-	return info.ModTime(), info.Size(), true
+// assetKey returns the key of a display image referenced from wallet.json,
+// kept beside it so a credential's card art does not bloat the document the
+// wallet reparses on every request.
+func (s *WalletStore) assetKey(name string) string {
+	return s.key("assets", name)
 }
 
-// assetsDir holds the display images referenced from wallet.json, kept beside it
-// so a credential's card art does not bloat the file the wallet reparses on
-// every request.
-func (s *WalletStore) assetsDir() string {
-	return filepath.Join(s.Dir, "assets")
-}
-
-// storeDisplayAsset writes a data-URI display image to the assets directory as a
-// content-addressed file and returns a reference of the form
-// "asset:<sha256>.<ext>". A value that is not a data URI (an already-stored
-// reference, or an external URL) is returned unchanged with converted=false, so
-// it can run on every save. Content addressing dedupes the baseline art a demo
-// re-issues and makes an asset immutable, so a reference stays valid across a
-// shared, reloaded store.
+// storeDisplayAsset writes a data-URI display image as a content-addressed
+// asset and returns a reference of the form "asset:<sha256>.<ext>". A value
+// that is not a data URI (an already-stored reference, or an external URL) is
+// returned unchanged with converted=false, so it can run on every save.
+// Content addressing dedupes the baseline art a demo re-issues and makes an
+// asset immutable, so a reference stays valid across a shared, reloaded store.
 func (s *WalletStore) storeDisplayAsset(uri string) (ref string, converted bool) {
 	contentType, data, ok := dataURIImage(uri)
 	if !ok {
@@ -140,52 +220,37 @@ func (s *WalletStore) storeDisplayAsset(uri string) (ref string, converted bool)
 	}
 	sum := sha256.Sum256(data)
 	name := hex.EncodeToString(sum[:]) + "." + assetExtension(contentType)
-	if err := os.MkdirAll(s.assetsDir(), 0o700); err != nil {
-		return uri, false
-	}
-	path := filepath.Join(s.assetsDir(), name)
-	if _, err := os.Stat(path); err == nil {
+	key := s.assetKey(name)
+	if _, exists := s.backend.Stat(key); exists {
 		return "asset:" + name, true
 	}
-	tmp, err := os.CreateTemp(s.assetsDir(), name+".tmp-*")
-	if err != nil {
-		return uri, false
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return uri, false
-	}
-	if err := tmp.Close(); err != nil {
-		return uri, false
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
+	if err := s.backend.Write(key, data, 0o600); err != nil {
 		return uri, false
 	}
 	return "asset:" + name, true
 }
 
 // ReadDisplayAsset returns the bytes and content type of a stored display asset,
-// or ok=false when the reference is not an asset reference or the file is
+// or ok=false when the reference is not an asset reference or the asset is
 // missing. The image-serving endpoint uses it.
 func (s *WalletStore) ReadDisplayAsset(ref string) (contentType string, data []byte, ok bool) {
 	name, found := strings.CutPrefix(ref, "asset:")
 	// The name is a hash and an extension the store wrote, but the read is
-	// path-guarded anyway so a reference can never reach outside the directory.
+	// guarded anyway so a reference can never reach outside the assets.
 	if !found || name == "" || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
 		return "", nil, false
 	}
-	data, err := os.ReadFile(filepath.Join(s.assetsDir(), name))
+	data, err := s.backend.Read(s.assetKey(name))
 	if err != nil {
 		return "", nil, false
 	}
 	return assetContentType(name), data, true
 }
 
-// PruneUnreferencedAssets deletes display asset files that no credential in
+// PruneUnreferencedAssets deletes display assets that no credential in
 // wallet.json references. It reads the current wallet.json under saveMu, so it
 // never races a save that is adding a reference (or an asset), and content
-// addressing means a re-issued image rewrites the same file. A leftover asset
+// addressing means a re-issued image rewrites the same asset. A leftover asset
 // is harmless, so errors are ignored. The demo reset calls it, since clearing
 // the baseline orphans the assets of whatever was issued since the last reset.
 func (s *WalletStore) PruneUnreferencedAssets() {
@@ -193,7 +258,7 @@ func (s *WalletStore) PruneUnreferencedAssets() {
 	defer s.saveMu.Unlock()
 
 	referenced := make(map[string]bool)
-	if data, err := os.ReadFile(s.walletPath()); err == nil {
+	if data, err := s.backend.Read(s.walletKey()); err == nil {
 		var wj walletJSON
 		if json.Unmarshal(data, &wj) == nil {
 			for _, c := range wj.Credentials {
@@ -209,17 +274,15 @@ func (s *WalletStore) PruneUnreferencedAssets() {
 		}
 	}
 
-	entries, err := os.ReadDir(s.assetsDir())
+	names, err := s.backend.List(s.key("assets"))
 	if err != nil {
 		return
 	}
-	for _, entry := range entries {
-		name := entry.Name()
-		// Skip an in-flight temp write and any referenced asset.
-		if entry.IsDir() || strings.Contains(name, ".tmp-") || referenced[name] {
+	for _, name := range names {
+		if referenced[name] {
 			continue
 		}
-		_ = os.Remove(filepath.Join(s.assetsDir(), name))
+		_ = s.backend.Delete(s.assetKey(name))
 	}
 }
 
@@ -241,7 +304,7 @@ func assetExtension(contentType string) string {
 	}
 }
 
-// assetContentType maps a stored asset file name back to its content type.
+// assetContentType maps a stored asset name back to its content type.
 func assetContentType(name string) string {
 	switch {
 	case strings.HasSuffix(name, ".png"):
@@ -259,61 +322,27 @@ func assetContentType(name string) string {
 	}
 }
 
-// holderKeyPath returns the path to the holder private key.
-func (s *WalletStore) holderKeyPath() string {
-	return filepath.Join(s.Dir, "holder.pem")
+// The shared CA sits one level above the wallet, so every wallet under the
+// same state directory shares one CA.
+func (s *WalletStore) sharedCAKeyPEM() string { return path.Join(s.sharedPrefix, "wallet-ca-key.pem") }
+
+func (s *WalletStore) sharedCACertPEM() string {
+	return path.Join(s.sharedPrefix, "wallet-ca-cert.pem")
 }
 
-// issuerKeyPath returns the path to the issuer private key.
-func (s *WalletStore) issuerKeyPath() string {
-	return filepath.Join(s.Dir, "issuer.pem")
-}
+func (s *WalletStore) tlsCertPEM() string { return s.key("wallet-tls-cert.pem") }
 
-func (s *WalletStore) sharedStateDir() string {
-	parent := filepath.Dir(s.Dir)
-	if parent == "." || parent == "" {
-		return s.Dir
-	}
-	return parent
-}
+func (s *WalletStore) tlsKeyPEM() string { return s.key("wallet-tls-key.pem") }
 
-func (s *WalletStore) sharedCAKeyPath() string {
-	return filepath.Join(s.sharedStateDir(), "wallet-ca-key.pem")
-}
+func (s *WalletStore) legacyTLSCertPEM() string { return s.key("issuer-tls-cert.pem") }
 
-func (s *WalletStore) sharedCACertPath() string {
-	return filepath.Join(s.sharedStateDir(), "wallet-ca-cert.pem")
-}
+func (s *WalletStore) legacyTLSKeyPEM() string { return s.key("issuer-tls-key.pem") }
 
-// issuerTLSCertPath returns the path to the wallet HTTPS certificate.
-func (s *WalletStore) issuerTLSCertPath() string {
-	return filepath.Join(s.Dir, "wallet-tls-cert.pem")
-}
+func (s *WalletStore) logCleanMarkerKey() string { return s.key("wallet-log-cleaned-at") }
 
-// issuerTLSKeyPath returns the path to the wallet HTTPS private key.
-func (s *WalletStore) issuerTLSKeyPath() string {
-	return filepath.Join(s.Dir, "wallet-tls-key.pem")
-}
-
-func (s *WalletStore) logCleanMarkerPath() string {
-	return filepath.Join(s.Dir, "wallet-log-cleaned-at")
-}
-
-func (s *WalletStore) legacyIssuerTLSCertPath() string {
-	return filepath.Join(s.Dir, "issuer-tls-cert.pem")
-}
-
-func (s *WalletStore) legacyIssuerTLSKeyPath() string {
-	return filepath.Join(s.Dir, "issuer-tls-key.pem")
-}
-
-// LoadOrCreate loads the wallet from disk, or creates a new empty wallet if none exists.
+// LoadOrCreate loads the wallet, or creates a new empty wallet if none exists.
 // Keys are loaded or auto-generated as needed.
 func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
-	if err := s.ensureDir(); err != nil {
-		return nil, fmt.Errorf("creating wallet directory: %w", err)
-	}
-
 	holderKey, issuerKey, err := s.LoadOrCreateKeys()
 	if err != nil {
 		return nil, err
@@ -325,14 +354,14 @@ func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
 
 	w := New(holderKey, issuerKey, false)
 	w.runtime = s.runtime()
-	w.TemplatesDir = filepath.Join(s.Dir, "templates")
+	w.Templates = s.Templates()
 	if err := w.SetCertificateAuthority(caKey, caCert); err != nil {
 		return nil, fmt.Errorf("configuring shared wallet CA: %w", err)
 	}
 
-	data, err := os.ReadFile(s.walletPath())
+	data, err := s.backend.Read(s.walletKey())
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return w, nil
 		}
 		return nil, fmt.Errorf("reading wallet.json: %w", err)
@@ -365,18 +394,15 @@ func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
 	return w, nil
 }
 
-// Save persists the wallet state to disk.
+// Save persists the wallet state.
 func (s *WalletStore) Save(w *Wallet) error {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
-	if err := s.ensureDir(); err != nil {
-		return fmt.Errorf("creating wallet directory: %w", err)
-	}
 
 	creds := w.GetCredentials()
-	// Move any embedded display image out of wallet.json into the assets
-	// directory, leaving a reference in its place. Done on the copy, so the
-	// in-memory wallet is untouched until a reload picks up the references.
+	// Move any embedded display image out of wallet.json into the assets,
+	// leaving a reference in its place. Done on the copy, so the in-memory
+	// wallet is untouched until a reload picks up the references.
 	for i := range creds {
 		if creds[i].Display == nil {
 			continue
@@ -417,26 +443,10 @@ func (s *WalletStore) Save(w *Wallet) error {
 	if s.saveDelay != nil {
 		s.saveDelay()
 	}
-
-	// Write-then-rename so a concurrent writer or a crash never leaves a
-	// partially written (or interleaved) wallet.json behind.
-	tmp, err := os.CreateTemp(s.Dir, "wallet.json.tmp-*")
-	if err != nil {
-		return fmt.Errorf("creating temporary wallet.json: %w", err)
-	}
-	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
-		return fmt.Errorf("setting wallet.json permissions: %w", err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+	if err := s.backend.Write(s.walletKey(), data, 0o600); err != nil {
 		return fmt.Errorf("writing wallet.json: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("writing wallet.json: %w", err)
-	}
-	return os.Rename(tmp.Name(), s.walletPath())
+	return nil
 }
 
 // ClearLog removes all persisted wallet activity log entries.
@@ -469,7 +479,7 @@ func (s *WalletStore) filterLogEntries(entries []LogEntry) []LogEntry {
 }
 
 func (s *WalletStore) loadLogCleanMarker() time.Time {
-	data, err := os.ReadFile(s.logCleanMarkerPath())
+	data, err := s.backend.Read(s.logCleanMarkerKey())
 	if err != nil {
 		return time.Time{}
 	}
@@ -481,24 +491,17 @@ func (s *WalletStore) loadLogCleanMarker() time.Time {
 }
 
 func (s *WalletStore) writeLogCleanMarker(cleanedAt time.Time) error {
-	if err := s.ensureDir(); err != nil {
-		return fmt.Errorf("creating wallet directory: %w", err)
-	}
-	return os.WriteFile(s.logCleanMarkerPath(), []byte(cleanedAt.Format(time.RFC3339Nano)), 0600)
+	return s.backend.Write(s.logCleanMarkerKey(), []byte(cleanedAt.Format(time.RFC3339Nano)), 0o600)
 }
 
-// LoadOrCreateKeys loads holder and issuer keys from PEM files, generating them if they don't exist.
+// LoadOrCreateKeys loads the holder and issuer keys, generating them if they don't exist.
 func (s *WalletStore) LoadOrCreateKeys() (*ecdsa.PrivateKey, *ecdsa.PrivateKey, error) {
-	if err := s.ensureDir(); err != nil {
-		return nil, nil, fmt.Errorf("creating wallet directory: %w", err)
-	}
-
-	holderKey, err := s.loadOrGenerateKey(s.holderKeyPath(), "holder")
+	holderKey, err := s.loadOrGenerateKey(s.key("holder.pem"), "holder")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	issuerKey, err := s.loadOrGenerateKey(s.issuerKeyPath(), "issuer")
+	issuerKey, err := s.loadOrGenerateKey(s.key("issuer.pem"), "issuer")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -506,14 +509,10 @@ func (s *WalletStore) LoadOrCreateKeys() (*ecdsa.PrivateKey, *ecdsa.PrivateKey, 
 	return holderKey, issuerKey, nil
 }
 
-// LoadOrCreateSharedCA loads the shared wallet CA from disk or creates it.
+// LoadOrCreateSharedCA loads the shared wallet CA or creates it.
 func (s *WalletStore) LoadOrCreateSharedCA() (*ecdsa.PrivateKey, *x509.Certificate, error) {
-	if err := os.MkdirAll(s.sharedStateDir(), 0700); err != nil {
-		return nil, nil, fmt.Errorf("creating shared wallet state directory: %w", err)
-	}
-
-	keyData, keyErr := os.ReadFile(s.sharedCAKeyPath())
-	certData, certErr := os.ReadFile(s.sharedCACertPath())
+	keyData, keyErr := s.backend.Read(s.sharedCAKeyPEM())
+	certData, certErr := s.backend.Read(s.sharedCACertPEM())
 	if keyErr == nil && certErr == nil {
 		key, err := parsePEMKey(keyData, "wallet CA")
 		if err == nil {
@@ -523,10 +522,10 @@ func (s *WalletStore) LoadOrCreateSharedCA() (*ecdsa.PrivateKey, *x509.Certifica
 			}
 		}
 	}
-	if keyErr != nil && !os.IsNotExist(keyErr) {
+	if keyErr != nil && !errors.Is(keyErr, fs.ErrNotExist) {
 		return nil, nil, fmt.Errorf("reading wallet CA key: %w", keyErr)
 	}
-	if certErr != nil && !os.IsNotExist(certErr) {
+	if certErr != nil && !errors.Is(certErr, fs.ErrNotExist) {
 		return nil, nil, fmt.Errorf("reading wallet CA certificate: %w", certErr)
 	}
 
@@ -538,10 +537,10 @@ func (s *WalletStore) LoadOrCreateSharedCA() (*ecdsa.PrivateKey, *x509.Certifica
 	if err != nil {
 		return nil, nil, fmt.Errorf("generating wallet CA certificate: %w", err)
 	}
-	if err := saveKeyPEM(s.sharedCAKeyPath(), caKey); err != nil {
+	if err := s.saveKeyPEM(s.sharedCAKeyPEM(), caKey); err != nil {
 		return nil, nil, fmt.Errorf("saving wallet CA key: %w", err)
 	}
-	if err := saveCertPEM(s.sharedCACertPath(), caCert); err != nil {
+	if err := s.saveCertPEM(s.sharedCACertPEM(), caCert); err != nil {
 		return nil, nil, fmt.Errorf("saving wallet CA certificate: %w", err)
 	}
 	return caKey, caCert, nil
@@ -552,21 +551,17 @@ func (s *WalletStore) LoadOrCreateSharedCACertificatePEM() ([]byte, error) {
 	if _, _, err := s.LoadOrCreateSharedCA(); err != nil {
 		return nil, err
 	}
-	certPEM, err := os.ReadFile(s.sharedCACertPath())
+	certPEM, err := s.backend.Read(s.sharedCACertPEM())
 	if err != nil {
 		return nil, fmt.Errorf("reading wallet CA certificate: %w", err)
 	}
 	return certPEM, nil
 }
 
-// LoadOrCreateIssuerTLSCertificate loads the issuer HTTPS certificate from disk,
-// or generates and persists a new one if none exists or it no longer matches
-// the requested host.
+// LoadOrCreateIssuerTLSCertificate loads the issuer HTTPS certificate, or
+// generates and persists a new one if none exists or it no longer matches the
+// requested host.
 func (s *WalletStore) LoadOrCreateIssuerTLSCertificate(serverName string) (tls.Certificate, error) {
-	if err := s.ensureDir(); err != nil {
-		return tls.Certificate{}, fmt.Errorf("creating wallet directory: %w", err)
-	}
-
 	certPEM, keyPEM, err := s.loadIssuerTLSCertificatePEM(serverName)
 	if err != nil {
 		return tls.Certificate{}, err
@@ -588,10 +583,6 @@ func (s *WalletStore) LoadOrCreateIssuerTLSCertificateForURL(issuerURL string) (
 // LoadOrCreateIssuerTLSCertificatePEM returns the persisted issuer HTTPS certificate PEM,
 // generating it first if needed.
 func (s *WalletStore) LoadOrCreateIssuerTLSCertificatePEM(serverName string) ([]byte, error) {
-	if err := s.ensureDir(); err != nil {
-		return nil, fmt.Errorf("creating wallet directory: %w", err)
-	}
-
 	certPEM, _, err := s.loadIssuerTLSCertificatePEM(serverName)
 	if err != nil {
 		return nil, err
@@ -630,28 +621,25 @@ func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []
 		return nil, nil, err
 	}
 
-	certPEM, certErr := os.ReadFile(s.issuerTLSCertPath())
-	keyPEM, keyErr := os.ReadFile(s.issuerTLSKeyPath())
-	if os.IsNotExist(certErr) && os.IsNotExist(keyErr) {
-		certPEM, certErr = os.ReadFile(s.legacyIssuerTLSCertPath())
-		keyPEM, keyErr = os.ReadFile(s.legacyIssuerTLSKeyPath())
+	certPEM, certErr := s.backend.Read(s.tlsCertPEM())
+	keyPEM, keyErr := s.backend.Read(s.tlsKeyPEM())
+	if errors.Is(certErr, fs.ErrNotExist) && errors.Is(keyErr, fs.ErrNotExist) {
+		certPEM, certErr = s.backend.Read(s.legacyTLSCertPEM())
+		keyPEM, keyErr = s.backend.Read(s.legacyTLSKeyPEM())
 	}
 	if certErr == nil && keyErr == nil {
 		if cert, err := tls.X509KeyPair(certPEM, keyPEM); err == nil && issuerTLSCertificateMatches(cert, serverName, caCert) {
-			if err := os.WriteFile(s.issuerTLSCertPath(), certPEM, 0644); err != nil {
-				return nil, nil, fmt.Errorf("saving wallet TLS certificate: %w", err)
-			}
-			if err := os.WriteFile(s.issuerTLSKeyPath(), keyPEM, 0600); err != nil {
-				return nil, nil, fmt.Errorf("saving wallet TLS key: %w", err)
+			if err := s.saveIssuerTLSPEM(certPEM, keyPEM); err != nil {
+				return nil, nil, err
 			}
 			return certPEM, keyPEM, nil
 		}
 	}
 
-	if certErr != nil && !os.IsNotExist(certErr) {
+	if certErr != nil && !errors.Is(certErr, fs.ErrNotExist) {
 		return nil, nil, fmt.Errorf("reading wallet TLS certificate: %w", certErr)
 	}
-	if keyErr != nil && !os.IsNotExist(keyErr) {
+	if keyErr != nil && !errors.Is(keyErr, fs.ErrNotExist) {
 		return nil, nil, fmt.Errorf("reading wallet TLS key: %w", keyErr)
 	}
 
@@ -659,14 +647,21 @@ func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := os.WriteFile(s.issuerTLSCertPath(), certPEM, 0644); err != nil {
-		return nil, nil, fmt.Errorf("saving wallet TLS certificate: %w", err)
-	}
-	if err := os.WriteFile(s.issuerTLSKeyPath(), keyPEM, 0600); err != nil {
-		return nil, nil, fmt.Errorf("saving wallet TLS key: %w", err)
+	if err := s.saveIssuerTLSPEM(certPEM, keyPEM); err != nil {
+		return nil, nil, err
 	}
 
 	return certPEM, keyPEM, nil
+}
+
+func (s *WalletStore) saveIssuerTLSPEM(certPEM, keyPEM []byte) error {
+	if err := s.backend.Write(s.tlsKeyPEM(), keyPEM, 0o600); err != nil {
+		return fmt.Errorf("saving wallet TLS key: %w", err)
+	}
+	if err := s.backend.Write(s.tlsCertPEM(), certPEM, 0o644); err != nil {
+		return fmt.Errorf("saving wallet TLS certificate: %w", err)
+	}
+	return nil
 }
 
 func issuerTLSCertificateMatches(cert tls.Certificate, serverName string, caCert *x509.Certificate) bool {
@@ -699,14 +694,14 @@ func issuerTLSCertificateMatches(cert tls.Certificate, serverName string, caCert
 	return true
 }
 
-// loadOrGenerateKey loads a PEM key from path, or generates and saves a new one.
-func (s *WalletStore) loadOrGenerateKey(path, label string) (*ecdsa.PrivateKey, error) {
-	data, err := os.ReadFile(path)
+// loadOrGenerateKey loads the PEM key stored at the given key, or generates and saves a new one.
+func (s *WalletStore) loadOrGenerateKey(at, label string) (*ecdsa.PrivateKey, error) {
+	data, err := s.backend.Read(at)
 	if err == nil {
 		return parsePEMKey(data, label)
 	}
 
-	if !os.IsNotExist(err) {
+	if !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("reading %s key: %w", label, err)
 	}
 
@@ -715,11 +710,11 @@ func (s *WalletStore) loadOrGenerateKey(path, label string) (*ecdsa.PrivateKey, 
 		return nil, fmt.Errorf("generating %s key: %w", label, err)
 	}
 
-	if err := saveKeyPEM(path, key); err != nil {
+	if err := s.saveKeyPEM(at, key); err != nil {
 		return nil, fmt.Errorf("saving %s key: %w", label, err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Generated %s key: %s\n", label, path)
+	fmt.Fprintf(os.Stderr, "Generated %s key: %s\n", label, s.backend.Locate(at))
 	return key, nil
 }
 
@@ -759,8 +754,8 @@ func parsePEMCertificate(data []byte, label string) (*x509.Certificate, error) {
 	return cert, nil
 }
 
-// saveKeyPEM saves an EC private key as a PEM file.
-func saveKeyPEM(path string, key *ecdsa.PrivateKey) error {
+// saveKeyPEM stores an EC private key as PEM.
+func (s *WalletStore) saveKeyPEM(at string, key *ecdsa.PrivateKey) error {
 	der, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
 		return fmt.Errorf("marshaling key: %w", err)
@@ -771,11 +766,11 @@ func saveKeyPEM(path string, key *ecdsa.PrivateKey) error {
 		Bytes: der,
 	}
 
-	return os.WriteFile(path, pem.EncodeToMemory(block), 0600)
+	return s.backend.Write(at, pem.EncodeToMemory(block), 0o600)
 }
 
-func saveCertPEM(path string, cert *x509.Certificate) error {
-	return os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0644)
+func (s *WalletStore) saveCertPEM(at string, cert *x509.Certificate) error {
+	return s.backend.Write(at, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0o644)
 }
 
 func firstCertificatePEM(data []byte) ([]byte, error) {

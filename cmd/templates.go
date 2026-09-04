@@ -244,6 +244,7 @@ func init() {
 	rootCmd.AddCommand(templatesCmd)
 	templatesCmd.PersistentFlags().StringVar(&walletDir, "wallet-dir", "", "Wallet storage directory holding the templates/ subdirectory (default ~/.eudi-dev/wallet/, or an existing ~/.oid4vc-dev/wallet/)")
 	templatesCmd.PersistentFlags().StringVar(&templatesDir, "templates-dir", "", "Credential template directory (default <wallet-dir>/templates/)")
+	templatesCmd.PersistentFlags().StringVar(&storageSpec, "storage", "", storageFlagUsage)
 	templatesCmd.PersistentFlags().StringVar(&remoteFlag, "remote", "", "Manage templates on a remote wallet server at this URL (\"local\" forces the local store)")
 	templatesCmd.AddCommand(templatesListCmd)
 	templatesCmd.AddCommand(templatesShowCmd)
@@ -282,14 +283,18 @@ func printTemplateSaved(verb, name, path string) {
 	fmt.Fprintf(os.Stderr, "%s template %q\n", verb, name)
 }
 
-// resolveTemplatesDir returns the credential template directory: the
-// --templates-dir flag when set, otherwise the wallet directory's templates/
-// subdirectory.
-func resolveTemplatesDir() string {
+// resolveTemplates returns where the credential templates live: the
+// --templates-dir flag when set, otherwise the wallet's templates/ in its
+// storage backend.
+func resolveTemplates() (credtemplate.Location, error) {
 	if templatesDir != "" {
-		return templatesDir
+		return credtemplate.FileLocation(templatesDir), nil
 	}
-	return credtemplate.DirForWallet(walletDir)
+	store, err := openStore()
+	if err != nil {
+		return credtemplate.Location{}, err
+	}
+	return store.Templates(), nil
 }
 
 func parseTemplateClaims(arg string) (map[string]any, error) {

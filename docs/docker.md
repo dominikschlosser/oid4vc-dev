@@ -30,7 +30,47 @@ docker run -d --name eudi-demo -p 8085:8085 -p 8086:8086 \
 
 `--demo` seeds the four-PID baseline, runs HAIP in debug mode at OpenID4VCI feature level 1.1, disables the process and filesystem endpoints, and resets the wallet hourly (`--demo-reset` changes the schedule). The wallet UI is at `http://localhost:8085`, the demo issuer at `/issuer/`, the demo verifier at `/verifier/` and the decoder at `/decoder/`. The HTTPS issuer endpoints answer on port 8086 with a self-signed certificate.
 
-Without a volume the state is ephemeral. Removing the container discards the keys, the CA and every credential. The full deployment (TLS termination, rate limiting, usage statistics, persistence) is the compose example in [examples/public-demo](../examples/public-demo/), described in [public demo hosting](public-demo.md).
+Without a volume the state lives in memory (see [Storage](#storage)). Stopping the container discards the keys, the CA and every credential. The full deployment (TLS termination, rate limiting, usage statistics, persistence) is the compose example in [examples/public-demo](../examples/public-demo/), described in [public demo hosting](public-demo.md).
+
+## Storage
+
+The image sets `EUDI_DEV_STORAGE=auto`. The wallet then keeps its state in memory unless a state directory is mounted or named (a volume at `/home/app/.eudi-dev`, `EUDI_DEV_HOME`, or `--wallet-dir`). A container without a volume needs no writable filesystem, so it runs with `--read-only` (the start prints a warning that the instance registry could not be written). A container with a volume keeps its state in files.
+
+Pass `-e EUDI_DEV_STORAGE=...` (or `--storage` on the command) to choose explicitly:
+
+| Value | State lives in |
+|-------|----------------|
+| `file` | The wallet directory, as on the CLI |
+| `memory` | The process. Gone when the container stops |
+| `auto` | Files when a state directory is mounted or named, memory otherwise (the image default) |
+| `postgres://user:pass@host:5432/db` | One table (`eudi_dev_state`) in that database, created on first use |
+
+Several containers pointed at the same database serve one wallet: the same keys, the same CA, the same credentials. That is the setup for load testing a verifier or an issuer against many wallet servers. Docker resolves `wallet` to the replicas in turn:
+
+```yaml
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: wallet
+      POSTGRES_DB: wallet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+  wallet:
+    image: ghcr.io/dominikschlosser/eudi-dev:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      replicas: 4
+    environment:
+      EUDI_DEV_STORAGE: postgres://postgres:wallet@db:5432/wallet?sslmode=disable
+    command: ["wallet", "serve", "--auto-accept", "--pid", "--port", "8085",
+              "--base-url", "http://wallet:8085"]
+```
+
+Each wallet server re-reads the shared state on every request and writes the whole wallet document on every change, so two servers saving in the same instant keep the later document. Presentations only add activity log entries, which a load test can lose. The database holds the keys and the CA in the clear, as the wallet directory does (see [SECURITY.md](../SECURITY.md)).
 
 ## How it works
 

@@ -1,6 +1,6 @@
 # Wallet
 
-A stateful testing wallet with file persistence, CLI-driven OID4VP/VCI flows, QR scanning, and OS URL scheme registration. Credentials and keys are stored in `~/.eudi-dev/wallet/` (configurable via `--wallet-dir`) and persist across invocations.
+A stateful testing wallet with CLI-driven OID4VP/VCI flows, QR scanning, and OS URL scheme registration. Credentials and keys are stored in `~/.eudi-dev/wallet/` (configurable via `--wallet-dir`) and persist across invocations. The same state can live in memory or in a Postgres database instead (see [Storage backends](#storage-backends)).
 
 The wallet has two validation modes. Both run the same checks. The mode decides what happens to a finding:
 - `debug` (default) reports each finding and keeps processing the request. During DCQL evaluation it warns and keeps a credential match when some required claim paths are missing but other requested claims still match
@@ -135,7 +135,7 @@ All wallet state is stored in `~/.eudi-dev/wallet/` by default:
 
 A credential's display images (logo, background) are content-addressed files in `assets/`. `wallet.json` holds a reference (`asset:<hash>.<ext>`), so it stays small enough to reparse on every request and each image is stored once. A `data:` URI inside `wallet.json` is still served and moves to `assets/` on the next save.
 
-Wallet interaction logs are stored in `wallet.json` under the top-level `log` field. `wallet logs clean` clears those entries and writes `wallet-log-cleaned-at`. A running wallet server drops in-memory entries older than that marker when it saves. With `--wallet-dir`, both files are in that directory.
+Wallet interaction logs are stored in `wallet.json` under the top-level `log` field. `wallet logs clean` clears those entries and writes `wallet-log-cleaned-at`. A running wallet server drops in-memory entries older than that marker when it saves. With `--wallet-dir`, both are in that directory.
 
 Keys are P-256 EC keys, auto-generated on first use and reused across invocations. Wallets under the same wallet base directory share a persisted **CA key** and build certificate chains from it:
 
@@ -233,9 +233,25 @@ See [the wallet HTTP API](wallet/http-api.md) for every endpoint and for remote 
 
 ## Shared flags
 
-All wallet subcommands accept `--wallet-dir` to override the storage directory and `--templates-dir` to override the credential template directory (see [templates](templates.md)):
+All wallet subcommands accept `--wallet-dir` to override the storage directory, `--templates-dir` to override the credential template directory (see [templates](templates.md)) and `--storage` to choose the storage backend:
 
 ```bash
 eudi wallet list --wallet-dir /tmp/test-wallet
 eudi wallet serve --templates-dir ./my-templates
+eudi wallet serve --storage memory
 ```
+
+## Storage backends
+
+Everything the wallet keeps (credentials, keys, the shared CA, display assets, user templates, the activity log) goes through one storage layer. `--storage`, or the `EUDI_DEV_STORAGE` environment variable, picks the backend:
+
+| Value | State lives in |
+|-------|----------------|
+| `file` (default) | The wallet directory described above |
+| `memory` | The process. A `wallet serve` on memory starts empty and forgets everything on exit |
+| `auto` | Files when `--wallet-dir` or `EUDI_DEV_HOME` is given or the state directory holds state, memory otherwise. The [Docker image](docker.md#storage) default |
+| `postgres://user:pass@host:5432/db` | One table (`eudi_dev_state`) in that database. Several wallet servers pointed at it serve one wallet state |
+
+Every backend stores the same keys in the same layout. The wallet directory identifies the wallet on every backend, so a CLI command finds the server serving `~/.eudi-dev/wallet` whichever backend that server uses. `GET /api/config` reports the backend as `storage`. The default wallet is keyed `wallet` in a database wherever the process runs, so a CLI on the host and containers pointed at the same database address the same wallet.
+
+The flag and the variable apply to every command that opens the wallet, `issue --wallet` and `templates` included.

@@ -23,12 +23,20 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
+// loadLocalWallet loads the wallet the decoder is mounted on, the default
+// wallet when the decoder runs on its own.
+func loadLocalWallet(store *wallet.WalletStore) (*wallet.Wallet, error) {
+	if store == nil {
+		store = wallet.NewWalletStore("")
+	}
+	return store.LoadOrCreate()
+}
+
 // localWalletTrustAnchors returns the local wallet's CA certificates as
 // trust list entries. Credentials issued by the local wallet then validate
 // with a full chain, without a network lookup or an explicit trust list.
-func localWalletTrustAnchors() []trustlist.CertInfo {
-	store := wallet.NewWalletStore("")
-	w, err := store.LoadOrCreate()
+func localWalletTrustAnchors(store *wallet.WalletStore) []trustlist.CertInfo {
+	w, err := loadLocalWallet(store)
 	if err != nil || w == nil || len(w.CertChain) == 0 {
 		return nil
 	}
@@ -36,7 +44,7 @@ func localWalletTrustAnchors() []trustlist.CertInfo {
 	return []trustlist.CertInfo{{Raw: ca.Raw, PublicKey: ca.PublicKey}}
 }
 
-func verifyWithLocalWalletIssuerKey(token *sdjwt.Token) (*sdjwt.VerifyResult, string) {
+func verifyWithLocalWalletIssuerKey(token *sdjwt.Token, store *wallet.WalletStore) (*sdjwt.VerifyResult, string) {
 	if token == nil {
 		return nil, ""
 	}
@@ -45,8 +53,7 @@ func verifyWithLocalWalletIssuerKey(token *sdjwt.Token) (*sdjwt.VerifyResult, st
 		return nil, ""
 	}
 
-	store := wallet.NewWalletStore("")
-	w, err := store.LoadOrCreate()
+	w, err := loadLocalWallet(store)
 	if err != nil || w == nil || w.IssuerKey == nil {
 		return nil, ""
 	}

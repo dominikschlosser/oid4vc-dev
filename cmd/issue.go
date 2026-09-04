@@ -111,6 +111,7 @@ func init() {
 	rootCmd.AddCommand(issueCmd)
 	issueCmd.PersistentFlags().StringVar(&walletDir, "wallet-dir", "", "Wallet storage directory for --wallet, also the template location (default ~/.eudi-dev/wallet/, or an existing ~/.oid4vc-dev/wallet/)")
 	issueCmd.PersistentFlags().StringVar(&templatesDir, "templates-dir", "", "Credential template directory (default <wallet-dir>/templates/)")
+	issueCmd.PersistentFlags().StringVar(&storageSpec, "storage", "", storageFlagUsage)
 	issueCmd.PersistentFlags().StringVar(&remoteFlag, "remote", "", "With --wallet: issue on a remote wallet server at this URL (\"local\" forces the local store)")
 	issueCmd.AddCommand(issueSDJWTCmd)
 	issueCmd.AddCommand(issueJWTCmd)
@@ -434,13 +435,16 @@ func loadIssueCertChain(format string) ([]*x509.Certificate, error) {
 }
 
 func loadWalletForIssue(cmd *cobra.Command) (*wallet.Wallet, *wallet.WalletStore, error) {
-	store := wallet.NewWalletStore(walletDir)
+	store, err := openStore()
+	if err != nil {
+		return nil, nil, err
+	}
 	w, err := store.LoadOrCreate()
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading wallet: %w", err)
 	}
 	if templatesDir != "" {
-		w.TemplatesDir = templatesDir
+		w.Templates = credtemplate.FileLocation(templatesDir)
 	}
 
 	// With --cert the key and chain travel in the issue request as a signing
@@ -537,7 +541,11 @@ func resolveIssueTemplate(cmd *cobra.Command, format string) (*credtemplate.Temp
 		return nil, nil
 	}
 
-	tpl, err := credtemplate.Load(name, resolveTemplatesDir())
+	loc, err := resolveTemplates()
+	if err != nil {
+		return nil, err
+	}
+	tpl, err := credtemplate.Load(name, loc)
 	if err != nil {
 		return nil, err
 	}
@@ -620,7 +628,11 @@ func saveIssueTemplate(format string, claims map[string]any, alwaysDisclosed []s
 	} else {
 		tpl.VCT = issueVCT
 	}
-	path, err := credtemplate.Save(resolveTemplatesDir(), tpl)
+	loc, err := resolveTemplates()
+	if err != nil {
+		return err
+	}
+	path, err := credtemplate.Save(loc, tpl)
 	if err != nil {
 		return fmt.Errorf("saving template: %w", err)
 	}

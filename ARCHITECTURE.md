@@ -39,9 +39,10 @@ examples/      Keycloak and web-wallet integration examples
 | `remote` | Remote wallet control (REST client, instance discovery) |
 | `sdjwt` | SD-JWT parsing, disclosure resolution, verification |
 | `statuslist` | Token Status List encoding and decoding, in JWT and CWT form |
+| `storage` | The persistence layer: blobs under keys, on files, in memory or in Postgres (ADR-0016) |
 | `trustlist` | ETSI TS 119 602 trust list parsing |
 | `validate` | Orchestrates verification (signature, expiry, revocation) |
-| `wallet` | Wallet state, HTTP server, OID4VP and OID4VCI protocol logic |
+| `wallet` | Wallet state (persisted through `storage`), HTTP server, OID4VP and OID4VCI protocol logic |
 | `web` | Decoder and validator web UI |
 
 ## Flows
@@ -73,6 +74,7 @@ examples/      Keycloak and web-wallet integration examples
 | [0013](docs/adr/0013-only-the-eudi-stack-is-supported.md) | Only what the EUDI stack references is supported |
 | [0014](docs/adr/0014-pinned-draft-versions-stay-supported-alongside-the-latest.md) | Pinned draft versions stay supported alongside the latest |
 | [0015](docs/adr/0015-the-web-ui-lays-out-at-phone-width.md) | The web UI lays out at phone width |
+| [0016](docs/adr/0016-state-goes-through-one-storage-layer.md) | State goes through one storage layer |
 
 ## Related
 

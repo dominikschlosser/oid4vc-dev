@@ -121,7 +121,7 @@ func TestResolveIssueClaims_PIDWhenFlagged_SDJWT(t *testing.T) {
 	issueClaims = ""
 	issueOmit = nil
 
-	tpl, err := credtemplate.Load("pid-sdjwt", t.TempDir())
+	tpl, err := credtemplate.Load("pid-sdjwt", credtemplate.FileLocation(t.TempDir()))
 	if err != nil {
 		t.Fatalf("loading PID template: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestResolveIssueClaims_PIDWhenFlagged_GermanSDJWT(t *testing.T) {
 	issueClaims = ""
 	issueOmit = nil
 
-	tpl, err := credtemplate.Load("german-pid-sdjwt", t.TempDir())
+	tpl, err := credtemplate.Load("german-pid-sdjwt", credtemplate.FileLocation(t.TempDir()))
 	if err != nil {
 		t.Fatalf("loading German PID template: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestResolveIssueClaims_PIDWhenFlagged_MDOC(t *testing.T) {
 	issueClaims = ""
 	issueOmit = nil
 
-	tpl, err := credtemplate.Load("pid-mdoc", t.TempDir())
+	tpl, err := credtemplate.Load("pid-mdoc", credtemplate.FileLocation(t.TempDir()))
 	if err != nil {
 		t.Fatalf("loading PID template: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestResolveIssueClaims_PIDWhenFlagged_GermanMDOC(t *testing.T) {
 	issueClaims = ""
 	issueOmit = nil
 
-	tpl, err := credtemplate.Load("german-pid-mdoc", t.TempDir())
+	tpl, err := credtemplate.Load("german-pid-mdoc", credtemplate.FileLocation(t.TempDir()))
 	if err != nil {
 		t.Fatalf("loading German PID template: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestResolveIssueClaims_PIDWithOmit(t *testing.T) {
 	issueClaims = ""
 	issueOmit = []string{"place_of_birth", "address"}
 
-	tpl, err := credtemplate.Load("german-pid-sdjwt", t.TempDir())
+	tpl, err := credtemplate.Load("german-pid-sdjwt", credtemplate.FileLocation(t.TempDir()))
 	if err != nil {
 		t.Fatalf("loading PID template: %v", err)
 	}

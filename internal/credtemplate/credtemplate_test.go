@@ -31,7 +31,7 @@ func TestPredefinedTemplates(t *testing.T) {
 		t.Fatalf("expected 4 pre-defined templates, got %d", len(predefined))
 	}
 
-	sdjwt, err := Load("pid-sdjwt", t.TempDir())
+	sdjwt, err := Load("pid-sdjwt", FileLocation(t.TempDir()))
 	if err != nil {
 		t.Fatalf("loading pre-defined template: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestPredefinedTemplates(t *testing.T) {
 
 // The German PID is its own credential type with its own claim set.
 func TestPredefinedGermanPIDTemplates(t *testing.T) {
-	sdjwt, err := Load("german-pid-sdjwt", t.TempDir())
+	sdjwt, err := Load("german-pid-sdjwt", FileLocation(t.TempDir()))
 	if err != nil {
 		t.Fatalf("loading pre-defined template: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestPredefinedGermanPIDTemplates(t *testing.T) {
 		t.Errorf("expected %d claims, got %d", len(mock.SDJWTGermanPIDClaims), len(sdjwt.Claims))
 	}
 
-	mdoc, err := Load("german-pid-mdoc", t.TempDir())
+	mdoc, err := Load("german-pid-mdoc", FileLocation(t.TempDir()))
 	if err != nil {
 		t.Fatalf("loading pre-defined template: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestPIDTemplatesCarryDisplayDescription(t *testing.T) {
 		"german-pid-mdoc":  {"German PID Rulebook 1.0.0", "https://bmi.usercontent.opencode.de/eudi-wallet/eidas-2.0-architekturkonzept/content/features/PID/german-pid-rulebook/"},
 	}
 	for name, wants := range cases {
-		tpl, err := Load(name, t.TempDir())
+		tpl, err := Load(name, FileLocation(t.TempDir()))
 		if err != nil {
 			t.Fatalf("loading %s: %v", name, err)
 		}
@@ -119,7 +119,7 @@ func TestPredefinedTemplates_RecomputeDatedClaims(t *testing.T) {
 	mock.SDJWTPIDClaims["date_of_issuance"] = stale
 	t.Cleanup(func() { mock.SDJWTPIDClaims["date_of_issuance"] = original })
 
-	tpl, err := Load("pid-sdjwt", t.TempDir())
+	tpl, err := Load("pid-sdjwt", FileLocation(t.TempDir()))
 	if err != nil {
 		t.Fatalf("loading pre-defined template: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestPredefinedTemplates_RecomputeDatedClaims(t *testing.T) {
 		t.Errorf("date_of_issuance = %v, want %v", got, want)
 	}
 	// The German PID carries no issuance date, and refreshing must not invent one.
-	german, err := Load("german-pid-sdjwt", t.TempDir())
+	german, err := Load("german-pid-sdjwt", FileLocation(t.TempDir()))
 	if err != nil {
 		t.Fatalf("loading pre-defined template: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestLoadFromFileAndByName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	byName, err := Load("my-cred", dir)
+	byName, err := Load("my-cred", FileLocation(dir))
 	if err != nil {
 		t.Fatalf("loading by name: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestLoadFromFileAndByName(t *testing.T) {
 		t.Errorf("unexpected template: %+v", byName)
 	}
 
-	byPath, err := Load(path, "")
+	byPath, err := Load(path, Location{})
 	if err != nil {
 		t.Fatalf("loading by path: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestLoadFromFileAndByName(t *testing.T) {
 		t.Errorf("expected name from file name, got %q", byPath.Name)
 	}
 
-	if _, err := Load("does-not-exist", dir); err == nil {
+	if _, err := Load("does-not-exist", FileLocation(dir)); err == nil {
 		t.Error("expected error for unknown template")
 	}
 }
@@ -199,7 +199,7 @@ func TestLoadTemplateExtension(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "my-mdoc.template"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tpl, err := Load("my-mdoc", dir)
+	tpl, err := Load("my-mdoc", FileLocation(dir))
 	if err != nil {
 		t.Fatalf("loading .template file: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestLoadRejectsInvalidFormat(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte(`{"format": "nope", "claims": {}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load("bad", dir); err == nil {
+	if _, err := Load("bad", FileLocation(dir)); err == nil {
 		t.Error("expected error for invalid format")
 	}
 }
@@ -225,7 +225,7 @@ func TestListUserOverridesPredefined(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	templates, err := List(dir)
+	templates, err := List(FileLocation(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestListUserOverridesPredefined(t *testing.T) {
 }
 
 func TestListMissingDir(t *testing.T) {
-	templates, err := List(filepath.Join(t.TempDir(), "nope"))
+	templates, err := List(FileLocation(filepath.Join(t.TempDir(), "nope")))
 	if err != nil {
 		t.Fatalf("missing dir must not error: %v", err)
 	}
@@ -263,11 +263,11 @@ func TestSaveAndDelete(t *testing.T) {
 		AlwaysDisclosed: []string{"given_name"},
 		Predefined:      true, // must be cleared on save
 	}
-	path, err := Save(dir, tpl)
+	path, err := Save(FileLocation(dir), tpl)
 	if err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := Load("test-cred", dir)
+	loaded, err := Load("test-cred", FileLocation(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,16 +278,16 @@ func TestSaveAndDelete(t *testing.T) {
 		t.Errorf("round trip mismatch: %+v", loaded)
 	}
 
-	if err := Delete(dir, "test-cred"); err != nil {
+	if err := Delete(FileLocation(dir), "test-cred"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Error("template file still exists after delete")
 	}
-	if err := Delete(dir, "german-pid-sdjwt"); err == nil {
+	if err := Delete(FileLocation(dir), "german-pid-sdjwt"); err == nil {
 		t.Error("deleting a pre-defined template must fail")
 	}
-	if err := Delete(dir, "test-cred"); err == nil {
+	if err := Delete(FileLocation(dir), "test-cred"); err == nil {
 		t.Error("deleting a missing template must fail")
 	}
 }
@@ -295,7 +295,7 @@ func TestSaveAndDelete(t *testing.T) {
 func TestSaveRejectsBadNames(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"", "../escape", "a/b", ".hidden"} {
-		if _, err := Save(dir, Template{Name: name}); err == nil {
+		if _, err := Save(FileLocation(dir), Template{Name: name}); err == nil {
 			t.Errorf("expected error for name %q", name)
 		}
 	}

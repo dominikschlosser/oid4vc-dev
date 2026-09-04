@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dominikschlosser/eudi-dev/internal/credtemplate"
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
@@ -36,7 +37,7 @@ func TestIssueWithSigningOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := New(holderKey, issuerKey, false)
-	w.TemplatesDir = t.TempDir()
+	w.Templates = credtemplate.FileLocation(t.TempDir())
 
 	ca, leaf, leafKey, _ := authorityChain(t)
 	opts := IssueOptions{
