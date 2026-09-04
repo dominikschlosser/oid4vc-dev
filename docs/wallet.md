@@ -247,11 +247,15 @@ Everything the wallet keeps (credentials, keys, the shared CA, display assets, u
 
 | Value | State lives in |
 |-------|----------------|
-| `file` (default) | The wallet directory described above |
-| `memory` | The process. A `wallet serve` on memory starts empty and forgets everything on exit |
+| `file` (default) | The wallet directory described above. One wallet server per directory, the CLI works beside it |
+| `memory` | The process. One wallet server, which starts empty and forgets everything on exit |
 | `auto` | Files when `--wallet-dir` or `EUDI_DEV_HOME` is given or the state directory holds state, memory otherwise. The [Docker image](docker.md#storage) default |
-| `postgres://user:pass@host:5432/db` | One table (`eudi_dev_state`) in that database. Several wallet servers pointed at it serve one wallet state |
+| `postgres://user:pass@host:5432/db` | One table (`eudi_dev_state`) in that database. Several wallet servers pointed at it serve one wallet state, each reloading only the rows the others changed |
 
-Every backend stores the keys, certificates, assets and templates under the same names. The file backend keeps the wallet itself as `wallet.json`, the memory and Postgres backends keep it as one row per credential, log entry and status entry, so several servers can change it at once. The wallet directory identifies the wallet on every backend, so a CLI command finds the server serving `~/.eudi-dev/wallet` whichever backend that server uses. `GET /api/config` reports the backend as `storage`. The default wallet is keyed `wallet` in a database wherever the process runs, so a CLI on the host and containers pointed at the same database address the same wallet.
+Every backend stores the keys, certificates, assets and templates under the same names. The file backend keeps the wallet itself as `wallet.json`. The memory and Postgres backends keep it as one entry per credential, log entry and status entry, so several servers can change it at once. The wallet directory identifies the wallet on every backend, so a CLI command finds the server serving `~/.eudi-dev/wallet` whichever backend that server uses. `GET /api/config` reports the backend as `storage`. The default wallet is keyed `wallet` in a database wherever the process runs, so a CLI on the host and containers pointed at the same database address the same wallet.
 
 The flag and the variable apply to every command that opens the wallet, `issue --wallet` and `templates` included.
+
+## Seeded keys
+
+`--seed <string>` (or `EUDI_DEV_SEED`) derives the keys the wallet generates (holder, issuer, CA, TLS) from that string. A wallet that stores nothing, such as a container on the memory backend, then serves the same keys and CA on every start. Keys that already exist in the store are used as they are, so a seed changes nothing for an existing wallet. `auto` seeds the memory backend with a built-in value and generates random keys on every other backend (the [Docker image](docker.md#stateless-container) default). `GET /api/config` reports `seeded_keys`.

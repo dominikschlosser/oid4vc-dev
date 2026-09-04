@@ -844,7 +844,11 @@ func (d *DemoRP) signTicket(holderKey *ecdsa.PublicKey, granted ticketGrant) (st
 		// The index has to survive this process: every wallet API request
 		// reloads the store, which would otherwise hand the same index to the
 		// next credential and revoking one would revoke both.
-		config.StatusListIdx = d.wallet.NextStatusIndex()
+		idx, err := d.wallet.NextStatusIndex()
+		if err != nil {
+			return "", err
+		}
+		config.StatusListIdx = idx
 		d.saveWallet()
 	}
 	return mock.GenerateSDJWT(config)

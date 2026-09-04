@@ -423,6 +423,7 @@ func (l *localWallet) Config() (map[string]any, error) {
 		"remote_url":                "",
 		"wallet_dir":                store.Dir,
 		"storage":                   store.Backend().Kind(),
+		"seeded_keys":               store.Seeded(),
 		"templates_dir":             w.Templates.String(),
 		"base_url":                  w.BaseURL,
 		"issuer_url":                w.IssuerURL,

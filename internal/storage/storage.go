@@ -47,8 +47,8 @@ type Store interface {
 	Read(key string) ([]byte, error)
 	// Write replaces the blob at key atomically: a concurrent reader sees the
 	// old or the new content, never a mix. perm is the file mode the file
-	// backend applies. The others ignore it.
-	Write(key string, data []byte, perm fs.FileMode) error
+	// backend applies. The others ignore it. It returns the blob's new stamp.
+	Write(key string, data []byte, perm fs.FileMode) (Stamp, error)
 	// Delete removes the blob at key. A missing key is not an error.
 	Delete(key string) error
 	// Stat returns the blob's change stamp, or ok=false when it is missing.
@@ -57,11 +57,15 @@ type Store interface {
 	// missing prefix lists nothing.
 	List(prefix string) ([]string, error)
 	// ReadAll returns every blob under prefix, at any depth, by key.
-	ReadAll(prefix string) (map[string][]byte, error)
+	ReadAll(prefix string) (map[string]Blob, error)
+	// Stamps returns the stamp of every blob under prefix, at any depth, by
+	// key. A reader compares them with what it holds and reads only the
+	// blobs that changed.
+	Stamps(prefix string) (map[string]Stamp, error)
 	// WriteIf replaces the blob at key only while its stamp version is still
 	// expected ("" for a blob that must not exist yet) and returns
-	// ErrConflict otherwise. Several processes can share a counter this way.
-	WriteIf(key string, data []byte, perm fs.FileMode, expected string) error
+	// ErrConflict otherwise. It returns the blob's new stamp.
+	WriteIf(key string, data []byte, perm fs.FileMode, expected string) (Stamp, error)
 	// Locate returns a readable location of key for messages (the file path
 	// on the file backend). The root when key is "".
 	Locate(key string) string
@@ -71,6 +75,12 @@ type Store interface {
 
 // ErrConflict reports that a WriteIf found the blob changed by someone else.
 var ErrConflict = errors.New("storage: blob changed concurrently")
+
+// Blob is a stored blob with its stamp.
+type Blob struct {
+	Data  []byte
+	Stamp Stamp
+}
 
 // Stamp identifies a blob's current content. Two stamps of the same key are
 // equal only while the blob is unchanged. A reader that cached a parse
@@ -157,17 +167,20 @@ type failingStore struct {
 	err error
 }
 
-func (f failingStore) Read(string) ([]byte, error)             { return nil, f.err }
-func (f failingStore) Write(string, []byte, fs.FileMode) error { return f.err }
+func (f failingStore) Read(string) ([]byte, error) { return nil, f.err }
+func (f failingStore) Write(string, []byte, fs.FileMode) (Stamp, error) {
+	return Stamp{}, f.err
+}
 func (f failingStore) Delete(string) error                     { return f.err }
 func (f failingStore) Stat(string) (Stamp, bool)               { return Stamp{}, false }
 func (f failingStore) List(string) ([]string, error)           { return nil, f.err }
-func (f failingStore) ReadAll(string) (map[string][]byte, error) {
-	return nil, f.err
+func (f failingStore) ReadAll(string) (map[string]Blob, error) { return nil, f.err }
+func (f failingStore) Stamps(string) (map[string]Stamp, error) { return nil, f.err }
+func (f failingStore) WriteIf(string, []byte, fs.FileMode, string) (Stamp, error) {
+	return Stamp{}, f.err
 }
-func (f failingStore) WriteIf(string, []byte, fs.FileMode, string) error { return f.err }
-func (f failingStore) Locate(string) string                              { return f.err.Error() }
-func (f failingStore) Kind() string                                      { return "" }
+func (f failingStore) Locate(string) string { return f.err.Error() }
+func (f failingStore) Kind() string         { return "" }
 
 func isPostgresSpec(spec string) bool {
 	return strings.HasPrefix(spec, "postgres://") || strings.HasPrefix(spec, "postgresql://")

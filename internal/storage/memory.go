@@ -58,16 +58,21 @@ func (s *memoryStore) Read(key string) ([]byte, error) {
 	return append([]byte(nil), blob.data...), nil
 }
 
-func (s *memoryStore) Write(key string, data []byte, _ fs.FileMode) error {
+func (s *memoryStore) Write(key string, data []byte, _ fs.FileMode) (Stamp, error) {
 	key, err := cleanKey(key)
 	if err != nil {
-		return err
+		return Stamp{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.put(key, data), nil
+}
+
+// put stores data under key and returns the new stamp. Caller holds mu.
+func (s *memoryStore) put(key string, data []byte) Stamp {
 	s.seq++
 	s.blobs[key] = memoryBlob{data: append([]byte(nil), data...), version: s.seq}
-	return nil
+	return Stamp{Version: strconv.FormatUint(s.seq, 10), Size: int64(len(data))}
 }
 
 func (s *memoryStore) Delete(key string) error {
@@ -117,7 +122,7 @@ func (s *memoryStore) List(prefix string) ([]string, error) {
 	return names, nil
 }
 
-func (s *memoryStore) ReadAll(prefix string) (map[string][]byte, error) {
+func (s *memoryStore) ReadAll(prefix string) (map[string]Blob, error) {
 	prefix, err := cleanPrefix(prefix)
 	if err != nil {
 		return nil, err
@@ -127,29 +132,46 @@ func (s *memoryStore) ReadAll(prefix string) (map[string][]byte, error) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	blobs := make(map[string][]byte)
+	blobs := make(map[string]Blob)
 	for key, blob := range s.blobs {
 		if strings.HasPrefix(key, prefix) {
-			blobs[key] = append([]byte(nil), blob.data...)
+			blobs[key] = Blob{Data: append([]byte(nil), blob.data...), Stamp: Stamp{Version: strconv.FormatUint(blob.version, 10), Size: int64(len(blob.data))}}
 		}
 	}
 	return blobs, nil
 }
 
-func (s *memoryStore) WriteIf(key string, data []byte, _ fs.FileMode, expected string) error {
+func (s *memoryStore) Stamps(prefix string) (map[string]Stamp, error) {
+	prefix, err := cleanPrefix(prefix)
+	if err != nil {
+		return nil, err
+	}
+	if prefix != "" {
+		prefix += "/"
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	stamps := make(map[string]Stamp)
+	for key, blob := range s.blobs {
+		if strings.HasPrefix(key, prefix) {
+			stamps[key] = Stamp{Version: strconv.FormatUint(blob.version, 10), Size: int64(len(blob.data))}
+		}
+	}
+	return stamps, nil
+}
+
+func (s *memoryStore) WriteIf(key string, data []byte, _ fs.FileMode, expected string) (Stamp, error) {
 	key, err := cleanKey(key)
 	if err != nil {
-		return err
+		return Stamp{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	blob, ok := s.blobs[key]
 	if (ok && strconv.FormatUint(blob.version, 10) != expected) || (!ok && expected != "") {
-		return ErrConflict
+		return Stamp{}, ErrConflict
 	}
-	s.seq++
-	s.blobs[key] = memoryBlob{data: append([]byte(nil), data...), version: s.seq}
-	return nil
+	return s.put(key, data), nil
 }
 
 func (s *memoryStore) Locate(key string) string {

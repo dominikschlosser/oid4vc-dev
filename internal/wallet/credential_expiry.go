@@ -69,6 +69,9 @@ func CredentialNeedsRenewal(cred StoredCredential, now time.Time) bool {
 // when it says nothing. Same split as CredentialExpiry: iat in a JWT payload,
 // signed in an mdoc MSO.
 func CredentialIssuedAt(cred StoredCredential) time.Time {
+	if !cred.issuedAt.IsZero() {
+		return cred.issuedAt
+	}
 	switch cred.Format {
 	case "mso_mdoc":
 		doc, err := mdoc.Parse(cred.Raw)

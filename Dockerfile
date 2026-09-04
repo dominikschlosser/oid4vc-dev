@@ -16,6 +16,10 @@ ENV PORT=8085
 # State lives in memory unless a state directory is mounted or named
 # (EUDI_DEV_HOME, --wallet-dir), in which case it is kept in files.
 ENV EUDI_DEV_STORAGE=auto
+# A wallet holding its state in memory derives its keys from the built-in
+# seed, so it serves the same keys and CA on every start. Set your own seed,
+# or an empty value for random keys.
+ENV EUDI_DEV_SEED=auto
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
   CMD wget -q --spider http://localhost:${PORT}/ || exit 1
 ENTRYPOINT ["eudi"]

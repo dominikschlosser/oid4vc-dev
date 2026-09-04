@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/dominikschlosser/eudi-dev/internal/format"
 	"github.com/dominikschlosser/eudi-dev/internal/keys"
@@ -250,6 +251,7 @@ func (w *Wallet) importSDJWT(raw, group, bindingKeyPEM string) (*StoredCredentia
 		BatchGroup:    group,
 		BindingKeyPEM: bindingKeyPEM,
 	}
+	cred.issuedAt = issuedAtFromPayload(token.Payload)
 
 	if vct, ok := token.Payload["vct"].(string); ok {
 		cred.VCT = vct
@@ -274,6 +276,7 @@ func (w *Wallet) importPlainJWT(raw, group, bindingKeyPEM string) (*StoredCreden
 		BatchGroup:    group,
 		BindingKeyPEM: bindingKeyPEM,
 	}
+	cred.issuedAt = issuedAtFromPayload(payload)
 
 	if vct, ok := payload["vct"].(string); ok && vct != "" {
 		cred.VCT = vct
@@ -343,6 +346,7 @@ func (w *Wallet) importMDoc(raw, group, bindingKeyPEM string) (*StoredCredential
 		BatchGroup:    group,
 		BindingKeyPEM: bindingKeyPEM,
 	}
+	cred.issuedAt = mdocSignedAt(doc)
 
 	stored := w.appendCredential(cred)
 	_ = w.RegisterIssuedAttestation(IssuedAttestationSpec{Format: cred.Format, VCT: cred.VCT, DocType: cred.DocType})
@@ -375,6 +379,7 @@ func (c *StoredCredential) Rehydrate() error {
 		if c.Claims == nil {
 			c.Claims = token.ResolvedClaims
 		}
+		c.issuedAt = issuedAtFromPayload(token.Payload)
 
 	case "jwt_vc_json":
 		if c.Claims == nil {
@@ -391,6 +396,7 @@ func (c *StoredCredential) Rehydrate() error {
 			return fmt.Errorf("parsing mDoc: %w", err)
 		}
 		c.NameSpaces = doc.NameSpaces
+		c.issuedAt = mdocSignedAt(doc)
 		if c.Claims == nil {
 			claims := make(map[string]any)
 			for ns, items := range doc.NameSpaces {
@@ -431,4 +437,20 @@ func (w *Wallet) logCredentialImport(imported *StoredCredential, raw, issuer str
 	details := credentialImportLogDetails(imported, raw)
 	details["issuer"] = issuer
 	w.addProtocolLog("issuance", "credential_imported", fmt.Sprintf("Imported credential %s", imported.ID), true, details)
+}
+
+// issuedAtFromPayload reads a JWT payload's iat.
+func issuedAtFromPayload(payload map[string]any) time.Time {
+	if iat, ok := payload["iat"].(float64); ok && iat > 0 {
+		return time.Unix(int64(iat), 0)
+	}
+	return time.Time{}
+}
+
+// mdocSignedAt reads the signing time of an mdoc's MSO.
+func mdocSignedAt(doc *mdoc.Document) time.Time {
+	if doc == nil || doc.IssuerAuth == nil || doc.IssuerAuth.MSO == nil || doc.IssuerAuth.MSO.ValidityInfo == nil || doc.IssuerAuth.MSO.ValidityInfo.Signed == nil {
+		return time.Time{}
+	}
+	return *doc.IssuerAuth.MSO.ValidityInfo.Signed
 }

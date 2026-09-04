@@ -43,11 +43,18 @@ func (w *Wallet) EvaluateDCQL(query map[string]any) []CredentialMatch {
 // credential set the options the wallet can satisfy. The returned matches
 // are the first candidate of each query the first option of each set needs,
 // so approving without edits presents them unchanged.
+// dcqlDetailLimit is the number of held credentials up to which the
+// evaluation logs a line per credential. Above it a presentation logs one
+// summary line per query, so the log grows with the query and not with the
+// wallet.
+const dcqlDetailLimit = 20
+
 func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatch, *ConsentCredentialOptions) {
 	credentials := w.GetCredentials()
 	credQueries, _ := query["credentials"].([]any)
 
 	log.Printf("[DCQL] Evaluating query: %d credential queries against %d stored credentials", len(credQueries), len(credentials))
+	detail := len(credentials) <= dcqlDetailLimit
 
 	if findings := DCQLQueryFindings(query); len(findings) > 0 {
 		for _, finding := range findings {
@@ -69,6 +76,7 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 
 		queryID, _ := cqMap["id"].(string)
 		queryFormat, _ := cqMap["format"].(string)
+		var matched, skipped int
 
 		for _, cred := range credentials {
 			typeLabel := cred.VCT
@@ -77,11 +85,17 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 			}
 
 			if !matchesFormat(cred, queryFormat) {
-				log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: format mismatch (want %s, have %s)", queryID, typeLabel, cred.Format, queryFormat, cred.Format)
+				skipped++
+				if detail {
+					log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: format mismatch (want %s, have %s)", queryID, typeLabel, cred.Format, queryFormat, cred.Format)
+				}
 				continue
 			}
-			if !matchesMeta(cred, cqMap) {
-				log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: meta mismatch", queryID, typeLabel, cred.Format)
+			if !matchesMeta(cred, cqMap, detail) {
+				skipped++
+				if detail {
+					log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: meta mismatch", queryID, typeLabel, cred.Format)
+				}
 				continue
 			}
 
@@ -91,13 +105,19 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 					log.Printf("[DCQL] Warning: query=%s: credential %s (%s) missing required claims %v in debug mode, continuing with selected claims %v",
 						queryID, typeLabel, cred.Format, selection.missingRequired, selection.selectedKeys)
 				} else {
-					log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: required claims not found: %v",
-						queryID, typeLabel, cred.Format, selection.missingRequired)
+					skipped++
+					if detail {
+						log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: required claims not found: %v",
+							queryID, typeLabel, cred.Format, selection.missingRequired)
+					}
 					continue
 				}
 			}
 			if !selection.match {
-				log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: no requested claims matched", queryID, typeLabel, cred.Format)
+				skipped++
+				if detail {
+					log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: no requested claims matched", queryID, typeLabel, cred.Format)
+				}
 				continue
 			}
 
@@ -105,7 +125,10 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 			if taList, ok := cqMap["trusted_authorities"].([]any); ok && len(taList) > 0 {
 				if !checkTrustedAuthorities(cred, taList) {
 					if w.ValidationMode != ValidationModeDebug {
-						log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: not trusted by any trusted_authority", queryID, typeLabel, cred.Format)
+						skipped++
+						if detail {
+							log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: not trusted by any trusted_authority", queryID, typeLabel, cred.Format)
+						}
 						continue
 					}
 					// Debug mode offers the credential anyway, flagged for the
@@ -116,7 +139,10 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 				}
 			}
 
-			log.Printf("[DCQL]   query=%s: credential %s (%s) matched, selected claims: %v", queryID, typeLabel, cred.Format, selection.selectedKeys)
+			matched++
+			if detail {
+				log.Printf("[DCQL]   query=%s: credential %s (%s) matched, selected claims: %v", queryID, typeLabel, cred.Format, selection.selectedKeys)
+			}
 			matches = append(matches, CredentialMatch{
 				QueryID:            queryID,
 				CredentialID:       cred.ID,
@@ -129,6 +155,9 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 				EmptyArrayClaims:   selection.emptyArrays,
 				MissingClaims:      selection.missingRequired,
 			})
+		}
+		if !detail {
+			log.Printf("[DCQL]   query=%s: %d credentials matched, %d skipped", queryID, matched, skipped)
 		}
 	}
 
@@ -153,7 +182,7 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 	// wallet's own choice.
 	candidates := append([]CredentialMatch(nil), matches...)
 
-	matches = keepOnePresentationPerQuery(matches)
+	matches = keepOnePresentationPerQuery(matches, detail)
 
 	// OID4VP 1.0 §6.4.2: "If credential_sets is not provided, the Verifier
 	// requests presentations for all Credentials in credentials to be
@@ -384,9 +413,15 @@ func isDCQLIdentifier(id string) bool {
 // time, newest first, so a renewed credential supersedes the one it replaced.
 // Credentials stating no issuance time sort last, and ties keep their order.
 func sortMatchesNewestFirst(matches []CredentialMatch, credentials []StoredCredential) {
-	issued := make(map[string]time.Time, len(credentials))
+	matched := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		matched[m.CredentialID] = true
+	}
+	issued := make(map[string]time.Time, len(matches))
 	for _, c := range credentials {
-		issued[c.ID] = CredentialIssuedAt(c)
+		if matched[c.ID] {
+			issued[c.ID] = CredentialIssuedAt(c)
+		}
 	}
 	sort.SliceStable(matches, func(i, j int) bool {
 		if matches[i].QueryID != matches[j].QueryID {
@@ -430,20 +465,29 @@ func sortMatchesCompleteFirst(matches []CredentialMatch) {
 // one credential that will be presented. OID4VP 1.0 allows several only when
 // the query sets `multiple`, which this wallet does not implement. It happens
 // here so the consent dialog and the activity log report what is sent.
-func keepOnePresentationPerQuery(matches []CredentialMatch) []CredentialMatch {
+func keepOnePresentationPerQuery(matches []CredentialMatch, detail bool) []CredentialMatch {
 	if len(matches) == 0 {
 		return matches
 	}
 	seen := make(map[string]bool, len(matches))
+	dropped := make(map[string]int)
 	kept := matches[:0]
 	for _, m := range matches {
 		if seen[m.QueryID] {
-			log.Printf("[DCQL]   query=%s: credential %s not presented: the query asks for one credential and a better candidate matched",
-				m.QueryID, m.CredentialID)
+			dropped[m.QueryID]++
+			if detail {
+				log.Printf("[DCQL]   query=%s: credential %s not presented: the query asks for one credential and a better candidate matched",
+					m.QueryID, m.CredentialID)
+			}
 			continue
 		}
 		seen[m.QueryID] = true
 		kept = append(kept, m)
+	}
+	if !detail {
+		for queryID, n := range dropped {
+			log.Printf("[DCQL]   query=%s: %d other candidates not presented: the query asks for one credential", queryID, n)
+		}
 	}
 	return kept
 }
@@ -484,7 +528,7 @@ func matchesFormat(cred StoredCredential, queryFormat string) bool {
 // is the debug-mode reading. A vct_values entry is answered by that type and
 // by types extending it (internal/credtype), while doctype_value takes no such
 // rule, since ISO/IEC 18013-5 has no inheritance.
-func matchesMeta(cred StoredCredential, cqMap map[string]any) bool {
+func matchesMeta(cred StoredCredential, cqMap map[string]any, detail bool) bool {
 	meta, ok := cqMap["meta"].(map[string]any)
 	if !ok {
 		return true
@@ -514,7 +558,7 @@ func matchesMeta(cred StoredCredential, cqMap map[string]any) bool {
 		if found == "" {
 			return false
 		}
-		if found != cred.VCT {
+		if found != cred.VCT && detail {
 			log.Printf("[DCQL]   credential %s: vct %s answers the requested %s (an extending type answers for the type it extends)",
 				cred.ID, cred.VCT, found)
 		}

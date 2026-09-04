@@ -101,8 +101,12 @@ _Avoid_: Demo mode, public mode
 ### State
 
 **Storage backend**:
-Where the wallet state lives: `file` (the default, the wallet directory), `memory` (the process) or `postgres` (a shared database). Chosen by `--storage` or `EUDI_DEV_STORAGE`. Every backend holds the same keys in the same layout.
+Where the wallet state lives: `file` (the default, the wallet directory), `memory` (the process) or `postgres` (a shared database). Chosen by `--storage` or `EUDI_DEV_STORAGE`. Every backend holds the keys, certificates, assets and templates under the same names.
 _Avoid_: Database (for the layer as a whole), persistence provider
+
+**Seed**:
+A string the wallet derives its generated keys from, so a wallet that stores nothing serves the same keys on every start. Unrelated to the baseline credentials the demo profile starts with.
+_Avoid_: Seed (for the demo profile's starting credentials, say baseline)
 
 **Wallet directory**:
 The path that identifies a wallet. On the file backend it is also where the files are. On every backend it is how a CLI finds the server serving that wallet.

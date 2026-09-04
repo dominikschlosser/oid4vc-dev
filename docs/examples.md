@@ -74,7 +74,7 @@ It includes:
 - an ngrok tunnel in front of the local Keycloak, since the public wallet fetches the request object and calls the token endpoint server side (or set `KEYCLOAK_PUBLIC_URL` to your own public URL)
 - the same admin-API step pointing the verifier's `walletScheme` / `trustListUrl` at the public wallet
 
-### Load test target
+### Load Test Target
 
 Folder: [`examples/load-test`](../examples/load-test/README.md)
 

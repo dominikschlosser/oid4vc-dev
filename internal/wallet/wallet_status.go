@@ -15,9 +15,6 @@
 package wallet
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/dominikschlosser/eudi-dev/internal/mdoc"
 	"github.com/dominikschlosser/eudi-dev/internal/statuslist"
 )
@@ -136,27 +133,25 @@ func (w *Wallet) BuildStatusList() (int, []byte) {
 	return bits, bitstring
 }
 
-// nextStatusIndex returns the next status list index and increments the counter.
-func (w *Wallet) nextStatusIndex() int {
+// nextStatusIndex reserves the next status list index: from the store's
+// shared counter on a backend that has one, from the wallet's own counter
+// otherwise.
+func (w *Wallet) nextStatusIndex() (int, error) {
 	w.mu.RLock()
 	allocate := w.allocateStatusIndex
 	w.mu.RUnlock()
 	if allocate != nil {
-		idx, err := allocate(w)
-		if err == nil {
-			return idx
-		}
-		fmt.Fprintf(os.Stderr, "warning: allocating a status list index from the shared counter: %v\n", err)
+		return allocate(w)
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	idx := w.StatusListCounter
 	w.StatusListCounter++
-	return idx
+	return idx, nil
 }
 
 // NextStatusIndex reserves and returns the next wallet-managed status list index.
-func (w *Wallet) NextStatusIndex() int {
+func (w *Wallet) NextStatusIndex() (int, error) {
 	return w.nextStatusIndex()
 }
 

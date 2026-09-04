@@ -579,7 +579,11 @@ func TestSetCredentialStatusRejectsAnOutOfRangeValueClearly(t *testing.T) {
 	// Registered here rather than searched for, so the case under test always
 	// exists: a skipped test proves nothing about the range check.
 	id := creds[0].ID
-	srv.wallet.RegisterStatusEntry(id, srv.wallet.NextStatusIndex())
+	idx, err := srv.wallet.NextStatusIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.wallet.RegisterStatusEntry(id, idx)
 
 	req := httptest.NewRequest("POST", "/api/credentials/"+id+"/status", strings.NewReader(`{"status":256}`))
 	req.Header.Set("Content-Type", "application/json")

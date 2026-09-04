@@ -44,6 +44,9 @@ var templatesDir string
 
 // storageSpec is the --storage flag.
 var storageSpec string
+
+// keySeed is the --seed flag.
+var keySeed string
 var walletValidationMode string
 
 // noOpen suppresses the browser this CLI opens on the user's behalf. The URL
@@ -63,6 +66,7 @@ func init() {
 	walletCmd.PersistentFlags().StringVar(&remoteFlag, "remote", "", "Manage a remote wallet server at this URL for this invocation (\"local\" forces the local store)")
 	walletCmd.PersistentFlags().StringVar(&templatesDir, "templates-dir", "", "Credential template directory (default <wallet-dir>/templates/)")
 	walletCmd.PersistentFlags().StringVar(&storageSpec, "storage", "", storageFlagUsage)
+	walletCmd.PersistentFlags().StringVar(&keySeed, "seed", "", seedFlagUsage)
 	walletCmd.PersistentFlags().StringVar(&walletValidationMode, "mode", string(wallet.ValidationModeDebug), "Wallet validation mode: 'debug' (default) or 'strict'")
 	walletCmd.PersistentFlags().BoolVar(&noOpen, "no-open", false, "Never open a browser, only print the URL")
 	walletCmd.AddCommand(walletServeCmd())
@@ -124,7 +128,7 @@ func init() {
 	rootCmd.AddCommand(walletCmd)
 }
 
-const storageFlagUsage = "Where the wallet state lives: 'file', 'memory', 'auto' (files when a state directory was given or exists, memory otherwise) or a postgres:// URL (default $EUDI_DEV_STORAGE, else file)"
+const storageFlagUsage = "Where the wallet state lives: 'file', 'memory', 'auto' (files when a state directory was given or exists, memory otherwise) or a postgres:// URL (default $EUDI_DEV_STORAGE)"
 
 // resolvedStorageSpec returns the --storage flag, else EUDI_DEV_STORAGE.
 func resolvedStorageSpec() string {
@@ -134,9 +138,18 @@ func resolvedStorageSpec() string {
 	return os.Getenv(storage.EnvVar)
 }
 
+const seedFlagUsage = "Derive the wallet's generated keys from this string, so a wallet that stores nothing gets the same keys on every start. 'auto' seeds the memory backend only (default $EUDI_DEV_SEED)"
+
 // openStore opens the wallet store for --wallet-dir on the --storage backend.
 func openStore() (*wallet.WalletStore, error) {
-	return wallet.OpenWalletStore(walletDir, resolvedStorageSpec())
+	store, err := wallet.OpenWalletStore(walletDir, resolvedStorageSpec())
+	if err != nil {
+		return nil, err
+	}
+	if keySeed != "" {
+		store.SetSeed(keySeed)
+	}
+	return store, nil
 }
 
 // resolvedWalletDir returns the absolute --wallet-dir, which identifies the

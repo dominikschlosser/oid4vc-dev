@@ -112,6 +112,7 @@ func init() {
 	issueCmd.PersistentFlags().StringVar(&walletDir, "wallet-dir", "", "Wallet storage directory for --wallet, also the template location (default ~/.eudi-dev/wallet/, or an existing ~/.oid4vc-dev/wallet/)")
 	issueCmd.PersistentFlags().StringVar(&templatesDir, "templates-dir", "", "Credential template directory (default <wallet-dir>/templates/)")
 	issueCmd.PersistentFlags().StringVar(&storageSpec, "storage", "", storageFlagUsage)
+	issueCmd.PersistentFlags().StringVar(&keySeed, "seed", "", seedFlagUsage)
 	issueCmd.PersistentFlags().StringVar(&remoteFlag, "remote", "", "With --wallet: issue on a remote wallet server at this URL (\"local\" forces the local store)")
 	issueCmd.AddCommand(issueSDJWTCmd)
 	issueCmd.AddCommand(issueJWTCmd)

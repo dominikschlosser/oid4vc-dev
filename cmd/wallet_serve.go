@@ -590,6 +590,12 @@ func runWalletServe(cmd *cobra.Command, opts *walletServeOptions) error {
 	fmt.Printf("  Metadata:    %s/.well-known/jwt-vc-issuer\n", httpsURL)
 	fmt.Printf("  Credentials: %d loaded\n", len(w.GetCredentials()))
 	fmt.Printf("  Storage:     %s\n", store.Location())
+	if source := store.SeedSource(); source != "" {
+		fmt.Printf("  Keys:        derived from the %s\n", source)
+	}
+	if opts.Demo && store.SeedSource() == "built-in seed" {
+		fmt.Fprintln(os.Stderr, "warning: the keys derive from the public built-in seed, anyone can derive this wallet's CA. Set EUDI_DEV_SEED to a secret or persist the state.")
+	}
 	fmt.Printf("  Validation:  %s\n", w.ValidationMode)
 	if opts.Demo {
 		if schedule := demoResetDescription(demoOpts); schedule != "" {

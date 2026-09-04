@@ -15,6 +15,7 @@
 package wallet
 
 import (
+	"crypto/ecdsa"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -148,10 +149,61 @@ func TestServerReloadSeesAnotherOpenersWrite(t *testing.T) {
 }
 
 func TestConfigReportsTheStorageBackend(t *testing.T) {
+	t.Setenv(SeedEnvVar, "")
 	srv := newTestServer(t, false)
 	srv.SetStore(NewWalletStoreOn(t.TempDir(), storage.NewMemory()))
 	config := decodeJSON(t, serverRequest(t, srv, http.MethodGet, "/api/config", ""))
-	if config["storage"] != storage.KindMemory {
-		t.Fatalf("storage = %v", config["storage"])
+	if config["storage"] != storage.KindMemory || config["seeded_keys"] != false {
+		t.Fatalf("storage = %v, seeded_keys = %v", config["storage"], config["seeded_keys"])
+	}
+}
+
+// A seeded store generates the same holder, issuer, CA and TLS keys on every
+// fresh start, so a wallet that keeps no state serves the same identity after
+// a restart. Different seeds, and no seed, differ.
+func TestWalletStore_SeededKeysAreStableAcrossFreshStarts(t *testing.T) {
+	fresh := func(seed string) (*Wallet, *WalletStore) {
+		store := NewWalletStoreOn(filepath.Join(t.TempDir(), "wallet"), storage.NewMemory())
+		store.SetSeed(seed)
+		w, err := store.LoadOrCreate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return w, store
+	}
+	first, firstStore := fresh("bench")
+	again, againStore := fresh("bench")
+	if !first.HolderKey.Equal(again.HolderKey) || !first.IssuerKey.Equal(again.IssuerKey) || !first.CAKey.Equal(again.CAKey) {
+		t.Fatal("the same seed gave different keys on a fresh start")
+	}
+	tls, _ := firstStore.LoadOrCreateIssuerTLSCertificate("localhost")
+	tlsAgain, _ := againStore.LoadOrCreateIssuerTLSCertificate("localhost")
+	if !tls.PrivateKey.(*ecdsa.PrivateKey).Equal(tlsAgain.PrivateKey) {
+		t.Fatal("the same seed gave different TLS keys")
+	}
+	if !firstStore.Seeded() {
+		t.Fatal("a seeded store reports no seed")
+	}
+
+	other, _ := fresh("bench-2")
+	random, randomStore := fresh("")
+	if other.HolderKey.Equal(first.HolderKey) || random.HolderKey.Equal(first.HolderKey) || randomStore.Seeded() {
+		t.Fatal("another seed or no seed repeated the keys")
+	}
+}
+
+// "auto" seeds a wallet whose state lives in memory and leaves every other
+// backend with random keys, so a public seed never becomes a stored CA.
+func TestWalletStore_AutoSeedAppliesToMemoryOnly(t *testing.T) {
+	memory := NewWalletStoreOn(filepath.Join(t.TempDir(), "wallet"), storage.NewMemory())
+	memory.SetSeed("auto")
+	file := NewWalletStoreOn(filepath.Join(t.TempDir(), "wallet"), storage.NewFile(t.TempDir()))
+	file.SetSeed("auto")
+	if !memory.Seeded() || file.Seeded() {
+		t.Fatalf("seeded: memory %t, file %t", memory.Seeded(), file.Seeded())
+	}
+	t.Setenv(SeedEnvVar, "auto")
+	if !NewWalletStoreOn(filepath.Join(t.TempDir(), "wallet"), storage.NewMemory()).Seeded() {
+		t.Fatal("the environment's auto did not seed a memory store")
 	}
 }

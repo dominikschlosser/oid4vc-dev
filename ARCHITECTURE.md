@@ -75,6 +75,7 @@ examples/      Keycloak and web-wallet integration examples
 | [0014](docs/adr/0014-pinned-draft-versions-stay-supported-alongside-the-latest.md) | Pinned draft versions stay supported alongside the latest |
 | [0015](docs/adr/0015-the-web-ui-lays-out-at-phone-width.md) | The web UI lays out at phone width |
 | [0016](docs/adr/0016-state-goes-through-one-storage-layer.md) | State goes through one storage layer |
+| [0017](docs/adr/0017-generated-keys-can-derive-from-a-seed.md) | Generated keys can derive from a seed |
 
 ## Related
 

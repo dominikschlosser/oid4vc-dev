@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hkdf"
 	"crypto/rand"
 	"crypto/sha1" //nolint:gosec // ISO/IEC 18013-5 Annex B mandates SHA-1 for the subject key identifier, a name, not a security primitive
 	"crypto/sha256"
@@ -329,4 +330,32 @@ func PrivateKeyJWK(key *ecdsa.PrivateKey) string {
 		return fmt.Sprintf(`{"error": %q}`, err)
 	}
 	return string(b)
+}
+
+// Seed derives keys from a secret string, so a wallet that stores nothing
+// gets the same keys on every start. An empty Seed generates at random.
+type Seed []byte
+
+// Key derives the P-256 key for a label: HKDF-SHA256 over the seed, reduced
+// into the curve order as FIPS 186-5 A.2.1 describes, so every label yields
+// an independent key.
+func (s Seed) Key(label string) (*ecdsa.PrivateKey, error) {
+	if len(s) == 0 {
+		return GenerateKey()
+	}
+	material, err := hkdf.Key(sha256.New, s, []byte("eudi-dev/key"), label, 48)
+	if err != nil {
+		return nil, fmt.Errorf("deriving the %s key: %w", label, err)
+	}
+	order := elliptic.P256().Params().N
+	scalar := new(big.Int).SetBytes(material)
+	scalar.Mod(scalar, new(big.Int).Sub(order, big.NewInt(1)))
+	scalar.Add(scalar, big.NewInt(1))
+	raw := make([]byte, 32)
+	scalar.FillBytes(raw)
+	key, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), raw)
+	if err != nil {
+		return nil, fmt.Errorf("deriving the %s key: %w", label, err)
+	}
+	return key, nil
 }

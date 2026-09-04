@@ -64,25 +64,35 @@ func openPostgres(dsn string) (Store, error) {
 	return store.(*postgresStore), nil
 }
 
-// prepare creates the table unless it exists. A failure is not remembered,
-// so a database that was still starting is retried on the next call. Two
-// processes creating the table at the same moment race inside Postgres, and
-// the loser's unique violation means the table is there.
+// prepare creates the table and its prefix index unless they exist. A
+// failure is not remembered, so a database that was still starting is
+// retried on the next call. Two processes creating them at the same moment
+// race inside Postgres, and the loser's error (a unique violation or
+// "relation already exists") means they are there.
+//
+// Every listing is a LIKE on a key prefix. The primary key's index serves
+// that only under the C collation, so a second index with text_pattern_ops
+// keeps a listing from scanning the whole table.
 func (s *postgresStore) prepare() error {
 	s.prepareMu.Lock()
 	defer s.prepareMu.Unlock()
 	if s.prepared {
 		return nil
 	}
-	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS ` + postgresTable + ` (
-		key        TEXT PRIMARY KEY,
-		data       BYTEA NOT NULL,
-		version    BIGINT NOT NULL,
-		updated_at TIMESTAMPTZ NOT NULL
-	)`)
-	var pgErr *pgconn.PgError
-	if err != nil && !(errors.As(err, &pgErr) && pgErr.Code == "23505") {
-		return fmt.Errorf("preparing postgres storage at %s: %w", s.label, err)
+	for _, statement := range []string{
+		`CREATE TABLE IF NOT EXISTS ` + postgresTable + ` (
+			key        TEXT PRIMARY KEY,
+			data       BYTEA NOT NULL,
+			version    BIGINT NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS ` + postgresTable + `_prefix ON ` + postgresTable + ` (key text_pattern_ops)`,
+	} {
+		_, err := s.db.Exec(statement)
+		var pgErr *pgconn.PgError
+		if err != nil && !(errors.As(err, &pgErr) && (pgErr.Code == "23505" || pgErr.Code == "42P07")) {
+			return fmt.Errorf("preparing postgres storage at %s: %w", s.label, err)
+		}
 	}
 	s.prepared = true
 	return nil
@@ -118,21 +128,23 @@ func (s *postgresStore) Read(key string) ([]byte, error) {
 	return data, nil
 }
 
-func (s *postgresStore) Write(key string, data []byte, _ fs.FileMode) error {
+func (s *postgresStore) Write(key string, data []byte, _ fs.FileMode) (Stamp, error) {
 	key, err := cleanKey(key)
 	if err != nil {
-		return err
+		return Stamp{}, err
 	}
 	if err := s.prepare(); err != nil {
-		return err
+		return Stamp{}, err
 	}
-	_, err = s.db.Exec(`INSERT INTO `+postgresTable+` (key, data, version, updated_at)
+	var version int64
+	err = s.db.QueryRow(`INSERT INTO `+postgresTable+` (key, data, version, updated_at)
 		VALUES ($1, $2, 1, now())
-		ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data, version = `+postgresTable+`.version + 1, updated_at = now()`, key, data)
+		ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data, version = `+postgresTable+`.version + 1, updated_at = now()
+		RETURNING version`, key, data).Scan(&version)
 	if err != nil {
-		return fmt.Errorf("writing %s: %w", key, err)
+		return Stamp{}, fmt.Errorf("writing %s: %w", key, err)
 	}
-	return nil
+	return Stamp{Version: strconv.FormatInt(version, 10), Size: int64(len(data))}, nil
 }
 
 func (s *postgresStore) Delete(key string) error {
@@ -200,7 +212,7 @@ func (s *postgresStore) List(prefix string) ([]string, error) {
 	return names, nil
 }
 
-func (s *postgresStore) ReadAll(prefix string) (map[string][]byte, error) {
+func (s *postgresStore) ReadAll(prefix string) (map[string]Blob, error) {
 	prefix, err := cleanPrefix(prefix)
 	if err != nil {
 		return nil, err
@@ -211,19 +223,20 @@ func (s *postgresStore) ReadAll(prefix string) (map[string][]byte, error) {
 	if prefix != "" {
 		prefix += "/"
 	}
-	rows, err := s.db.Query(`SELECT key, data FROM `+postgresTable+` WHERE key LIKE $1 ESCAPE '\'`, likePrefix(prefix))
+	rows, err := s.db.Query(`SELECT key, data, version FROM `+postgresTable+` WHERE key LIKE $1 ESCAPE '\'`, likePrefix(prefix))
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", prefix, err)
 	}
 	defer func() { _ = rows.Close() }()
-	blobs := make(map[string][]byte)
+	blobs := make(map[string]Blob)
 	for rows.Next() {
 		var key string
 		var data []byte
-		if err := rows.Scan(&key, &data); err != nil {
+		var version int64
+		if err := rows.Scan(&key, &data, &version); err != nil {
 			return nil, err
 		}
-		blobs[key] = data
+		blobs[key] = Blob{Data: data, Stamp: Stamp{Version: strconv.FormatInt(version, 10), Size: int64(len(data))}}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -231,33 +244,64 @@ func (s *postgresStore) ReadAll(prefix string) (map[string][]byte, error) {
 	return blobs, nil
 }
 
-func (s *postgresStore) WriteIf(key string, data []byte, _ fs.FileMode, expected string) error {
-	key, err := cleanKey(key)
+func (s *postgresStore) Stamps(prefix string) (map[string]Stamp, error) {
+	prefix, err := cleanPrefix(prefix)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := s.prepare(); err != nil {
-		return err
+		return nil, err
 	}
-	var result sql.Result
-	if expected == "" {
-		result, err = s.db.Exec(`INSERT INTO `+postgresTable+` (key, data, version, updated_at)
-			VALUES ($1, $2, 1, now()) ON CONFLICT (key) DO NOTHING`, key, data)
-	} else {
-		version, parseErr := strconv.ParseInt(expected, 10, 64)
-		if parseErr != nil {
-			return ErrConflict
+	if prefix != "" {
+		prefix += "/"
+	}
+	rows, err := s.db.Query(`SELECT key, version, octet_length(data) FROM `+postgresTable+` WHERE key LIKE $1 ESCAPE '\'`, likePrefix(prefix))
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", prefix, err)
+	}
+	defer func() { _ = rows.Close() }()
+	stamps := make(map[string]Stamp)
+	for rows.Next() {
+		var key string
+		var version, size int64
+		if err := rows.Scan(&key, &version, &size); err != nil {
+			return nil, err
 		}
-		result, err = s.db.Exec(`UPDATE `+postgresTable+` SET data = $2, version = version + 1, updated_at = now()
-			WHERE key = $1 AND version = $3`, key, data, version)
+		stamps[key] = Stamp{Version: strconv.FormatInt(version, 10), Size: size}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return stamps, nil
+}
+
+func (s *postgresStore) WriteIf(key string, data []byte, _ fs.FileMode, expected string) (Stamp, error) {
+	key, err := cleanKey(key)
+	if err != nil {
+		return Stamp{}, err
+	}
+	if err := s.prepare(); err != nil {
+		return Stamp{}, err
+	}
+	var version int64
+	if expected == "" {
+		err = s.db.QueryRow(`INSERT INTO `+postgresTable+` (key, data, version, updated_at)
+			VALUES ($1, $2, 1, now()) ON CONFLICT (key) DO NOTHING RETURNING version`, key, data).Scan(&version)
+	} else {
+		previous, parseErr := strconv.ParseInt(expected, 10, 64)
+		if parseErr != nil {
+			return Stamp{}, ErrConflict
+		}
+		err = s.db.QueryRow(`UPDATE `+postgresTable+` SET data = $2, version = version + 1, updated_at = now()
+			WHERE key = $1 AND version = $3 RETURNING version`, key, data, previous).Scan(&version)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return Stamp{}, ErrConflict
 	}
 	if err != nil {
-		return fmt.Errorf("writing %s: %w", key, err)
+		return Stamp{}, fmt.Errorf("writing %s: %w", key, err)
 	}
-	if n, err := result.RowsAffected(); err != nil || n == 0 {
-		return ErrConflict
-	}
-	return nil
+	return Stamp{Version: strconv.FormatInt(version, 10), Size: int64(len(data))}, nil
 }
 
 // likePrefix escapes a key prefix for a LIKE pattern.

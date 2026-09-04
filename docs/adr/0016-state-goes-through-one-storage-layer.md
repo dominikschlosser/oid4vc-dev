@@ -14,10 +14,13 @@ Files the user points at by path (a credential, a template, a key PEM) are read 
 
 ## Consequences
 
-The file backend keeps the wallet as one `wallet.json`. The memory and database backends keep it as one blob per entity (a credential, a log entry, a status entry, a deferred issuance, an issued attestation, the settings) under `state/`. A save writes the entities that changed since the wallet was loaded and deletes the ones that went away, so two servers on one database only clash when they change the same entity. The status list counter moves with a compare-and-swap, so two servers issuing at once never hand out the same index.
+The file backend keeps the wallet as one `wallet.json`. The memory and database backends keep it as one blob per entity (a credential, a log entry, a status entry, a deferred issuance, an issued attestation, the settings) under `state/`, each keyed by the entity's identity. A save writes the entities that changed since the wallet was loaded and deletes the ones that went away, so two servers on one database only clash when they change the same entity. It keeps each credential as last stored and encodes only the ones that differ, so adding a credential costs one row however many the wallet holds. The status list counter moves with a compare-and-swap, so two servers issuing at once never hand out the same index.
+
+The per-request reload (ADR-0005) compares one revision row per section with the ones the server loaded and refreshes only the sections that changed. Within a section it compares the stamps of the rows with the ones it holds and reads only the rows that are new or changed, keeping the parsed form of the rest. A server writes the revision of a section it changed with a compare-and-swap, so it recognises its own change and skips it. The activity log is append-only: a server stores each entry as one row without comparing the rest of the wallet, and the log views load it on demand, so a presentation costs one server one row and the others nothing. The store trims the log to its cap on its own, since a server that only appends never loads it.
+
+The file and memory backends serve one wallet server. The CLI can work beside a file-backed server, which the reload picks up by the file's modification time. Several wallet servers on one wallet need the database backend.
 
 The keys, the CA and every credential are stored in the clear on every backend (ADR-0003). A shared database holding the CA key is a trust anchor.
 
 Postgres is the only external backend. Another engine is another `Store` implementation behind the same keys.
 
-The per-request reload (ADR-0005) compares the change stamp the backend reports.

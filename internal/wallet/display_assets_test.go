@@ -52,9 +52,9 @@ func TestDisplayImagesStoredAsAssetsBesideWallet(t *testing.T) {
 	if err := store.Save(srv.wallet); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	saved := store.storedCredentials()
-	if len(saved) != 1 || saved[0].Display == nil {
-		t.Fatalf("stored credentials = %+v", saved)
+	saved, err := store.storedCredentials()
+	if err != nil || len(saved) != 1 || saved[0].Display == nil {
+		t.Fatalf("stored credentials = %+v, %v", saved, err)
 	}
 	if !strings.HasPrefix(saved[0].Display.LogoURI, "asset:") {
 		t.Errorf("the stored credential references %q, want an asset reference", saved[0].Display.LogoURI)

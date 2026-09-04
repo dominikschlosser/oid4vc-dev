@@ -136,10 +136,11 @@ func (s *Server) handleClearLastError(w http.ResponseWriter, r *http.Request) {
 // Remote controllers use it to learn everything about an instance: identity
 // (pid, port, build), storage locations, URLs, and runtime behavior.
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
-	walletDir, storageKind := "", ""
+	walletDir, storageKind, seeded := "", "", false
 	if store := s.currentStore(); store != nil {
 		walletDir = store.Dir
 		storageKind = store.Backend().Kind()
+		seeded = store.Seeded()
 	}
 	templatesDir := s.wallet.Templates.String()
 	// Snapshot the runtime-mutable conformance fields together under the lock.
@@ -149,6 +150,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		"port":                  s.port,
 		"build_id":              processBuildID(),
 		"storage":               storageKind,
+		"seeded_keys":           seeded,
 		"version":               s.version,
 		"imprint":               len(s.imprintHTML) > 0,
 		"base_url":              s.wallet.BaseURL,

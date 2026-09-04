@@ -156,6 +156,7 @@ eudi wallet serve -d                   # run in the background (stop with `eudi 
 | `--issuer-key`          | —        | Override issuer key (PEM/JWK)                    |
 | `--mode`                | `debug`  | Validation mode: `debug` or `strict`             |
 | `--storage`             | `file`   | Storage backend: `file`, `memory`, `auto` or a `postgres://` URL. `$EUDI_DEV_STORAGE` when set (see [storage backends](../wallet.md#storage-backends)) |
+| `--seed`                | —        | Derive the generated keys from this string. `auto` seeds the memory backend only. `$EUDI_DEV_SEED` when set (see [seeded keys](../wallet.md#seeded-keys)) |
 | `--session-transcript`  | `oid4vp` | mDoc session transcript mode: `oid4vp` or `iso`  |
 | `--register`            | `false`  | Register OS URL scheme handlers                  |
 | `--no-register`         | `false`  | Skip URL scheme registration (overrides --register) |

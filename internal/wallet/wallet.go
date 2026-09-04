@@ -35,6 +35,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 	"github.com/dominikschlosser/eudi-dev/internal/oid4vc"
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
+	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
 // SessionTranscriptMode controls how the mDoc session transcript is constructed.
@@ -117,10 +118,18 @@ type Wallet struct {
 	Log       []LogEntry
 	mu        sync.RWMutex
 	// persisted is what the store last loaded or saved, on a backend that
-	// keeps the wallet as entities. Nil on the file backend.
+	// keeps the wallet as entities, and revisions the section revisions it
+	// was loaded from. Nil on the file backend.
 	persisted stateSnapshot
+	revisions map[string]storage.Stamp
+	// savedCredentials are the credentials as last stored, by id, and
+	// entitySeqs the positions of the ordered rows, by key. A save marshals
+	// a credential only when it differs from its stored form.
+	savedCredentials map[string]StoredCredential
+	entitySeqs       map[string]int
 	// allocateStatusIndex hands out status list indices from the shared
-	// counter of an entity-backed store. Nil counts in memory.
+	// counter of an entity-backed store. Nil means StatusListCounter is used
+	// as it is.
 	allocateStatusIndex func(*Wallet) (int, error)
 	logSink             func(LogEntry)
 	// credentialSink forwards imports to the wallet a clone was made from.
@@ -271,9 +280,12 @@ type StoredCredential struct {
 	// have all been used (EUDI ARF method C, ISSU_52).
 	Uses int `json:"uses,omitempty"`
 	// LastPresentedAt is when this copy was last sent, for display.
-	LastPresentedAt time.Time                          `json:"last_presented_at,omitempty"`
-	Disclosures     []sdjwt.Disclosure                 `json:"-"`
-	NameSpaces      map[string][]mdoc.IssuerSignedItem `json:"-"`
+	LastPresentedAt time.Time          `json:"last_presented_at,omitempty"`
+	Disclosures     []sdjwt.Disclosure `json:"-"`
+	// issuedAt is the credential's issuance time as parsed from Raw, so the
+	// newest-first ordering does not parse the credential again.
+	issuedAt   time.Time
+	NameSpaces map[string][]mdoc.IssuerSignedItem `json:"-"`
 }
 
 // batchSigningKey returns the private key this copy presents with: its own
@@ -698,7 +710,9 @@ func (w *Wallet) generateDefaultCredentials(claimOverrides map[string]any, vct s
 	statusListURL := w.StatusListURL()
 	var sdStatusIdx, mdocStatusIdx int
 	if statusListURL != "" {
-		sdStatusIdx = w.nextStatusIndex()
+		if sdStatusIdx, err = w.nextStatusIndex(); err != nil {
+			return err
+		}
 		sdConfig.StatusListURI = statusListURL
 		sdConfig.StatusListIdx = sdStatusIdx
 	}
@@ -732,7 +746,9 @@ func (w *Wallet) generateDefaultCredentials(claimOverrides map[string]any, vct s
 	}
 
 	if statusListURL != "" {
-		mdocStatusIdx = w.nextStatusIndex()
+		if mdocStatusIdx, err = w.nextStatusIndex(); err != nil {
+			return err
+		}
 		mdocConfig.StatusListURI = statusListURL
 		mdocConfig.StatusListIdx = mdocStatusIdx
 	}

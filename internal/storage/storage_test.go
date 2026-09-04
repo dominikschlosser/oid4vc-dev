@@ -64,7 +64,7 @@ func TestStore_ReadWriteDeleteRoundTrip(t *testing.T) {
 				t.Fatal("Stat reports a missing key")
 			}
 
-			if err := store.Write(key, []byte("one"), 0o600); err != nil {
+			if _, err := store.Write(key, []byte("one"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			data, err := store.Read(key)
@@ -76,7 +76,7 @@ func TestStore_ReadWriteDeleteRoundTrip(t *testing.T) {
 				t.Fatalf("Stat = %+v, %v", first, ok)
 			}
 
-			if err := store.Write(key, []byte("second"), 0o600); err != nil {
+			if _, err := store.Write(key, []byte("second"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			second, _ := store.Stat(key)
@@ -90,7 +90,7 @@ func TestStore_ReadWriteDeleteRoundTrip(t *testing.T) {
 			// backend relies on the modification time, which coarse
 			// filesystems round, so the server bounds that case by time.
 			if kind != KindFile {
-				if err := store.Write(key, []byte("SECOND"), 0o600); err != nil {
+				if _, err := store.Write(key, []byte("SECOND"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 				if third, _ := store.Stat(key); third == second {
@@ -117,7 +117,7 @@ func TestStore_ListNamesDirectChildrenOnly(t *testing.T) {
 			root := scope(t)
 			keys := []string{root + "/assets/b.png", root + "/assets/a.png", root + "/assets/nested/c.png", root + "/wallet.json"}
 			for _, key := range keys {
-				if err := store.Write(key, []byte("x"), 0o600); err != nil {
+				if _, err := store.Write(key, []byte("x"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 				defer store.Delete(key)
@@ -142,7 +142,7 @@ func TestStore_ReadAllReturnsEveryBlobUnderPrefix(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			root := scope(t)
 			for _, key := range []string{root + "/state/log/1", root + "/state/credentials/a", root + "/other"} {
-				if err := store.Write(key, []byte(key), 0o600); err != nil {
+				if _, err := store.Write(key, []byte(key), 0o600); err != nil {
 					t.Fatal(err)
 				}
 				defer store.Delete(key)
@@ -151,38 +151,48 @@ func TestStore_ReadAllReturnsEveryBlobUnderPrefix(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := map[string][]byte{root + "/state/log/1": []byte(root + "/state/log/1"), root + "/state/credentials/a": []byte(root + "/state/credentials/a")}
-			if !reflect.DeepEqual(blobs, want) {
-				t.Fatalf("ReadAll = %v, want %v", blobs, want)
+			if len(blobs) != 2 || string(blobs[root+"/state/log/1"].Data) != root+"/state/log/1" || string(blobs[root+"/state/credentials/a"].Data) != root+"/state/credentials/a" {
+				t.Fatalf("ReadAll = %v", blobs)
+			}
+			if stamp, _ := store.Stat(root + "/state/log/1"); blobs[root+"/state/log/1"].Stamp != stamp {
+				t.Fatalf("ReadAll stamp %+v, Stat %+v", blobs[root+"/state/log/1"].Stamp, stamp)
 			}
 			if blobs, err := store.ReadAll(root + "/missing"); err != nil || len(blobs) != 0 {
 				t.Fatalf("ReadAll of a missing prefix = %v, %v", blobs, err)
+			}
+			stamps, err := store.Stamps(root + "/state")
+			if err != nil || len(stamps) != 2 || stamps[root+"/state/log/1"] != blobs[root+"/state/log/1"].Stamp {
+				t.Fatalf("Stamps = %v, %v (ReadAll stamp %+v)", stamps, err, blobs[root+"/state/log/1"].Stamp)
 			}
 		})
 	}
 }
 
 // WriteIf lets several openers share a counter: a write that lost the race
-// reports the conflict instead of overwriting the winner.
+// reports the conflict and leaves the winner's value in place. The file
+// backend takes no lock and is left out.
 func TestStore_WriteIfRefusesAStaleVersion(t *testing.T) {
 	for kind, store := range backends(t) {
+		if kind == KindFile {
+			continue
+		}
 		t.Run(kind, func(t *testing.T) {
 			key := scope(t) + "/counter"
 			defer store.Delete(key)
-			if err := store.WriteIf(key, []byte("1"), 0o600, "9"); !errors.Is(err, ErrConflict) {
+			if _, err := store.WriteIf(key, []byte("1"), 0o600, "9"); !errors.Is(err, ErrConflict) {
 				t.Fatalf("creating with a version: %v", err)
 			}
-			if err := store.WriteIf(key, []byte("1"), 0o600, ""); err != nil {
+			if _, err := store.WriteIf(key, []byte("1"), 0o600, ""); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.WriteIf(key, []byte("1"), 0o600, ""); !errors.Is(err, ErrConflict) {
+			if _, err := store.WriteIf(key, []byte("1"), 0o600, ""); !errors.Is(err, ErrConflict) {
 				t.Fatalf("creating twice: %v", err)
 			}
 			stamp, _ := store.Stat(key)
-			if err := store.WriteIf(key, []byte("2"), 0o600, stamp.Version); err != nil {
+			if _, err := store.WriteIf(key, []byte("2"), 0o600, stamp.Version); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.WriteIf(key, []byte("3"), 0o600, stamp.Version); !errors.Is(err, ErrConflict) {
+			if _, err := store.WriteIf(key, []byte("3"), 0o600, stamp.Version); !errors.Is(err, ErrConflict) {
 				t.Fatalf("writing with the old version: %v", err)
 			}
 			if data, _ := store.Read(key); string(data) != "2" {
@@ -193,8 +203,8 @@ func TestStore_WriteIfRefusesAStaleVersion(t *testing.T) {
 }
 
 // A counter moved with Stat, Read and WriteIf hands out every value once,
-// however many writers move it at the same time. The file backend has no
-// lock across processes and is not used for a shared counter.
+// however many writers move it at the same time. The file backend takes no
+// lock and is left out.
 func TestStore_WriteIfSerialisesConcurrentIncrements(t *testing.T) {
 	for kind, store := range backends(t) {
 		if kind == KindFile {
@@ -221,7 +231,7 @@ func TestStore_WriteIfSerialisesConcurrentIncrements(t *testing.T) {
 								}
 								next, _ = strconv.Atoi(string(data))
 							}
-							err := store.WriteIf(key, []byte(strconv.Itoa(next+1)), 0o600, expected)
+							_, err := store.WriteIf(key, []byte(strconv.Itoa(next+1)), 0o600, expected)
 							if errors.Is(err, ErrConflict) {
 								continue
 							}
@@ -252,7 +262,7 @@ func TestStore_RejectsEscapingKeys(t *testing.T) {
 	for kind, store := range backends(t) {
 		t.Run(kind, func(t *testing.T) {
 			for _, key := range []string{"", "/abs", "../up", "a/../b", "a/./b", "a//b"} {
-				if err := store.Write(key, []byte("x"), 0o600); err == nil {
+				if _, err := store.Write(key, []byte("x"), 0o600); err == nil {
 					t.Errorf("Write(%q) accepted", key)
 				}
 				if _, err := store.Read(key); err == nil {
@@ -275,7 +285,7 @@ func TestStore_ConcurrentWritersLeaveWholeBlobs(t *testing.T) {
 					defer wg.Done()
 					body := []byte(fmt.Sprintf("{\"writer\":%d,\"pad\":\"%s\"}", i, strings.Repeat("x", 4096)))
 					for j := 0; j < 20; j++ {
-						if err := store.Write(key, body, 0o600); err != nil {
+						if _, err := store.Write(key, body, 0o600); err != nil {
 							t.Error(err)
 							return
 						}
@@ -294,10 +304,10 @@ func TestStore_ConcurrentWritersLeaveWholeBlobs(t *testing.T) {
 func TestFile_LayoutMatchesTheWalletDirectory(t *testing.T) {
 	root := t.TempDir()
 	store := NewFile(root)
-	if err := store.Write("wallet/wallet.json", []byte("{}"), 0o600); err != nil {
+	if _, err := store.Write("wallet/wallet.json", []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Write("wallet/templates/t.json", []byte("{}"), 0o644); err != nil {
+	if _, err := store.Write("wallet/templates/t.json", []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if store.Locate("wallet/wallet.json") != filepath.Join(root, "wallet", "wallet.json") {
@@ -325,7 +335,7 @@ func TestFile_LayoutMatchesTheWalletDirectory(t *testing.T) {
 func TestFile_ListHidesInFlightWrites(t *testing.T) {
 	root := t.TempDir()
 	store := NewFile(root)
-	if err := store.Write("wallet/assets/a.png", []byte("x"), 0o600); err != nil {
+	if _, err := store.Write("wallet/assets/a.png", []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "wallet", "assets", ".tmp-b.png-0a1b"), []byte("x"), 0o600); err != nil {
@@ -342,7 +352,7 @@ func TestMemory_IsSharedPerProcess(t *testing.T) {
 	first, _ := Open(KindMemory, Options{})
 	second, _ := Open(KindMemory, Options{})
 	defer first.Delete(key)
-	if err := first.Write(key, []byte("x"), 0o600); err != nil {
+	if _, err := first.Write(key, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := second.Read(key); err != nil {

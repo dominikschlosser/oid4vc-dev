@@ -409,14 +409,14 @@ func TestWalletStore_LoadOrCreateIssuerTLSCertificate_MigratesLegacyPaths(t *tes
 	dir := t.TempDir()
 	store := NewWalletStore(dir)
 
-	certPEM, keyPEM, err := generateIssuerTLSCertificatePEM("localhost")
+	certPEM, keyPEM, err := generateIssuerTLSCertificatePEMWithCA("localhost", nil, nil)
 	if err != nil {
-		t.Fatalf("generateIssuerTLSCertificatePEM: %v", err)
+		t.Fatalf("generateIssuerTLSCertificatePEMWithCA: %v", err)
 	}
-	if err := store.Backend().Write(store.legacyTLSCertPEM(), certPEM, 0o644); err != nil {
+	if _, err := store.Backend().Write(store.legacyTLSCertPEM(), certPEM, 0o644); err != nil {
 		t.Fatalf("write legacy cert: %v", err)
 	}
-	if err := store.Backend().Write(store.legacyTLSKeyPEM(), keyPEM, 0o600); err != nil {
+	if _, err := store.Backend().Write(store.legacyTLSKeyPEM(), keyPEM, 0o600); err != nil {
 		t.Fatalf("write legacy key: %v", err)
 	}
 
@@ -504,7 +504,7 @@ func TestLoadReadsTheLegacyPendingIssuancesField(t *testing.T) {
 	    {"id": "def-1", "transaction_id": "tx-1", "deferred_endpoint": "https://issuer.example/deferred"}
 	  ]
 	}`
-	if err := store.Backend().Write(store.walletKey(), []byte(legacy), 0o600); err != nil {
+	if _, err := store.Backend().Write(store.walletKey(), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

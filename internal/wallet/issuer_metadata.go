@@ -122,14 +122,22 @@ func generateIssuerTLSCertificate(serverName string, caKey *ecdsa.PrivateKey, ca
 	return cert, nil
 }
 
-func generateIssuerTLSCertificatePEM(serverName string) ([]byte, []byte, error) {
-	return generateIssuerTLSCertificatePEMWithCA(serverName, nil, nil)
-}
-
 func generateIssuerTLSCertificatePEMWithCA(serverName string, caKey *ecdsa.PrivateKey, caCert *x509.Certificate) ([]byte, []byte, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generating TLS key: %w", err)
+	}
+	return issuerTLSCertificatePEM(serverName, key, caKey, caCert)
+}
+
+// issuerTLSCertificatePEM builds the HTTPS certificate for serverName over
+// the given key, signed by the CA when one is given and self-signed
+// otherwise.
+func issuerTLSCertificatePEM(serverName string, key *ecdsa.PrivateKey, caKey *ecdsa.PrivateKey, caCert *x509.Certificate) ([]byte, []byte, error) {
+	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, err := rand.Int(rand.Reader, serialLimit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generating TLS serial: %w", err)
 	}
 	if serverName == "" {
 		serverName = "localhost"
@@ -137,12 +145,6 @@ func generateIssuerTLSCertificatePEMWithCA(serverName string, caKey *ecdsa.Priva
 	dnsNames := []string{"localhost", "host.docker.internal"}
 	if serverName != "localhost" && serverName != "host.docker.internal" {
 		dnsNames = append(dnsNames, serverName)
-	}
-
-	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-	serial, err := rand.Int(rand.Reader, serialLimit)
-	if err != nil {
-		return nil, nil, fmt.Errorf("generating TLS serial: %w", err)
 	}
 
 	tmpl := &x509.Certificate{

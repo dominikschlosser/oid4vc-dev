@@ -61,10 +61,10 @@ func (s *fileStore) Read(key string) ([]byte, error) {
 // world-readable blob, 0700 otherwise. The file is created with perm under
 // the process umask, written beside the target and renamed into place, so a
 // concurrent reader or a crash never sees a partial file.
-func (s *fileStore) Write(key string, data []byte, perm fs.FileMode) error {
+func (s *fileStore) Write(key string, data []byte, perm fs.FileMode) (Stamp, error) {
 	key, err := cleanKey(key)
 	if err != nil {
-		return err
+		return Stamp{}, err
 	}
 	target := s.path(key)
 	dir := filepath.Dir(target)
@@ -73,22 +73,26 @@ func (s *fileStore) Write(key string, data []byte, perm fs.FileMode) error {
 		dirPerm = 0o755
 	}
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return fmt.Errorf("creating %s: %w", dir, err)
+		return Stamp{}, fmt.Errorf("creating %s: %w", dir, err)
 	}
 
 	tmp, err := createTemp(dir, filepath.Base(target), perm)
 	if err != nil {
-		return fmt.Errorf("creating temporary file for %s: %w", target, err)
+		return Stamp{}, fmt.Errorf("creating temporary file for %s: %w", target, err)
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		return fmt.Errorf("writing %s: %w", target, err)
+		return Stamp{}, fmt.Errorf("writing %s: %w", target, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("writing %s: %w", target, err)
+		return Stamp{}, fmt.Errorf("writing %s: %w", target, err)
 	}
-	return os.Rename(tmp.Name(), target)
+	if err := os.Rename(tmp.Name(), target); err != nil {
+		return Stamp{}, err
+	}
+	stamp, _ := s.Stat(key)
+	return stamp, nil
 }
 
 // createTemp opens a new file named tempPrefix + base + a random suffix in
@@ -154,12 +158,12 @@ func (s *fileStore) List(prefix string) ([]string, error) {
 	return names, nil
 }
 
-func (s *fileStore) ReadAll(prefix string) (map[string][]byte, error) {
+func (s *fileStore) ReadAll(prefix string) (map[string]Blob, error) {
 	prefix, err := cleanPrefix(prefix)
 	if err != nil {
 		return nil, err
 	}
-	blobs := make(map[string][]byte)
+	blobs := make(map[string]Blob)
 	root, err := os.OpenRoot(s.root)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -186,7 +190,11 @@ func (s *fileStore) ReadAll(prefix string) (map[string][]byte, error) {
 		if err != nil {
 			return err
 		}
-		blobs[p] = data
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		blobs[p] = Blob{Data: data, Stamp: Stamp{Version: strconv.FormatInt(info.ModTime().UnixNano(), 10), Size: info.Size()}}
 		return nil
 	})
 	if err != nil {
@@ -195,13 +203,53 @@ func (s *fileStore) ReadAll(prefix string) (map[string][]byte, error) {
 	return blobs, nil
 }
 
-// WriteIf compares the stamp and writes without a lock, so it is exact for
-// the writers of one process and best effort across processes. The wallet
-// keeps a single document on this backend and never shares a counter.
-func (s *fileStore) WriteIf(key string, data []byte, perm fs.FileMode, expected string) error {
+func (s *fileStore) Stamps(prefix string) (map[string]Stamp, error) {
+	prefix, err := cleanPrefix(prefix)
+	if err != nil {
+		return nil, err
+	}
+	stamps := make(map[string]Stamp)
+	root, err := os.OpenRoot(s.root)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return stamps, nil
+		}
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	if prefix == "" {
+		prefix = "."
+	}
+	err = fs.WalkDir(root.FS(), prefix, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || strings.HasPrefix(d.Name(), tempPrefix) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		stamps[p] = Stamp{Version: strconv.FormatInt(info.ModTime().UnixNano(), 10), Size: info.Size()}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return stamps, nil
+}
+
+// WriteIf checks the stamp and writes without a lock, so two writers can
+// both pass the check. The wallet keeps one document on this backend and
+// shares no counter through it.
+func (s *fileStore) WriteIf(key string, data []byte, perm fs.FileMode, expected string) (Stamp, error) {
 	current, ok := s.Stat(key)
 	if (ok && current.Version != expected) || (!ok && expected != "") {
-		return ErrConflict
+		return Stamp{}, ErrConflict
 	}
 	return s.Write(key, data, perm)
 }

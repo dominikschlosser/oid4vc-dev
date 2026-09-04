@@ -30,7 +30,7 @@ docker run -d --name eudi-demo -p 8085:8085 -p 8086:8086 \
 
 `--demo` seeds the four-PID baseline, runs HAIP in debug mode at OpenID4VCI feature level 1.1, disables the process and filesystem endpoints, and resets the wallet hourly (`--demo-reset` changes the schedule). The wallet UI is at `http://localhost:8085`, the demo issuer at `/issuer/`, the demo verifier at `/verifier/` and the decoder at `/decoder/`. The HTTPS issuer endpoints answer on port 8086 with a self-signed certificate.
 
-Without a volume the state lives in memory (see [Storage](#storage)). Stopping the container discards the keys, the CA and every credential. The full deployment (TLS termination, rate limiting, usage statistics, persistence) is the compose example in [examples/public-demo](../examples/public-demo/), described in [public demo hosting](public-demo.md).
+Without a volume the state lives in memory (see [Storage](#storage)). Stopping the container discards every credential. The keys and the CA derive from the image's built-in seed and come back the same on the next start (see [Stateless container](#stateless-container)). The full deployment (TLS termination, rate limiting, usage statistics, persistence) is the compose example in [examples/public-demo](../examples/public-demo/), described in [public demo hosting](public-demo.md).
 
 ## Storage
 
@@ -44,6 +44,18 @@ Pass `-e EUDI_DEV_STORAGE=...` (or `--storage` on the command) to choose explici
 | `memory` | The process. Gone when the container stops |
 | `auto` | Files when a state directory is mounted or named, memory otherwise (the image default) |
 | `postgres://user:pass@host:5432/db` | One table (`eudi_dev_state`) in that database, created on first use |
+
+### Stateless container
+
+A container without a volume regenerates its keys on every start. With `EUDI_DEV_SEED` set, the holder key, the issuer key, the CA key and the TLS key derive from that string, so every start (and every container started with the same seed) serves the same keys and the same CA. Verifiers keep trusting the trust list they fetched before a restart, and no volume, backup or database is needed. The certificates themselves are signed anew on each start with fresh serials, so their bytes differ while their keys and subjects stay the same.
+
+The image sets `EUDI_DEV_SEED=auto`: the built-in seed applies when the state lives in memory and random keys are generated whenever a volume or a database holds the state. The built-in seed is public, so anyone can derive those keys, and `wallet serve` says so in its startup summary (see [SECURITY.md](../SECURITY.md)). Set your own value with `-e EUDI_DEV_SEED=<seed>` (or `--seed`) for a test bench, or an empty value for random keys.
+
+```bash
+docker run --read-only -p 8085:8085 -p 8086:8086 -e EUDI_DEV_SEED=my-bench ghcr.io/dominikschlosser/eudi-dev
+```
+
+### Shared database
 
 Several containers pointed at the same database serve one wallet: the same keys, the same CA, the same credentials. [examples/load-test](../examples/load-test/README.md) runs two wallet servers on one database behind an nginx ingress, the target for load and performance tests.
 

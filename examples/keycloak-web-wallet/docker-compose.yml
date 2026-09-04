@@ -46,9 +46,9 @@ services:
       - --base-url
       - http://localhost:${WALLET_PORT:-9085}
     volumes:
-      # Mounted at the home directory (owned by the image's app user) so the
-      # wallet state survives between the CA export and `wallet serve`.
-      - wallet-data:/home/app
+      # The state directory, so the wallet keeps its files and the CA the
+      # export handed to Keycloak is the one `wallet serve` uses.
+      - wallet-data:/home/app/.eudi-dev
 
   # One-off helper for exporting the wallet CA before Keycloak starts
   # (the wallet service itself joins Keycloak's network namespace, so it
@@ -58,7 +58,7 @@ services:
     build: ../..
     network_mode: "none"
     volumes:
-      - wallet-data:/home/app
+      - wallet-data:/home/app/.eudi-dev
 
   app:
     build: ./demo

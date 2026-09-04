@@ -389,7 +389,9 @@ func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 	// counter. The fully automatic case (no status URI and no index) already
 	// drew a unique counter index.
 	if opts.BatchSize >= 2 && registerStatus && (opts.StatusListIdx != nil || opts.StatusListURI != nil) {
-		statusIdx = w.nextStatusIndex()
+		if statusIdx, err = w.nextStatusIndex(); err != nil {
+			return nil, err
+		}
 	}
 
 	raw, err := signCopy(holderPub, statusIdx)
@@ -419,7 +421,9 @@ func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 			}
 			copyIdx := statusIdx
 			if registerStatus {
-				copyIdx = w.nextStatusIndex()
+				if copyIdx, err = w.nextStatusIndex(); err != nil {
+					return nil, err
+				}
 			}
 			copyRaw, err := signCopy(&copyKey.PublicKey, copyIdx)
 			if err != nil {
@@ -569,7 +573,11 @@ func (w *Wallet) resolveIssueStatus(uri *string, idx *int) (string, int, bool, e
 		if statusURI == "" {
 			return "", 0, false, nil
 		}
-		return statusURI, w.NextStatusIndex(), true, nil
+		idx, err := w.NextStatusIndex()
+		if err != nil {
+			return "", 0, false, err
+		}
+		return statusURI, idx, true, nil
 	}
 }
 

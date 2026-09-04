@@ -15,11 +15,15 @@
 package wallet
 
 import (
+	"io/fs"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -179,7 +183,11 @@ func TestEntities_StatusIndicesAreUniqueAcrossOpeners(t *testing.T) {
 		go func(w *Wallet) {
 			defer wg.Done()
 			for i := 0; i < 25; i++ {
-				idx := w.NextStatusIndex()
+				idx, err := w.NextStatusIndex()
+				if err != nil {
+					t.Error(err)
+					return
+				}
 				mu.Lock()
 				if seen[idx] {
 					t.Errorf("index %d handed out twice", idx)
@@ -266,16 +274,22 @@ func TestEntities_ReloadDuringSaveKeepsTheReloadedSnapshot(t *testing.T) {
 	if err := store.Save(w); err != nil {
 		t.Fatal(err)
 	}
-	if got := store.storedCredentialsFromEntities(); len(got) != 1 || got[0].ID != first {
-		t.Fatalf("stored credentials = %+v", got)
+	if got, err := store.storedCredentialsFromEntities(); err != nil || len(got) != 1 || got[0].ID != first {
+		t.Fatalf("stored credentials = %+v, %v", got, err)
 	}
 }
 
-// Two servers on one store issuing at the same time never hand out the same
-// status list index, since the counter moves through the store.
+// The index the shared counter hands out is the one the issued credential's
+// status claim carries, so two servers issuing at the same time produce
+// distinct status claims.
 func TestEntities_ServersIssueWithDistinctStatusIndices(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "wallet")
 	backend := storage.NewMemory()
+	// The store is created once up front, as the first server of a
+	// deployment does before the next one starts.
+	if _, err := NewWalletStoreOn(dir, backend).LoadOrCreate(); err != nil {
+		t.Fatal(err)
+	}
 	servers := []*Server{newTestServer(t, false), newTestServer(t, false)}
 	for _, srv := range servers {
 		srv.SetStore(NewWalletStoreOn(dir, backend))
@@ -312,32 +326,287 @@ func TestEntities_ServersIssueWithDistinctStatusIndices(t *testing.T) {
 	}
 }
 
-// The wallet's change stamp differs after every save, including saves by a
-// second opener, so a server never mistakes a changed store for an unchanged
-// one.
-func TestEntities_StampChangesWithEverySave(t *testing.T) {
+// A server sees which sections another opener changed, and none for its own
+// saves, so a presentation on one server costs the others nothing and an
+// issuance costs them the credential section once.
+func TestEntities_ChangedSectionsNameWhatOthersChanged(t *testing.T) {
 	store, backend := entityStore(t)
 	w, err := store.LoadOrCreate()
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen := make(map[storage.Stamp]bool)
-	for i := 0; i < 3; i++ {
-		if err := store.Save(w); err != nil {
-			t.Fatal(err)
-		}
-		other, err := NewWalletStoreOn(store.Dir, backend).LoadOrCreate()
-		if err != nil {
-			t.Fatal(err)
-		}
-		other.Log = append(other.Log, LogEntry{Time: time.Now(), Action: "other"})
-		if err := NewWalletStoreOn(store.Dir, backend).Save(other); err != nil {
-			t.Fatal(err)
-		}
-		stamp, ok := store.WalletStamp()
-		if !ok || seen[stamp] {
-			t.Fatalf("stamp %+v seen again (ok=%t)", stamp, ok)
-		}
-		seen[stamp] = true
+	if err := store.Save(w); err != nil {
+		t.Fatal(err)
 	}
+	if changed, _ := store.ChangedSections(w, true); len(changed) != 0 {
+		t.Fatalf("own save changed %v", changed)
+	}
+
+	other := NewWalletStoreOn(store.Dir, backend)
+	o, err := other.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Log = append(o.Log, LogEntry{Time: time.Now(), Action: "presentation"})
+	if err := other.Save(o); err != nil {
+		t.Fatal(err)
+	}
+	if changed, _ := store.ChangedSections(w, false); len(changed) != 0 {
+		t.Fatalf("a log entry elsewhere changed %v for a request", changed)
+	}
+	if changed, _ := store.ChangedSections(w, true); !slices.Equal(changed, []string{logSection}) {
+		t.Fatalf("a log entry elsewhere changed %v for the log view", changed)
+	}
+
+	importTestCredential(t, o, "Elsewhere")
+	if err := other.Save(o); err != nil {
+		t.Fatal(err)
+	}
+	changed, _ := store.ChangedSections(w, false)
+	if !slices.Equal(changed, []string{credentialsSection, attestationsSection}) {
+		t.Fatalf("an import elsewhere changed %v", changed)
+	}
+	if err := store.LoadSections(w, changed); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.Credentials) != 1 || len(w.Log) != 0 {
+		t.Fatalf("after loading %v: %d credentials, %d log entries", changed, len(w.Credentials), len(w.Log))
+	}
+	if changed, _ := store.ChangedSections(w, false); len(changed) != 0 {
+		t.Fatalf("still changed after loading: %v", changed)
+	}
+}
+
+// A save never moves the shared status counter back: a server whose wallet
+// still holds an older counter leaves the store's value in place.
+func TestEntities_SaveLeavesTheSharedCounterAlone(t *testing.T) {
+	store, backend := entityStore(t)
+	a, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(a); err != nil {
+		t.Fatal(err)
+	}
+	b, err := NewWalletStoreOn(store.Dir, backend).LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 12; i++ {
+		if _, err := a.NextStatusIndex(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b.StatusListCounter = 10
+	b.Log = append(b.Log, LogEntry{Time: time.Now(), Action: "presentation"})
+	if err := NewWalletStoreOn(store.Dir, backend).Save(b); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := NewWalletStoreOn(store.Dir, backend).LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.StatusListCounter != 12 {
+		t.Fatalf("stored counter = %d, want 12", reloaded.StatusListCounter)
+	}
+}
+
+// A server whose snapshot is behind the store rewrites a credential another
+// server added under the same key, so the store never lists it twice.
+func TestEntities_StaleSnapshotRewritesTheSameRow(t *testing.T) {
+	store, backend := entityStore(t)
+	a, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(a); err != nil {
+		t.Fatal(err)
+	}
+	second := NewWalletStoreOn(store.Dir, backend)
+	b, err := second.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	importTestCredential(t, a, "FromA")
+	if err := store.Save(a); err != nil {
+		t.Fatal(err)
+	}
+	importTestCredential(t, b, "FromB")
+	if err := second.Save(b); err != nil {
+		t.Fatal(err)
+	}
+	// b's state is refreshed from the store while its snapshot stays behind.
+	behind := b.persisted
+	fresh, err := NewWalletStoreOn(store.Dir, backend).LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Credentials = fresh.Credentials
+	b.persisted = behind
+	if err := second.Save(b); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := backend.List(store.stateKey(credentialsSection))
+	if len(rows) != 2 {
+		t.Fatalf("credential rows = %v", rows)
+	}
+}
+
+// countingStore counts the credential rows a store reads.
+type countingStore struct {
+	storage.Store
+	reads atomic.Int64
+}
+
+func (c *countingStore) Read(key string) ([]byte, error) {
+	if strings.Contains(key, "/"+credentialsSection+"/") {
+		c.reads.Add(1)
+	}
+	return c.Store.Read(key)
+}
+
+func (c *countingStore) ReadAll(prefix string) (map[string]storage.Blob, error) {
+	blobs, err := c.Store.ReadAll(prefix)
+	for key := range blobs {
+		if strings.Contains(key, "/"+credentialsSection+"/") {
+			c.reads.Add(1)
+		}
+	}
+	return blobs, err
+}
+
+// A credential another server added is loaded on its own: the rows already
+// held keep their parsed form and are not read again.
+func TestEntities_LoadReadsOnlyTheRowsThatChanged(t *testing.T) {
+	backend := &countingStore{Store: storage.NewMemory()}
+	dir := filepath.Join(t.TempDir(), "wallet")
+	first := NewWalletStoreOn(dir, backend)
+	w, err := first.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		importTestCredential(t, w, "Held")
+	}
+	if err := first.Save(w); err != nil {
+		t.Fatal(err)
+	}
+	second := NewWalletStoreOn(dir, backend)
+	o, err := second.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	added := importTestCredential(t, o, "Added")
+	if err := second.Save(o); err != nil {
+		t.Fatal(err)
+	}
+
+	backend.reads.Store(0)
+	if err := first.LoadSections(w, []string{credentialsSection}); err != nil {
+		t.Fatal(err)
+	}
+	if reads := backend.reads.Load(); reads != 1 {
+		t.Fatalf("loading one added credential read %d rows", reads)
+	}
+	if len(w.Credentials) != 6 || w.Credentials[5].ID != added {
+		t.Fatalf("credentials after the load = %d, last %s", len(w.Credentials), w.Credentials[len(w.Credentials)-1].ID)
+	}
+	for _, cred := range w.Credentials {
+		if cred.Claims == nil {
+			t.Fatalf("credential %s lost its parsed form", cred.ID)
+		}
+	}
+}
+
+// The stored log stays bounded even when the servers only append to it: the
+// store drops the oldest rows beyond the cap and marks the log changed.
+func TestEntities_StoredLogIsTrimmed(t *testing.T) {
+	store, backend := entityStore(t)
+	w, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < maxLogEntries+50; i++ {
+		w.Log = append(w.Log, LogEntry{Time: time.Now().Add(time.Duration(i) * time.Microsecond), Action: "step", Detail: strconv.Itoa(i)})
+	}
+	if err := store.Save(w); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.trimLogRows(); err != nil {
+		t.Fatal(err)
+	}
+	names, _ := backend.List(store.stateKey(logSection))
+	if len(names) != maxLogEntries {
+		t.Fatalf("stored log rows = %d, want %d", len(names), maxLogEntries)
+	}
+	if changed, _ := store.ChangedSections(w, true); !slices.Equal(changed, []string{logSection}) {
+		t.Fatalf("the trim changed %v", changed)
+	}
+	reloaded, _ := NewWalletStoreOn(store.Dir, backend).LoadOrCreate()
+	if len(reloaded.Log) != maxLogEntries || reloaded.Log[len(reloaded.Log)-1].Detail != strconv.Itoa(maxLogEntries+49) {
+		t.Fatalf("reloaded log: %d entries, last %q", len(reloaded.Log), reloaded.Log[len(reloaded.Log)-1].Detail)
+	}
+}
+
+// A log entry a server appends is stored on its own and reaches another
+// server's log view, and the server's next full save has nothing to write
+// for it.
+func TestEntities_AppendedLogEntryIsStoredOnItsOwn(t *testing.T) {
+	store, backend := entityStore(t)
+	w, err := store.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(w); err != nil {
+		t.Fatal(err)
+	}
+	other := NewWalletStoreOn(store.Dir, backend)
+	o, err := other.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w.AddLog("presentation", "sent", true)
+	entry := w.GetLog()[len(w.GetLog())-1]
+	if err := store.AppendLogEntry(w, entry); err != nil {
+		t.Fatal(err)
+	}
+	if changed, _ := store.ChangedSections(w, true); len(changed) != 0 {
+		t.Fatalf("own log entry changed %v", changed)
+	}
+	changed, _ := other.ChangedSections(o, true)
+	if !slices.Equal(changed, []string{logSection}) {
+		t.Fatalf("another server sees %v changed", changed)
+	}
+	if err := other.LoadSections(o, changed); err != nil {
+		t.Fatal(err)
+	}
+	if len(o.Log) != 1 || o.Log[0].Detail != "sent" {
+		t.Fatalf("another server's log = %+v", o.Log)
+	}
+
+	writes := &countingWrites{Store: backend}
+	again := NewWalletStoreOn(store.Dir, writes)
+	w2, err := again.LoadOrCreate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writes.count.Store(0)
+	if err := again.Save(w2); err != nil {
+		t.Fatal(err)
+	}
+	if n := writes.count.Load(); n != 0 {
+		t.Fatalf("a save right after a load wrote %d rows", n)
+	}
+}
+
+// countingWrites counts the rows a store writes.
+type countingWrites struct {
+	storage.Store
+	count atomic.Int64
+}
+
+func (c *countingWrites) Write(key string, data []byte, perm fs.FileMode) (storage.Stamp, error) {
+	c.count.Add(1)
+	return c.Store.Write(key, data, perm)
 }

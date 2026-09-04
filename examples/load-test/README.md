@@ -21,7 +21,7 @@ curl -s localhost:8080/api/config | jq '{storage, credential_count}'
 docker compose logs ingress | grep upstream=
 ```
 
-The ingress log shows the requests landing on `wallet-1` and `wallet-2` in turn. `storage` is `postgres` and `credential_count` is the same on each. `WALLET_TAG=2.4.0 docker compose up -d` pins a release. `docker compose build` builds the working tree instead of the published image. `INGRESS_PORT=18080 docker compose up -d` moves the HTTP host port (the base URL follows it).
+The ingress log shows `upstream=` alternating between the two server addresses. `storage` is `postgres` and `credential_count` is the same on each. `WALLET_TAG=2.4.0 docker compose up -d` pins a release. `docker compose build` builds the working tree instead of the published image. `INGRESS_PORT=18080 docker compose up -d` moves the HTTP host port (the base URL follows it).
 
 ## Drive it
 
@@ -46,7 +46,7 @@ eudi wallet list
 eudi wallet logs
 ```
 
-A browser session stays on one server (the ingress hashes the `eudi_session` cookie), so the wallet UI at `http://localhost:8080` works as usual.
+A browser session stays on one server (the ingress hashes the `eudi_session` cookie), so the wallet UI at `http://localhost:8080` works as usual once it has been opened. A flow that starts with a verifier's or issuer's redirect in a fresh browser lands on either server, so open the UI first.
 
 ## Check correctness under load
 
@@ -56,7 +56,7 @@ A browser session stays on one server (the ingress hashes the `eudi_session` coo
 go run ./examples/load-test/loadtest -url http://localhost:8080
 ```
 
-`-issuers`, `-issues`, `-presenters`, `-presentations` and `-readers` set the load. `-callback-port` moves the callback (default 9090). `-servers` names the servers behind the ingress, which are asked directly when a listing misses a credential.
+`-issuers`, `-issues`, `-presenters`, `-presentations` and `-readers` set the load. `-callback-port` moves the callback (default 9090) and `-callback-host` names this machine as the containers reach it (default `host.docker.internal`). `-url` also takes several comma separated server URLs, used in turn, to run without the ingress. `-servers` names the servers behind the ingress, which are asked directly when a listing misses a credential. A credential that is missing from a listing begun after its issuance was acknowledged counts as a problem even when the next listing has it.
 
 ## Scale
 

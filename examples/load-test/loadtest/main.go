@@ -67,8 +67,6 @@ func main() {
 	if *direct != "" {
 		opts.servers = strings.Split(*direct, ",")
 	}
-	targets = strings.Split(opts.walletURL, ",")
-	opts.walletURL = "{target}"
 
 	if err := run(opts); err != nil {
 		fmt.Fprintln(os.Stderr, "FAIL:", err)
@@ -79,19 +77,14 @@ func main() {
 
 var client = &http.Client{Timeout: 60 * time.Second, Transport: &http.Transport{MaxIdleConnsPerHost: 64}}
 
-// targets are the URLs requests go to in turn. One entry is the ingress.
-var (
-	targets   []string
-	targetSeq atomic.Uint64
-)
+// target is what requests go to: the ingress, or several servers in turn.
+type target struct {
+	urls []string
+	seq  atomic.Uint64
+}
 
-// at returns the URL of the next request, the placeholder replaced by the
-// next target.
-func at(walletURL, path string) string {
-	if walletURL == "{target}" {
-		walletURL = targets[targetSeq.Add(1)%uint64(len(targets))]
-	}
-	return walletURL + path
+func (t *target) url(path string) string {
+	return t.urls[t.seq.Add(1)%uint64(len(t.urls))] + path
 }
 
 // timings collects request durations per operation.
@@ -128,12 +121,17 @@ type issued struct {
 }
 
 func run(opts options) error {
-	baseline, err := config(opts.walletURL)
+	ingress := &target{urls: strings.Split(opts.walletURL, ",")}
+	baseline, err := ingress.config()
 	if err != nil {
 		return err
 	}
-	fmt.Printf("target %s: storage=%v credentials=%v\n", strings.Join(targets, ", "), baseline["storage"], baseline["credential_count"])
-	baseCount := int(baseline["credential_count"].(float64))
+	count, ok := baseline["credential_count"].(float64)
+	if !ok {
+		return errors.New("/api/config reports no credential_count")
+	}
+	baseCount := int(count)
+	fmt.Printf("target %s: storage=%v credentials=%d\n", opts.walletURL, baseline["storage"], baseCount)
 
 	callbacks := &callbackServer{received: make(map[string]string)}
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", opts.callbackPort))
@@ -169,7 +167,7 @@ func run(opts options) error {
 			defer wg.Done()
 			for n := 0; n < opts.issues; n++ {
 				began := time.Now()
-				cred, err := issue(opts.walletURL, fmt.Sprintf("LOAD-%d-%d", worker, n))
+				cred, err := ingress.issue(fmt.Sprintf("LOAD-%d-%d", worker, n))
 				t.add("issue", time.Since(began))
 				if err != nil {
 					fail(err)
@@ -191,7 +189,7 @@ func run(opts options) error {
 				expected[state] = true
 				mu.Unlock()
 				began := time.Now()
-				err := present(opts.walletURL, callbackURL, state)
+				err := ingress.present(callbackURL, state)
 				t.add("present", time.Since(began))
 				if err != nil {
 					fail(err)
@@ -218,7 +216,7 @@ func run(opts options) error {
 				known := append([]issued(nil), issuedCreds...)
 				mu.Unlock()
 				began := time.Now()
-				listed, err := list(opts.walletURL)
+				listed, err := ingress.list()
 				t.add("list", time.Since(began))
 				if err != nil {
 					fail(err)
@@ -230,7 +228,7 @@ func run(opts options) error {
 					}
 					// Read again at once: a gap that closes is a delay, one
 					// that stays is a loss.
-					again, err := list(opts.walletURL)
+					again, err := ingress.list()
 					if err != nil {
 						fail(err)
 						return
@@ -238,7 +236,7 @@ func run(opts options) error {
 					detail := fmt.Sprintf("credential %s acked %s, listing began %s, missing from it (server %s), present on the next read from %s: %t",
 						cred.id, cred.acked.Format("15:04:05.000"), began.Format("15:04:05.000"), listed.upstream, again.upstream, again.ids[cred.id])
 					for _, server := range opts.servers {
-						if l, err := list(server); err == nil {
+						if l, err := (&target{urls: []string{server}}).list(); err == nil {
 							detail += fmt.Sprintf(", %s directly: %t (%d listed)", server, l.ids[cred.id], len(l.ids))
 						}
 					}
@@ -254,6 +252,9 @@ func run(opts options) error {
 	readersWG.Wait()
 	elapsed := time.Since(start)
 	if firstErr != nil {
+		for _, problem := range readerErrors {
+			fmt.Println("  " + problem)
+		}
 		return firstErr
 	}
 
@@ -267,10 +268,9 @@ func run(opts options) error {
 	t.report(elapsed)
 	fmt.Printf("issued %d credentials, %d presentations requested, %d callbacks received in %s\n", len(issuedCreds), len(expected), callbacks.count(), elapsed.Round(time.Millisecond))
 
-	var problems []string
-	problems = append(problems, readerErrors...)
+	problems := append([]string(nil), readerErrors...)
 
-	final, err := list(opts.walletURL)
+	final, err := ingress.list()
 	if err != nil {
 		return err
 	}
@@ -296,29 +296,37 @@ func run(opts options) error {
 			problems = append(problems, fmt.Sprintf("presentation %s carried no SD-JWT presentation", state))
 		}
 	}
-	for i := 0; i < 6; i++ {
-		cfg, err := config(opts.walletURL)
+	// Every server is asked for its count: each one directly when they are
+	// named, otherwise the ingress twice per address it fronts.
+	agreeing := opts.servers
+	if len(agreeing) == 0 {
+		for range 2 * len(ingress.urls) {
+			agreeing = append(agreeing, ingress.urls...)
+		}
+	}
+	for _, server := range agreeing {
+		cfg, err := (&target{urls: []string{server}}).config()
 		if err != nil {
 			return err
 		}
-		if got := int(cfg["credential_count"].(float64)); got != len(listed) {
-			problems = append(problems, fmt.Sprintf("a server reports %d credentials while the listing has %d", got, len(listed)))
+		if got, _ := cfg["credential_count"].(float64); int(got) != len(listed) {
+			problems = append(problems, fmt.Sprintf("%s reports %d credentials while the listing has %d", server, int(got), len(listed)))
 		}
 	}
 
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		for _, p := range problems {
-			fmt.Println("  -", p)
+			fmt.Println("  " + p)
 		}
 		return fmt.Errorf("%d correctness problems", len(problems))
 	}
-	fmt.Printf("checks: %d credentials listed once, %d distinct status indices, %d presentations delivered, %d servers agree\n", len(issuedCreds), len(indices), len(expected), 6)
+	fmt.Printf("checks: %d credentials listed once, %d distinct status indices, %d presentations delivered, %d count reads agree\n", len(issuedCreds), len(indices), len(expected), len(agreeing))
 	return nil
 }
 
-func config(walletURL string) (map[string]any, error) {
-	resp, err := client.Get(at(walletURL, "/api/config"))
+func (t *target) config() (map[string]any, error) {
+	resp, err := client.Get(t.url("/api/config"))
 	if err != nil {
 		return nil, err
 	}
@@ -330,9 +338,9 @@ func config(walletURL string) (map[string]any, error) {
 	return cfg, nil
 }
 
-func issue(walletURL, givenName string) (issued, error) {
+func (t *target) issue(givenName string) (issued, error) {
 	body, _ := json.Marshal(map[string]any{"format": "sdjwt", "template": "pid-sdjwt", "claims": map[string]any{"given_name": givenName}})
-	resp, err := client.Post(at(walletURL, "/api/issue"), "application/json", bytes.NewReader(body))
+	resp, err := client.Post(t.url("/api/issue"), "application/json", bytes.NewReader(body))
 	if err != nil {
 		return issued{}, err
 	}
@@ -344,15 +352,18 @@ func issue(walletURL, givenName string) (issued, error) {
 		} `json:"status"`
 		Error string `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil || resp.StatusCode != http.StatusCreated || doc.ID == "" {
-		return issued{}, fmt.Errorf("issue: status %d, id %q, error %q: %w", resp.StatusCode, doc.ID, doc.Error, err)
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return issued{}, fmt.Errorf("issue: %w", err)
+	}
+	if resp.StatusCode != http.StatusCreated || doc.ID == "" {
+		return issued{}, fmt.Errorf("issue: status %d, id %q, error %q", resp.StatusCode, doc.ID, doc.Error)
 	}
 	return issued{id: doc.ID, idx: doc.Status.Idx, acked: time.Now()}, nil
 }
 
 const dcqlQuery = `{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{"vct_values":["urn:eudi:pid:1"]},"claims":[{"path":["given_name"]}]}]}`
 
-func present(walletURL, callbackURL, state string) error {
+func (t *target) present(callbackURL, state string) error {
 	query := url.Values{
 		"client_id":     {"redirect_uri:" + callbackURL},
 		"response_type": {"vp_token"},
@@ -362,7 +373,7 @@ func present(walletURL, callbackURL, state string) error {
 		"state":         {state},
 		"dcql_query":    {dcqlQuery},
 	}
-	resp, err := client.Get(at(walletURL, "/authorize?"+query.Encode()))
+	resp, err := client.Get(t.url("/authorize?" + query.Encode()))
 	if err != nil {
 		return err
 	}
@@ -382,8 +393,8 @@ type listing struct {
 	upstream string
 }
 
-func list(walletURL string) (listing, error) {
-	resp, err := client.Get(at(walletURL, "/api/credentials"))
+func (t *target) list() (listing, error) {
+	resp, err := client.Get(t.url("/api/credentials"))
 	if err != nil {
 		return listing{}, err
 	}

@@ -21,7 +21,7 @@ import (
 )
 
 // A reader that sees a revision written after a row also sees that row. The
-// wallet's per-request reload relies on it: it stats the revision first and
+// wallet's per-request reload relies on it: it checks the revision first and
 // reads the state after.
 func TestStore_ARowWrittenBeforeARevisionIsVisibleWithIt(t *testing.T) {
 	for kind, store := range backends(t) {
@@ -30,30 +30,28 @@ func TestStore_ARowWrittenBeforeARevisionIsVisibleWithIt(t *testing.T) {
 			revision := root + "/revision"
 			defer store.Delete(revision)
 			defer func() {
-				for n := 0; n < 300; n++ {
-					_ = store.Delete(root + "/rows/" + strconv.Itoa(n))
+				rows, _ := store.ReadAll(root + "/rows")
+				for key := range rows {
+					_ = store.Delete(key)
 				}
 			}()
 			var wg sync.WaitGroup
 			done := make(chan struct{})
-			var written sync.Map
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				defer close(done)
 				for n := 0; n < 300; n++ {
 					key := root + "/rows/" + strconv.Itoa(n)
-					if err := store.Write(key, []byte("x"), 0o600); err != nil {
+					if _, err := store.Write(key, []byte("x"), 0o600); err != nil {
 						t.Error(err)
 						return
 					}
-					if err := store.Write(revision, []byte(strconv.Itoa(n)), 0o600); err != nil {
+					if _, err := store.Write(revision, []byte(strconv.Itoa(n)), 0o600); err != nil {
 						t.Error(err)
 						return
 					}
-					stamp, _ := store.Stat(revision)
-					written.Store(stamp.Version, n)
 				}
-				close(done)
 			}()
 			for i := 0; i < 4; i++ {
 				wg.Add(1)
@@ -65,21 +63,20 @@ func TestStore_ARowWrittenBeforeARevisionIsVisibleWithIt(t *testing.T) {
 							return
 						default:
 						}
-						stamp, ok := store.Stat(revision)
-						if !ok {
+						data, err := store.Read(revision)
+						if err != nil {
 							continue
 						}
+						n, _ := strconv.Atoi(string(data))
 						rows, err := store.ReadAll(root + "/rows")
 						if err != nil {
 							t.Error(err)
 							return
 						}
-						if n, ok := written.Load(stamp.Version); ok {
-							for k := 0; k <= n.(int); k++ {
-								if _, ok := rows[root+"/rows/"+strconv.Itoa(k)]; !ok {
-									t.Errorf("revision of row %d seen, row %d not", n, k)
-									return
-								}
+						for k := 0; k <= n; k++ {
+							if _, ok := rows[root+"/rows/"+strconv.Itoa(k)]; !ok {
+								t.Errorf("revision of row %d seen, row %d not", n, k)
+								return
 							}
 						}
 					}

@@ -55,6 +55,13 @@ type WalletStore struct {
 	prefix       string
 	sharedPrefix string
 
+	// seed derives the keys this store generates. Empty generates at random.
+	seed mock.Seed
+	// seedSource says where the seed came from, for the startup summary: ""
+	// for none, "seed" for a caller's, "built-in seed" for the one "auto"
+	// applies on the memory backend.
+	seedSource string
+
 	// saveMu orders the writers of wallet.json. Save snapshots the wallet and
 	// then writes the blob, and without the mutex a save that snapshotted
 	// earlier can write later, so the blob silently loses whatever only the
@@ -65,6 +72,10 @@ type WalletStore struct {
 
 	// saveDelay widens the snapshot-to-write window in tests. Nil otherwise.
 	saveDelay func()
+
+	// saves counts the entity saves, so the stored log is trimmed every
+	// logTrimEvery of them.
+	saves int
 }
 
 var walletRuntimeRegistry sync.Map
@@ -142,7 +153,43 @@ func NewWalletStoreOn(dir string, backend storage.Store) *WalletStore {
 	if sharedPrefix == "." {
 		sharedPrefix = ""
 	}
-	return &WalletStore{Dir: dir, backend: backend, prefix: prefix, sharedPrefix: sharedPrefix}
+	store := &WalletStore{Dir: dir, backend: backend, prefix: prefix, sharedPrefix: sharedPrefix}
+	store.SetSeed(os.Getenv(SeedEnvVar))
+	return store
+}
+
+// SeedEnvVar is the environment variable with the key seed. "auto" means the
+// built-in seed on the memory backend and random keys elsewhere.
+const SeedEnvVar = "EUDI_DEV_SEED"
+
+// defaultSeed is the seed "auto" uses. It is public, so it only serves a
+// wallet whose state is lost on exit.
+const defaultSeed = "eudi-dev"
+
+// SetSeed derives the keys this store generates from seed (see SeedEnvVar).
+// An empty seed generates at random.
+func (s *WalletStore) SetSeed(seed string) {
+	s.seed, s.seedSource = mock.Seed(seed), "seed"
+	if seed == "auto" {
+		s.seed, s.seedSource = nil, ""
+		if s.backend.Kind() == storage.KindMemory {
+			s.seed, s.seedSource = mock.Seed(defaultSeed), "built-in seed"
+		}
+	}
+	if len(s.seed) == 0 {
+		s.seedSource = ""
+	}
+}
+
+// Seeded reports whether generated keys derive from a seed.
+func (s *WalletStore) Seeded() bool {
+	return len(s.seed) > 0
+}
+
+// SeedSource is "" without a seed, "seed" for a caller's seed and "built-in
+// seed" for the public one "auto" applies on the memory backend.
+func (s *WalletStore) SeedSource() string {
+	return s.seedSource
 }
 
 // walletKeyPrefix is the key prefix of a wallet in a backend without
@@ -179,6 +226,9 @@ func (s *WalletStore) Templates() credtemplate.Location {
 
 // Exists reports whether the wallet has been saved at least once.
 func (s *WalletStore) Exists() bool {
+	if s.entityMode() {
+		return s.hasEntities()
+	}
 	_, ok := s.WalletStamp()
 	return ok
 }
@@ -195,12 +245,10 @@ func (s *WalletStore) key(parts ...string) string {
 
 func (s *WalletStore) walletKey() string { return s.key("wallet.json") }
 
-// WalletStamp returns the wallet's change stamp, or ok=false when the wallet
-// has not been saved.
+// WalletStamp returns wallet.json's change stamp, or ok=false when the wallet
+// has not been saved. The entity backends compare revisions per section
+// instead (see ChangedSections).
 func (s *WalletStore) WalletStamp() (storage.Stamp, bool) {
-	if s.entityMode() {
-		return s.backend.Stat(s.stateKey(revisionEntity))
-	}
 	return s.backend.Stat(s.walletKey())
 }
 
@@ -228,7 +276,7 @@ func (s *WalletStore) storeDisplayAsset(uri string) (ref string, converted bool)
 	if _, exists := s.backend.Stat(key); exists {
 		return "asset:" + name, true
 	}
-	if err := s.backend.Write(key, data, 0o600); err != nil {
+	if _, err := s.backend.Write(key, data, 0o600); err != nil {
 		return uri, false
 	}
 	return "asset:" + name, true
@@ -261,8 +309,12 @@ func (s *WalletStore) PruneUnreferencedAssets() {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
 
+	stored, err := s.storedCredentials()
+	if err != nil {
+		return
+	}
 	referenced := make(map[string]bool)
-	for _, c := range s.storedCredentials() {
+	for _, c := range stored {
 		if c.Display == nil {
 			continue
 		}
@@ -285,16 +337,19 @@ func (s *WalletStore) PruneUnreferencedAssets() {
 	}
 }
 
-// storedCredentials returns the credentials as stored.
-func (s *WalletStore) storedCredentials() []StoredCredential {
+func (s *WalletStore) storedCredentials() ([]StoredCredential, error) {
 	if s.entityMode() {
 		return s.storedCredentialsFromEntities()
 	}
 	var wj walletJSON
-	if data, err := s.backend.Read(s.walletKey()); err == nil {
-		_ = json.Unmarshal(data, &wj)
+	data, err := s.backend.Read(s.walletKey())
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
 	}
-	return wj.Credentials
+	if err != nil {
+		return nil, err
+	}
+	return wj.Credentials, json.Unmarshal(data, &wj)
 }
 
 // assetExtension maps an image content type to a file extension.
@@ -374,7 +429,8 @@ func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
 		if err := s.loadEntities(w); err != nil {
 			return nil, err
 		}
-		return w, s.rehydrate(w)
+		rehydrate(w)
+		return w, nil
 	}
 
 	data, err := s.backend.Read(s.walletKey())
@@ -401,17 +457,17 @@ func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
 	w.StatusListCounter = wj.StatusListCounter
 	w.BaseURL = wj.BaseURL
 	w.IssuerURL = wj.IssuerURL
-	return w, s.rehydrate(w)
+	rehydrate(w)
+	return w, nil
 }
 
 // rehydrate restores the credential fields that are not stored from Raw.
-func (s *WalletStore) rehydrate(w *Wallet) error {
+func rehydrate(w *Wallet) {
 	for i := range w.Credentials {
 		if err := w.Credentials[i].Rehydrate(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: rehydrating credential %s: %v\n", w.Credentials[i].ID, err)
 		}
 	}
-	return nil
 }
 
 // Save persists the wallet state.
@@ -450,7 +506,7 @@ func (s *WalletStore) Save(w *Wallet) error {
 	if s.saveDelay != nil {
 		s.saveDelay()
 	}
-	if err := s.backend.Write(s.walletKey(), data, 0o600); err != nil {
+	if _, err := s.backend.Write(s.walletKey(), data, 0o600); err != nil {
 		return fmt.Errorf("writing wallet.json: %w", err)
 	}
 	return nil
@@ -519,7 +575,8 @@ func (s *WalletStore) loadLogCleanMarker() time.Time {
 }
 
 func (s *WalletStore) writeLogCleanMarker(cleanedAt time.Time) error {
-	return s.backend.Write(s.logCleanMarkerKey(), []byte(cleanedAt.Format(time.RFC3339Nano)), 0o600)
+	_, err := s.backend.Write(s.logCleanMarkerKey(), []byte(cleanedAt.Format(time.RFC3339Nano)), 0o600)
+	return err
 }
 
 // LoadOrCreateKeys loads the holder and issuer keys, generating them if they don't exist.
@@ -557,7 +614,7 @@ func (s *WalletStore) LoadOrCreateSharedCA() (*ecdsa.PrivateKey, *x509.Certifica
 		return nil, nil, fmt.Errorf("reading wallet CA certificate: %w", certErr)
 	}
 
-	caKey, err := mock.GenerateKey()
+	caKey, err := s.seed.Key("ca")
 	if err != nil {
 		return nil, nil, fmt.Errorf("generating wallet CA key: %w", err)
 	}
@@ -671,7 +728,11 @@ func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []
 		return nil, nil, fmt.Errorf("reading wallet TLS key: %w", keyErr)
 	}
 
-	certPEM, keyPEM, err = generateIssuerTLSCertificatePEMWithCA(serverName, caKey, caCert)
+	tlsKey, err := s.seed.Key("tls")
+	if err != nil {
+		return nil, nil, fmt.Errorf("generating TLS key: %w", err)
+	}
+	certPEM, keyPEM, err = issuerTLSCertificatePEM(serverName, tlsKey, caKey, caCert)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -683,10 +744,10 @@ func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []
 }
 
 func (s *WalletStore) saveIssuerTLSPEM(certPEM, keyPEM []byte) error {
-	if err := s.backend.Write(s.tlsKeyPEM(), keyPEM, 0o600); err != nil {
+	if _, err := s.backend.Write(s.tlsKeyPEM(), keyPEM, 0o600); err != nil {
 		return fmt.Errorf("saving wallet TLS key: %w", err)
 	}
-	if err := s.backend.Write(s.tlsCertPEM(), certPEM, 0o644); err != nil {
+	if _, err := s.backend.Write(s.tlsCertPEM(), certPEM, 0o644); err != nil {
 		return fmt.Errorf("saving wallet TLS certificate: %w", err)
 	}
 	return nil
@@ -733,7 +794,7 @@ func (s *WalletStore) loadOrGenerateKey(at, label string) (*ecdsa.PrivateKey, er
 		return nil, fmt.Errorf("reading %s key: %w", label, err)
 	}
 
-	key, err := mock.GenerateKey()
+	key, err := s.seed.Key(label)
 	if err != nil {
 		return nil, fmt.Errorf("generating %s key: %w", label, err)
 	}
@@ -794,11 +855,13 @@ func (s *WalletStore) saveKeyPEM(at string, key *ecdsa.PrivateKey) error {
 		Bytes: der,
 	}
 
-	return s.backend.Write(at, pem.EncodeToMemory(block), 0o600)
+	_, err = s.backend.Write(at, pem.EncodeToMemory(block), 0o600)
+	return err
 }
 
 func (s *WalletStore) saveCertPEM(at string, cert *x509.Certificate) error {
-	return s.backend.Write(at, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0o644)
+	_, err := s.backend.Write(at, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0o644)
+	return err
 }
 
 func firstCertificatePEM(data []byte) ([]byte, error) {

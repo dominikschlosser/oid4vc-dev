@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/dominikschlosser/eudi-dev/internal/storage"
+	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
 // --storage wins over EUDI_DEV_STORAGE, and an unknown value is refused
@@ -58,5 +59,28 @@ func TestResolvedWalletDir_IsBackendIndependent(t *testing.T) {
 	}
 	if store.Dir != resolvedWalletDir() {
 		t.Fatalf("store dir %s, the CLI routes by %s", store.Dir, resolvedWalletDir())
+	}
+}
+
+// --seed wins over EUDI_DEV_SEED, and "auto" seeds the memory backend only.
+func TestOpenStore_SeedFlagBeatsEnvironment(t *testing.T) {
+	walletDir = t.TempDir()
+	t.Cleanup(func() { walletDir, storageSpec, keySeed = "", "", "" })
+	t.Setenv(wallet.SeedEnvVar, "auto")
+
+	storageSpec = storage.KindMemory
+	store, err := openStore()
+	if err != nil || !store.Seeded() {
+		t.Fatalf("auto on memory: seeded %t, %v", store.Seeded(), err)
+	}
+	storageSpec = storage.KindFile
+	store, err = openStore()
+	if err != nil || store.Seeded() {
+		t.Fatalf("auto on file: seeded %t, %v", store.Seeded(), err)
+	}
+	keySeed = "bench"
+	store, err = openStore()
+	if err != nil || !store.Seeded() {
+		t.Fatalf("--seed on file: seeded %t, %v", store.Seeded(), err)
 	}
 }

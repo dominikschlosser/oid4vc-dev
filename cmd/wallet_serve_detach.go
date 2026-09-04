@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
 // spawnDetachedServe re-executes `wallet serve` without --detached as a
@@ -57,6 +59,12 @@ func spawnDetachedServe(cmd *cobra.Command, port int, register, noRegister bool)
 		flags = append(flags, "--storage", store.Backend().Kind())
 	}
 	args := append([]string{"wallet", "serve"}, flags...)
+	// The seed is a secret, so it reaches the child through the environment
+	// and never through its command line.
+	env := os.Environ()
+	if keySeed != "" {
+		env = append(env, wallet.SeedEnvVar+"="+keySeed)
+	}
 
 	if err := os.MkdirAll(store.Dir, 0o700); err != nil {
 		return fmt.Errorf("creating wallet dir: %w", err)
@@ -69,6 +77,7 @@ func spawnDetachedServe(cmd *cobra.Command, port int, register, noRegister bool)
 	defer logFile.Close()
 
 	child := exec.Command(exe, args...)
+	child.Env = env
 	child.Stdout = logFile
 	child.Stderr = logFile
 	detachProcess(child)

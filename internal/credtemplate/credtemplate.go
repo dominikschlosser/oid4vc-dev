@@ -318,7 +318,7 @@ func Save(loc Location, t Template) (string, error) {
 		return "", fmt.Errorf("encoding template: %w", err)
 	}
 	key := loc.key(name + ".json")
-	if err := loc.Store.Write(key, append(data, '\n'), 0o644); err != nil {
+	if _, err := loc.Store.Write(key, append(data, '\n'), 0o644); err != nil {
 		return "", fmt.Errorf("writing template: %w", err)
 	}
 	return loc.Store.Locate(key), nil

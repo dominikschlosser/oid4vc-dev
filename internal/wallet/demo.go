@@ -246,6 +246,10 @@ func (s *Server) demoReset() error {
 	s.storeSyncMu.Lock()
 	defer s.storeSyncMu.Unlock()
 
+	// The reset clears the whole log, so an entity backend loads it first.
+	if err := s.reloadLocked(true); err != nil {
+		return err
+	}
 	s.wallet.ResetToBaseline()
 	// Re-issue the signing leaf from the same CA: leaves are valid for a year,
 	// and the CA stays pinnable.

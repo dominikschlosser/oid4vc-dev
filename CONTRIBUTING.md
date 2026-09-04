@@ -52,6 +52,8 @@ npx playwright install --with-deps chromium
 npx playwright test
 ```
 
+[examples/load-test](examples/load-test/README.md) checks correctness under load against two wallet servers on one database.
+
 The Docker specs (`docker.spec.js`) need a running Docker daemon. Skip them with `--grep-invert docker`. The wallet the suite starts follows `EUDI_DEV_STORAGE` too, and CI runs the suite once per backend.
 
 ## Code Style
