@@ -154,6 +154,58 @@ func (s *fileStore) List(prefix string) ([]string, error) {
 	return names, nil
 }
 
+func (s *fileStore) ReadAll(prefix string) (map[string][]byte, error) {
+	prefix, err := cleanPrefix(prefix)
+	if err != nil {
+		return nil, err
+	}
+	blobs := make(map[string][]byte)
+	root, err := os.OpenRoot(s.root)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return blobs, nil
+		}
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	rootFS := root.FS()
+	if prefix == "" {
+		prefix = "."
+	}
+	err = fs.WalkDir(rootFS, prefix, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || strings.HasPrefix(d.Name(), tempPrefix) {
+			return nil
+		}
+		data, err := fs.ReadFile(rootFS, p)
+		if err != nil {
+			return err
+		}
+		blobs[p] = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return blobs, nil
+}
+
+// WriteIf compares the stamp and writes without a lock, so it is exact for
+// the writers of one process and best effort across processes. The wallet
+// keeps a single document on this backend and never shares a counter.
+func (s *fileStore) WriteIf(key string, data []byte, perm fs.FileMode, expected string) error {
+	current, ok := s.Stat(key)
+	if (ok && current.Version != expected) || (!ok && expected != "") {
+		return ErrConflict
+	}
+	return s.Write(key, data, perm)
+}
+
 func (s *fileStore) Locate(key string) string {
 	if key == "" {
 		return s.root

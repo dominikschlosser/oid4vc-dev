@@ -56,12 +56,21 @@ type Store interface {
 	// List returns the names of the blobs directly under prefix, sorted. A
 	// missing prefix lists nothing.
 	List(prefix string) ([]string, error)
+	// ReadAll returns every blob under prefix, at any depth, by key.
+	ReadAll(prefix string) (map[string][]byte, error)
+	// WriteIf replaces the blob at key only while its stamp version is still
+	// expected ("" for a blob that must not exist yet) and returns
+	// ErrConflict otherwise. Several processes can share a counter this way.
+	WriteIf(key string, data []byte, perm fs.FileMode, expected string) error
 	// Locate returns a readable location of key for messages (the file path
 	// on the file backend). The root when key is "".
 	Locate(key string) string
 	// Kind is the backend name.
 	Kind() string
 }
+
+// ErrConflict reports that a WriteIf found the blob changed by someone else.
+var ErrConflict = errors.New("storage: blob changed concurrently")
 
 // Stamp identifies a blob's current content. Two stamps of the same key are
 // equal only while the blob is unchanged. A reader that cached a parse
@@ -153,8 +162,12 @@ func (f failingStore) Write(string, []byte, fs.FileMode) error { return f.err }
 func (f failingStore) Delete(string) error                     { return f.err }
 func (f failingStore) Stat(string) (Stamp, bool)               { return Stamp{}, false }
 func (f failingStore) List(string) ([]string, error)           { return nil, f.err }
-func (f failingStore) Locate(string) string                    { return f.err.Error() }
-func (f failingStore) Kind() string                            { return "" }
+func (f failingStore) ReadAll(string) (map[string][]byte, error) {
+	return nil, f.err
+}
+func (f failingStore) WriteIf(string, []byte, fs.FileMode, string) error { return f.err }
+func (f failingStore) Locate(string) string                              { return f.err.Error() }
+func (f failingStore) Kind() string                                      { return "" }
 
 func isPostgresSpec(spec string) bool {
 	return strings.HasPrefix(spec, "postgres://") || strings.HasPrefix(spec, "postgresql://")

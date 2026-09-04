@@ -176,8 +176,7 @@ func (s *postgresStore) List(prefix string) ([]string, error) {
 	if prefix != "" {
 		prefix += "/"
 	}
-	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(prefix)
-	rows, err := s.db.Query(`SELECT key FROM `+postgresTable+` WHERE key LIKE $1 ESCAPE '\'`, escaped+"%")
+	rows, err := s.db.Query(`SELECT key FROM `+postgresTable+` WHERE key LIKE $1 ESCAPE '\'`, likePrefix(prefix))
 	if err != nil {
 		return nil, fmt.Errorf("listing %s: %w", prefix, err)
 	}
@@ -199,6 +198,71 @@ func (s *postgresStore) List(prefix string) ([]string, error) {
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+func (s *postgresStore) ReadAll(prefix string) (map[string][]byte, error) {
+	prefix, err := cleanPrefix(prefix)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.prepare(); err != nil {
+		return nil, err
+	}
+	if prefix != "" {
+		prefix += "/"
+	}
+	rows, err := s.db.Query(`SELECT key, data FROM `+postgresTable+` WHERE key LIKE $1 ESCAPE '\'`, likePrefix(prefix))
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", prefix, err)
+	}
+	defer func() { _ = rows.Close() }()
+	blobs := make(map[string][]byte)
+	for rows.Next() {
+		var key string
+		var data []byte
+		if err := rows.Scan(&key, &data); err != nil {
+			return nil, err
+		}
+		blobs[key] = data
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return blobs, nil
+}
+
+func (s *postgresStore) WriteIf(key string, data []byte, _ fs.FileMode, expected string) error {
+	key, err := cleanKey(key)
+	if err != nil {
+		return err
+	}
+	if err := s.prepare(); err != nil {
+		return err
+	}
+	var result sql.Result
+	if expected == "" {
+		result, err = s.db.Exec(`INSERT INTO `+postgresTable+` (key, data, version, updated_at)
+			VALUES ($1, $2, 1, now()) ON CONFLICT (key) DO NOTHING`, key, data)
+	} else {
+		version, parseErr := strconv.ParseInt(expected, 10, 64)
+		if parseErr != nil {
+			return ErrConflict
+		}
+		result, err = s.db.Exec(`UPDATE `+postgresTable+` SET data = $2, version = version + 1, updated_at = now()
+			WHERE key = $1 AND version = $3`, key, data, version)
+	}
+	if err != nil {
+		return fmt.Errorf("writing %s: %w", key, err)
+	}
+	if n, err := result.RowsAffected(); err != nil || n == 0 {
+		return ErrConflict
+	}
+	return nil
+}
+
+// likePrefix escapes a key prefix for a LIKE pattern.
+func likePrefix(prefix string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(prefix) + "%"
 }
 
 func (s *postgresStore) Locate(key string) string {

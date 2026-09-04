@@ -137,6 +137,61 @@ func TestStore_ListNamesDirectChildrenOnly(t *testing.T) {
 	}
 }
 
+func TestStore_ReadAllReturnsEveryBlobUnderPrefix(t *testing.T) {
+	for kind, store := range backends(t) {
+		t.Run(kind, func(t *testing.T) {
+			root := scope(t)
+			for _, key := range []string{root + "/state/log/1", root + "/state/credentials/a", root + "/other"} {
+				if err := store.Write(key, []byte(key), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				defer store.Delete(key)
+			}
+			blobs, err := store.ReadAll(root + "/state")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := map[string][]byte{root + "/state/log/1": []byte(root + "/state/log/1"), root + "/state/credentials/a": []byte(root + "/state/credentials/a")}
+			if !reflect.DeepEqual(blobs, want) {
+				t.Fatalf("ReadAll = %v, want %v", blobs, want)
+			}
+			if blobs, err := store.ReadAll(root + "/missing"); err != nil || len(blobs) != 0 {
+				t.Fatalf("ReadAll of a missing prefix = %v, %v", blobs, err)
+			}
+		})
+	}
+}
+
+// WriteIf lets several openers share a counter: a write that lost the race
+// reports the conflict instead of overwriting the winner.
+func TestStore_WriteIfRefusesAStaleVersion(t *testing.T) {
+	for kind, store := range backends(t) {
+		t.Run(kind, func(t *testing.T) {
+			key := scope(t) + "/counter"
+			defer store.Delete(key)
+			if err := store.WriteIf(key, []byte("1"), 0o600, "9"); !errors.Is(err, ErrConflict) {
+				t.Fatalf("creating with a version: %v", err)
+			}
+			if err := store.WriteIf(key, []byte("1"), 0o600, ""); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.WriteIf(key, []byte("1"), 0o600, ""); !errors.Is(err, ErrConflict) {
+				t.Fatalf("creating twice: %v", err)
+			}
+			stamp, _ := store.Stat(key)
+			if err := store.WriteIf(key, []byte("2"), 0o600, stamp.Version); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.WriteIf(key, []byte("3"), 0o600, stamp.Version); !errors.Is(err, ErrConflict) {
+				t.Fatalf("writing with the old version: %v", err)
+			}
+			if data, _ := store.Read(key); string(data) != "2" {
+				t.Fatalf("counter = %s", data)
+			}
+		})
+	}
+}
+
 func TestStore_RejectsEscapingKeys(t *testing.T) {
 	for kind, store := range backends(t) {
 		t.Run(kind, func(t *testing.T) {

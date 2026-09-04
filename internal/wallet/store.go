@@ -38,9 +38,10 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
-// WalletStore persists the wallet through the storage layer: wallet.json,
-// the key and certificate PEMs, assets/ and templates/ under the wallet's
-// prefix, and the shared CA one level up.
+// WalletStore persists the wallet through the storage layer: wallet.json
+// (one entity per blob under state/ on the memory and database backends, see
+// store_entities.go), the key and certificate PEMs, assets/ and templates/
+// under the wallet's prefix, and the shared CA one level up.
 type WalletStore struct {
 	// Dir is the wallet's directory. On the file backend it is where the
 	// files are. On every backend it identifies the wallet: the instance
@@ -178,7 +179,7 @@ func (s *WalletStore) Templates() credtemplate.Location {
 
 // Exists reports whether the wallet has been saved at least once.
 func (s *WalletStore) Exists() bool {
-	_, ok := s.backend.Stat(s.walletKey())
+	_, ok := s.WalletStamp()
 	return ok
 }
 
@@ -194,9 +195,12 @@ func (s *WalletStore) key(parts ...string) string {
 
 func (s *WalletStore) walletKey() string { return s.key("wallet.json") }
 
-// WalletStamp returns wallet.json's change stamp, or ok=false when the wallet
+// WalletStamp returns the wallet's change stamp, or ok=false when the wallet
 // has not been saved.
 func (s *WalletStore) WalletStamp() (storage.Stamp, bool) {
+	if s.entityMode() {
+		return s.backend.Stat(s.stateKey(revisionEntity))
+	}
 	return s.backend.Stat(s.walletKey())
 }
 
@@ -258,18 +262,13 @@ func (s *WalletStore) PruneUnreferencedAssets() {
 	defer s.saveMu.Unlock()
 
 	referenced := make(map[string]bool)
-	if data, err := s.backend.Read(s.walletKey()); err == nil {
-		var wj walletJSON
-		if json.Unmarshal(data, &wj) == nil {
-			for _, c := range wj.Credentials {
-				if c.Display == nil {
-					continue
-				}
-				for _, uri := range []string{c.Display.LogoURI, c.Display.BackgroundURI} {
-					if name, ok := strings.CutPrefix(uri, "asset:"); ok {
-						referenced[name] = true
-					}
-				}
+	for _, c := range s.storedCredentials() {
+		if c.Display == nil {
+			continue
+		}
+		for _, uri := range []string{c.Display.LogoURI, c.Display.BackgroundURI} {
+			if name, ok := strings.CutPrefix(uri, "asset:"); ok {
+				referenced[name] = true
 			}
 		}
 	}
@@ -284,6 +283,18 @@ func (s *WalletStore) PruneUnreferencedAssets() {
 		}
 		_ = s.backend.Delete(s.assetKey(name))
 	}
+}
+
+// storedCredentials returns the credentials as stored.
+func (s *WalletStore) storedCredentials() []StoredCredential {
+	if s.entityMode() {
+		return s.storedCredentialsFromEntities()
+	}
+	var wj walletJSON
+	if data, err := s.backend.Read(s.walletKey()); err == nil {
+		_ = json.Unmarshal(data, &wj)
+	}
+	return wj.Credentials
 }
 
 // assetExtension maps an image content type to a file extension.
@@ -359,6 +370,13 @@ func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
 		return nil, fmt.Errorf("configuring shared wallet CA: %w", err)
 	}
 
+	if s.entityMode() {
+		if err := s.loadEntities(w); err != nil {
+			return nil, err
+		}
+		return w, s.rehydrate(w)
+	}
+
 	data, err := s.backend.Read(s.walletKey())
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -383,15 +401,17 @@ func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
 	w.StatusListCounter = wj.StatusListCounter
 	w.BaseURL = wj.BaseURL
 	w.IssuerURL = wj.IssuerURL
+	return w, s.rehydrate(w)
+}
 
-	// Re-hydrate non-serializable fields from Raw
+// rehydrate restores the credential fields that are not stored from Raw.
+func (s *WalletStore) rehydrate(w *Wallet) error {
 	for i := range w.Credentials {
 		if err := w.Credentials[i].Rehydrate(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: rehydrating credential %s: %v\n", w.Credentials[i].ID, err)
 		}
 	}
-
-	return w, nil
+	return nil
 }
 
 // Save persists the wallet state.
@@ -415,6 +435,9 @@ func (s *WalletStore) Save(w *Wallet) error {
 			d.BackgroundURI = background
 			creds[i].Display = &d
 		}
+	}
+	if s.entityMode() {
+		return s.saveEntities(w, creds)
 	}
 	w.mu.RLock()
 	issuedAttestations := dedupeIssuedAttestations(w.IssuedAttestations)

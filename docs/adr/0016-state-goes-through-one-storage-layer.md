@@ -14,7 +14,7 @@ Files the user points at by path (a credential, a template, a key PEM) are read 
 
 ## Consequences
 
-The blob is the unit of storage, so a save writes the whole wallet document. Two servers on a shared database that save at the same moment keep the later document. A load test that presents credentials writes activity log entries and tolerates that. A workload that needs concurrent writers to merge needs a finer schema behind the same interface.
+The file backend keeps the wallet as one `wallet.json`. The memory and database backends keep it as one blob per entity (a credential, a log entry, a status entry, a deferred issuance, an issued attestation, the settings) under `state/`. A save writes the entities that changed since the wallet was loaded and deletes the ones that went away, so two servers on one database only clash when they change the same entity. The status list counter moves with a compare-and-swap, so two servers issuing at once never hand out the same index.
 
 The keys, the CA and every credential are stored in the clear on every backend (ADR-0003). A shared database holding the CA key is a trust anchor.
 

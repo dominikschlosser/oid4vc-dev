@@ -377,6 +377,12 @@ func (s *Server) applyPersistedWalletState(reloaded *Wallet) {
 	s.wallet.StatusEntries = cloneStatusEntries(reloaded.StatusEntries)
 	s.wallet.StatusListCounter = reloaded.StatusListCounter
 	s.wallet.Log = append([]LogEntry(nil), reloaded.Log...)
+	// The snapshot moves with the state it describes. The deferred section
+	// stays with the in-memory deferred issuances kept above.
+	if reloaded.persisted != nil && s.store != nil {
+		s.wallet.persisted = reloaded.persisted.withSectionFrom(s.store.sectionPrefix(deferredSection), s.wallet.persisted)
+	}
+	s.wallet.allocateStatusIndex = reloaded.allocateStatusIndex
 }
 
 // Shutdown gracefully shuts down the server.

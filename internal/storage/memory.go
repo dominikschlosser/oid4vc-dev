@@ -117,6 +117,41 @@ func (s *memoryStore) List(prefix string) ([]string, error) {
 	return names, nil
 }
 
+func (s *memoryStore) ReadAll(prefix string) (map[string][]byte, error) {
+	prefix, err := cleanPrefix(prefix)
+	if err != nil {
+		return nil, err
+	}
+	if prefix != "" {
+		prefix += "/"
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	blobs := make(map[string][]byte)
+	for key, blob := range s.blobs {
+		if strings.HasPrefix(key, prefix) {
+			blobs[key] = append([]byte(nil), blob.data...)
+		}
+	}
+	return blobs, nil
+}
+
+func (s *memoryStore) WriteIf(key string, data []byte, _ fs.FileMode, expected string) error {
+	key, err := cleanKey(key)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	blob, ok := s.blobs[key]
+	if (ok && strconv.FormatUint(blob.version, 10) != expected) || (!ok && expected != "") {
+		return ErrConflict
+	}
+	s.seq++
+	s.blobs[key] = memoryBlob{data: append([]byte(nil), data...), version: s.seq}
+	return nil
+}
+
 func (s *memoryStore) Locate(key string) string {
 	if key == "" {
 		return KindMemory

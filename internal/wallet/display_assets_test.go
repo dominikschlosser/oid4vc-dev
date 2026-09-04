@@ -52,15 +52,12 @@ func TestDisplayImagesStoredAsAssetsBesideWallet(t *testing.T) {
 	if err := store.Save(srv.wallet); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	walletJSON, err := store.Backend().Read(store.walletKey())
-	if err != nil {
-		t.Fatalf("reading wallet.json: %v", err)
+	saved := store.storedCredentials()
+	if len(saved) != 1 || saved[0].Display == nil {
+		t.Fatalf("stored credentials = %+v", saved)
 	}
-	if strings.Contains(string(walletJSON), "data:image/") {
-		t.Error("wallet.json still embeds the display image after save")
-	}
-	if !strings.Contains(string(walletJSON), "asset:") {
-		t.Error("wallet.json does not reference the image as an asset")
+	if !strings.HasPrefix(saved[0].Display.LogoURI, "asset:") {
+		t.Errorf("the stored credential references %q, want an asset reference", saved[0].Display.LogoURI)
 	}
 	if entries, _ := store.Backend().List(store.key("assets")); len(entries) == 0 {
 		t.Error("no asset file was written beside wallet.json")

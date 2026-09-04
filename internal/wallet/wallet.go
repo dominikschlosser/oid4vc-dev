@@ -116,7 +116,13 @@ type Wallet struct {
 	Templates credtemplate.Location `json:"-"`
 	Log       []LogEntry
 	mu        sync.RWMutex
-	logSink   func(LogEntry)
+	// persisted is what the store last loaded or saved, on a backend that
+	// keeps the wallet as entities. Nil on the file backend.
+	persisted stateSnapshot
+	// allocateStatusIndex hands out status list indices from the shared
+	// counter of an entity-backed store. Nil counts in memory.
+	allocateStatusIndex func(*Wallet) (int, error)
+	logSink             func(LogEntry)
 	// credentialSink forwards imports to the wallet a clone was made from.
 	credentialSink func(StoredCredential)
 	// batchPresentedSink forwards a batch copy's use to the wallet a clone was

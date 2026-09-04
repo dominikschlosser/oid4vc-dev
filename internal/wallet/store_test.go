@@ -497,7 +497,7 @@ func TestWalletStore_LoadOrCreate_UsesSharedCA(t *testing.T) {
 // They are read on load, so collections already in flight survive an upgrade.
 func TestLoadReadsTheLegacyPendingIssuancesField(t *testing.T) {
 	dir := t.TempDir()
-	store := NewWalletStore(dir)
+	store := NewWalletStoreOn(dir, storage.NewFile(filepath.Dir(dir)))
 	legacy := `{
 	  "credentials": [],
 	  "pending_issuances": [
