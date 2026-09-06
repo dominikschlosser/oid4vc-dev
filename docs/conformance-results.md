@@ -12,6 +12,10 @@ The 4 `WARNING` are one condition, four times: `CheckForUnexpectedParametersInSe
 
 Suite defect in `release-v5.2.4`: under the pre-authorized code grant the client attestation negative modules keep running after their expected token refusal and interrupt themselves ("This is a bug in the test module"). Those six modules are excluded there and covered by the authorization code scenarios.
 
+## Run of 2026-09-06 (2.4.0 storage backends)
+
+The 2.4.0 storage layer keeps the wallet on files, in memory or in Postgres. The ten certifiable HAIP plans (4 VP HAIP, and per format the VCI HAIP plan issuer-initiated `by_value`, issuer-initiated `by_reference` and wallet-initiated) ran once per backend against a local suite `release-v5.2.4` (revision `ab35a8d`), wallet strict throughout. The three runs are identical: 228 modules each, 26962 condition successes, 4 condition failures, 0 wallet condition failures. The 4 failures are the multisigned suite NullPointerException described below, two per `dc_api.jwt` plan. The wallets under test ran as containers of the 2.4.0 image with `EUDI_DEV_STORAGE` set per backend and random keys, driven by the wrapper through `OIDF_WALLET_URL`. Run directories `/tmp/oidf-file-2.4.0`, `/tmp/oidf-memory-2.4.0` and `/tmp/oidf-postgres-2.4.0`.
+
 ## Runs of 2026-09-02 and 2026-09-04 (production certification and expanded matrix)
 
 Both runs use suite `release-v5.2.4` (revision `ab35a8d`): the production certification run of 2026-09-04 on release 2.3.7, and the expanded local matrix of 2026-09-02 for release 2.3.0 (ISO 18013-5 certificate profile, RFC 3986 request URI parsing, `response_uri` derived from a `redirect_uri` client id per OID4VP 1.0 §5.9.3).
