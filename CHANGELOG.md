@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.4.0] - Unreleased
+## [2.4.0] - 2026-09-06
 
 ### Added
 
@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **The Docker image keeps its state in memory and derives its keys from the public seed `eudi-dev`.** It needs no volume and runs on a read-only filesystem. A deployment that mounts a volume sets `EUDI_DEV_STORAGE=file` and `EUDI_DEV_SEED=`, as the public-demo and Keycloak examples do.
-- Above 20 held credentials the server log summarises each DCQL query in one line.
+- The `[DCQL]` server log names every matched credential and, for a query nothing answers, lists the skipped credentials grouped by reason in one line.
 
 ## [2.3.7] - 2026-09-04
 

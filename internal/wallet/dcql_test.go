@@ -1311,28 +1311,28 @@ func TestEvaluateDCQL_NewestWinsEvenWhenStoredFirst(t *testing.T) {
 	}
 }
 
-// Up to dcqlDetailLimit held credentials the evaluation logs a line per
-// credential. Above it a presentation logs one summary line per query.
-func TestEvaluateDCQL_SummarisesAboveTheDetailLimit(t *testing.T) {
+// The log names every matched credential. A query nothing answers logs the
+// skipped credentials grouped by reason.
+func TestEvaluateDCQL_LogsMatchesAndGroupedSkipReasons(t *testing.T) {
 	w := generateTestWallet(t)
-	for i := 0; i < dcqlDetailLimit; i++ {
+	for i := 0; i < 3; i++ {
 		addSDJWTPID(t, w, fmt.Sprintf("pid-%d", i), int64(1000+i))
 	}
 	logs := captureTestLogs(t)
 	w.EvaluateDCQL(pidQuery())
-	if !strings.Contains(logs.String(), "matched, selected claims") {
-		t.Fatalf("at the limit no line per credential was logged:\n%s", logs)
+	out := logs.String()
+	if strings.Count(out, "matched, selected claims") != 3 || !strings.Contains(out, "query=pid: 2 other candidates not presented") {
+		t.Fatalf("a matching query logged:\n%s", out)
 	}
 
-	addSDJWTPID(t, w, "pid-one-more", 5000)
 	logs.Reset()
-	w.EvaluateDCQL(pidQuery())
-	out := logs.String()
-	if strings.Contains(out, "matched, selected claims") || strings.Contains(out, "not presented: the query asks for one credential and a better candidate") {
-		t.Fatalf("above the limit a line per credential was logged:\n%s", out)
-	}
-	if !strings.Contains(out, fmt.Sprintf("%d credentials matched", dcqlDetailLimit+1)) || !strings.Contains(out, fmt.Sprintf("%d other candidates not presented", dcqlDetailLimit)) {
-		t.Fatalf("above the limit the summary is missing:\n%s", out)
+	w.EvaluateDCQL(map[string]any{"credentials": []any{map[string]any{
+		"id": "mdl", "format": "mso_mdoc",
+		"meta":   map[string]any{"doctype_value": "org.iso.18013.5.1.mDL"},
+		"claims": []any{map[string]any{"path": []any{"org.iso.18013.5.1", "family_name"}}},
+	}}})
+	if !strings.Contains(logs.String(), "query=mdl: no match among 3 credentials: 3 format dc+sd-jwt (want mso_mdoc)") {
+		t.Fatalf("a query nothing answers logged:\n%s", logs.String())
 	}
 }
 

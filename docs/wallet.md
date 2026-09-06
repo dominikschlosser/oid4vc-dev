@@ -99,7 +99,7 @@ The macOS URL handler sends links to the active remote wallet. While a remote ta
 
 A domestic PID extends the country-independent one. ARF Annex 2 (v3.0.0) PID_14 requires the vct to be "`urn:eudi:pid:1` for the type defined in this document or a domestic type that extends it", so `urn:eudi:pid:de:1` carries every attribute `urn:eudi:pid:1` defines plus the German ones.
 
-The wallet matches a DCQL `vct_values` entry against the credential's own type and every type it extends. A request for `urn:eudi:pid:1` is answered by any PID, a request for `urn:eudi:pid:de:1` by a German PID. The `[DCQL]` server log records the requested type whenever a credential matched under a type other than its own (up to 20 held credentials, above that it logs one summary line per query).
+The wallet matches a DCQL `vct_values` entry against the credential's own type and every type it extends. A request for `urn:eudi:pid:1` is answered by any PID, a request for `urn:eudi:pid:de:1` by a German PID. The `[DCQL]` server log records the requested type whenever a credential matched under a type other than its own.
 
 The relationship comes from two places:
 

@@ -18,6 +18,8 @@ import (
 	"crypto/x509"
 	"fmt"
 	"log"
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,11 +32,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/trustlist"
 	"github.com/dominikschlosser/eudi-dev/internal/validate"
 )
-
-// dcqlDetailLimit is the number of held credentials up to which the
-// evaluation logs a line per credential. Above it a presentation logs one
-// summary line per query.
-const dcqlDetailLimit = 20
 
 // EvaluateDCQL matches stored credentials against a DCQL query (OID4VP 1.0 Section 6).
 // It returns matched credentials grouped by query credential ID.
@@ -53,12 +50,6 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 	credQueries, _ := query["credentials"].([]any)
 
 	log.Printf("[DCQL] Evaluating query: %d credential queries against %d stored credentials", len(credQueries), len(credentials))
-	detail := len(credentials) <= dcqlDetailLimit
-	detailf := func(format string, args ...any) {
-		if detail {
-			log.Printf(format, args...)
-		}
-	}
 
 	if findings := DCQLQueryFindings(query); len(findings) > 0 {
 		for _, finding := range findings {
@@ -80,7 +71,10 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 
 		queryID, _ := cqMap["id"].(string)
 		queryFormat, _ := cqMap["format"].(string)
-		var matched, skipped int
+		// The log names every matched credential. The skipped ones are only
+		// interesting when nothing matched, and then by reason.
+		matched := 0
+		skipped := make(map[string]int)
 
 		for _, cred := range credentials {
 			typeLabel := cred.VCT
@@ -89,13 +83,11 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 			}
 
 			if !matchesFormat(cred, queryFormat) {
-				skipped++
-				detailf("[DCQL]   query=%s: credential %s (%s) skipped: format mismatch (want %s, have %s)", queryID, typeLabel, cred.Format, queryFormat, cred.Format)
+				skipped[fmt.Sprintf("format %s (want %s)", cred.Format, queryFormat)]++
 				continue
 			}
-			if !matchesMeta(cred, cqMap, detail) {
-				skipped++
-				detailf("[DCQL]   query=%s: credential %s (%s) skipped: meta mismatch", queryID, typeLabel, cred.Format)
+			if !matchesMeta(cred, cqMap) {
+				skipped["meta mismatch"]++
 				continue
 			}
 
@@ -105,15 +97,12 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 					log.Printf("[DCQL] Warning: query=%s: credential %s (%s) missing required claims %v in debug mode, continuing with selected claims %v",
 						queryID, typeLabel, cred.Format, selection.missingRequired, selection.selectedKeys)
 				} else {
-					skipped++
-					detailf("[DCQL]   query=%s: credential %s (%s) skipped: required claims not found: %v",
-						queryID, typeLabel, cred.Format, selection.missingRequired)
+					skipped[fmt.Sprintf("required claims not found %v", selection.missingRequired)]++
 					continue
 				}
 			}
 			if !selection.match {
-				skipped++
-				detailf("[DCQL]   query=%s: credential %s (%s) skipped: no requested claims matched", queryID, typeLabel, cred.Format)
+				skipped["no requested claims matched"]++
 				continue
 			}
 
@@ -121,8 +110,7 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 			if taList, ok := cqMap["trusted_authorities"].([]any); ok && len(taList) > 0 {
 				if !checkTrustedAuthorities(cred, taList) {
 					if w.ValidationMode != ValidationModeDebug {
-						skipped++
-						detailf("[DCQL]   query=%s: credential %s (%s) skipped: not trusted by any trusted_authority", queryID, typeLabel, cred.Format)
+						skipped["not trusted by any trusted_authority"]++
 						continue
 					}
 					// Debug mode offers the credential anyway, flagged for the
@@ -134,7 +122,7 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 			}
 
 			matched++
-			detailf("[DCQL]   query=%s: credential %s (%s) matched, selected claims: %v", queryID, typeLabel, cred.Format, selection.selectedKeys)
+			log.Printf("[DCQL]   query=%s: credential %s (%s) matched, selected claims: %v", queryID, typeLabel, cred.Format, selection.selectedKeys)
 			matches = append(matches, CredentialMatch{
 				QueryID:            queryID,
 				CredentialID:       cred.ID,
@@ -148,8 +136,8 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 				MissingClaims:      selection.missingRequired,
 			})
 		}
-		if !detail {
-			log.Printf("[DCQL]   query=%s: %d credentials matched, %d skipped", queryID, matched, skipped)
+		if matched == 0 {
+			log.Printf("[DCQL]   query=%s: no match among %d credentials: %s", queryID, len(credentials), skipReasons(skipped))
 		}
 	}
 
@@ -174,7 +162,7 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 	// wallet's own choice.
 	candidates := append([]CredentialMatch(nil), matches...)
 
-	matches = keepOnePresentationPerQuery(matches, detail)
+	matches = keepOnePresentationPerQuery(matches)
 
 	// OID4VP 1.0 §6.4.2: "If credential_sets is not provided, the Verifier
 	// requests presentations for all Credentials in credentials to be
@@ -457,7 +445,7 @@ func sortMatchesCompleteFirst(matches []CredentialMatch) {
 // one credential that will be presented. OID4VP 1.0 allows several only when
 // the query sets `multiple`, which this wallet does not implement. It happens
 // here so the consent dialog and the activity log report what is sent.
-func keepOnePresentationPerQuery(matches []CredentialMatch, detail bool) []CredentialMatch {
+func keepOnePresentationPerQuery(matches []CredentialMatch) []CredentialMatch {
 	if len(matches) == 0 {
 		return matches
 	}
@@ -467,21 +455,30 @@ func keepOnePresentationPerQuery(matches []CredentialMatch, detail bool) []Crede
 	for _, m := range matches {
 		if seen[m.QueryID] {
 			dropped[m.QueryID]++
-			if detail {
-				log.Printf("[DCQL]   query=%s: credential %s not presented: the query asks for one credential and a better candidate matched",
-					m.QueryID, m.CredentialID)
-			}
 			continue
 		}
 		seen[m.QueryID] = true
 		kept = append(kept, m)
 	}
-	if !detail {
-		for queryID, n := range dropped {
-			log.Printf("[DCQL]   query=%s: %d other candidates not presented: the query asks for one credential", queryID, n)
-		}
+	for _, queryID := range slices.Sorted(maps.Keys(dropped)) {
+		log.Printf("[DCQL]   query=%s: %d other candidates not presented: the query asks for one credential", queryID, dropped[queryID])
 	}
 	return kept
+}
+
+// skipReasons lists the reasons credentials were skipped, most frequent
+// first, for the no-match log line.
+func skipReasons(skipped map[string]int) string {
+	reasons := slices.Sorted(maps.Keys(skipped))
+	slices.SortStableFunc(reasons, func(a, b string) int { return skipped[b] - skipped[a] })
+	parts := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		parts = append(parts, fmt.Sprintf("%d %s", skipped[reason], reason))
+	}
+	if len(parts) == 0 {
+		return "no credentials held"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // sortMatchesByPreferredFormat moves the preferred format to the front within
@@ -520,7 +517,7 @@ func matchesFormat(cred StoredCredential, queryFormat string) bool {
 // is the debug-mode reading. A vct_values entry is answered by that type and
 // by types extending it (internal/credtype), while doctype_value takes no such
 // rule, since ISO/IEC 18013-5 has no inheritance.
-func matchesMeta(cred StoredCredential, cqMap map[string]any, detail bool) bool {
+func matchesMeta(cred StoredCredential, cqMap map[string]any) bool {
 	meta, ok := cqMap["meta"].(map[string]any)
 	if !ok {
 		return true
@@ -550,7 +547,7 @@ func matchesMeta(cred StoredCredential, cqMap map[string]any, detail bool) bool 
 		if found == "" {
 			return false
 		}
-		if found != cred.VCT && detail {
+		if found != cred.VCT {
 			log.Printf("[DCQL]   credential %s: vct %s answers the requested %s (an extending type answers for the type it extends)",
 				cred.ID, cred.VCT, found)
 		}
