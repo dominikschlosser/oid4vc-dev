@@ -30,7 +30,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
-// testEncJWK creates a JWK map suitable for encryption tests, with the required "alg" field.
 func testEncJWK(t *testing.T, pub *ecdsa.PublicKey) map[string]any {
 	t.Helper()
 	jwkJSON := mock.PublicKeyJWK(pub)
@@ -272,7 +271,6 @@ func TestCreateVPToken_SDJWT(t *testing.T) {
 		t.Error("expected sd_hash in KB-JWT payload")
 	}
 
-	// Only selected disclosures should be present
 	discNames := make(map[string]bool)
 	for _, d := range parsed.Disclosures {
 		if !d.IsArrayEntry {
@@ -466,9 +464,7 @@ func TestCreateVPToken_SDJWT_NestedSelectiveDisclosure(t *testing.T) {
 	}
 }
 
-// A claim under a cleartext structural parent (the payload carries "address"
-// directly with its children in _sd, as real SD-JWT VCs commonly do) is
-// disclosed when requested, the same as a top-level SD claim.
+// The address itself is cleartext, but its children require disclosures.
 func TestCreateSDJWTPresentation_ClearTextParentChildIsDisclosed(t *testing.T) {
 	w := generateTestWallet(t)
 
@@ -736,7 +732,6 @@ func TestBuildSessionTranscriptOID4VP(t *testing.T) {
 		t.Fatalf("buildSessionTranscriptOID4VP error: %v", err)
 	}
 
-	// Decode and verify structure: [null, null, ["OpenID4VPHandover", hash]]
 	var decoded []cbor.RawMessage
 	if err := cbor.Unmarshal(transcript, &decoded); err != nil {
 		t.Fatalf("decoding SessionTranscript: %v", err)
@@ -852,10 +847,8 @@ func TestSignJWT(t *testing.T) {
 }
 
 func TestCreateVPToken_ImportedSDJWT_PreservesDisclosures(t *testing.T) {
-	// Simulates importing an externally-issued SD-JWT and presenting it
 	w := generateTestWallet(t)
 
-	// Generate an SD-JWT from an "external" issuer (different key, with holder binding)
 	externalKey, _ := mock.GenerateKey()
 	rawSDJWT, err := mock.GenerateSDJWT(mock.SDJWTConfig{
 		Issuer:    "https://external-issuer.example",
@@ -881,7 +874,6 @@ func TestCreateVPToken_ImportedSDJWT_PreservesDisclosures(t *testing.T) {
 		t.Fatal("expected disclosures after import")
 	}
 
-	// Simulate persist + reload
 	cred.Disclosures = nil
 	if err := cred.Rehydrate(); err != nil {
 		t.Fatalf("Rehydrate: %v", err)
@@ -1050,7 +1042,7 @@ func TestEncryptResponse_LegacyFieldNamesIgnored(t *testing.T) {
 	key, _ := mock.GenerateKey()
 	jwk := testEncJWK(t, &key.PublicKey)
 
-	// Draft-era field names carry no preference, so the default A128GCM applies.
+	// Earlier draft field names do not select an algorithm. The default is A128GCM.
 	reqObj := &oid4vc.RequestObjectJWT{
 		Payload: map[string]any{
 			"client_metadata": map[string]any{
@@ -1086,7 +1078,6 @@ func TestEncryptResponse_LegacyFieldNamesIgnored(t *testing.T) {
 }
 
 func TestCreateVPToken_SDJWT_SurvivesPersistReload(t *testing.T) {
-	// Simulates: import → save to disk (Disclosures lost) → reload + Rehydrate → present
 	w := generateTestWalletWithPID(t)
 
 	creds := w.GetCredentials()
@@ -1106,11 +1097,10 @@ func TestCreateVPToken_SDJWT_SurvivesPersistReload(t *testing.T) {
 		t.Fatal("expected disclosures in original credential")
 	}
 
-	// Simulate persistence: clear non-serialized fields (json:"-")
+	// Persistence omits fields tagged json:"-".
 	sdCred.Disclosures = nil
 	sdCred.NameSpaces = nil
 
-	// Simulate reload: rehydrate from Raw
 	if err := sdCred.Rehydrate(); err != nil {
 		t.Fatalf("Rehydrate: %v", err)
 	}
@@ -1167,7 +1157,6 @@ func TestSubmitPresentation_DirectPostJWT_NoEncryptionKey(t *testing.T) {
 		TokenMap: map[string]string{"q1": "dummy-token"},
 	}
 
-	// response_mode=direct_post.jwt but no encryption key in request object
 	params := PresentationParams{
 		Nonce:        "n",
 		ClientID:     "c",
@@ -1233,7 +1222,6 @@ func TestEncryptResponse_ErrorWhenJWKMissingAlg(t *testing.T) {
 	jwkJSON := mock.PublicKeyJWK(&key.PublicKey)
 	var jwk map[string]any
 	json.Unmarshal([]byte(jwkJSON), &jwk)
-	// Intentionally no jwk["alg"]
 
 	reqObj := &oid4vc.RequestObjectJWT{
 		Payload: map[string]any{
@@ -1299,7 +1287,6 @@ func TestVPTokenMapResult_QueryIDs(t *testing.T) {
 	if len(ids) != 2 {
 		t.Errorf("expected 2 IDs, got %d", len(ids))
 	}
-	// Check both IDs are present (order may vary)
 	idSet := make(map[string]bool)
 	for _, id := range ids {
 		idSet[id] = true
@@ -1343,7 +1330,7 @@ func TestEncryptJWE_A128CBCHS256(t *testing.T) {
 		t.Errorf("expected alg=ECDH-ES, got %v", header["alg"])
 	}
 
-	// CEK should be 32 bytes (256-bit: 128 MAC + 128 enc)
+	// The 256-bit CEK contains a 128-bit MAC key and a 128-bit encryption key.
 	if len(cek) != 32 {
 		t.Errorf("expected 32-byte CEK, got %d bytes", len(cek))
 	}

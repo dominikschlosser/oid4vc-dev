@@ -77,7 +77,6 @@ func doJSON(t *testing.T, h http.Handler, method, target, body string, header ma
 	return rec.Code, doc
 }
 
-// signES256 creates a JOSE compact JWT signed with the given key.
 func signES256(t *testing.T, key *ecdsa.PrivateKey, header, payload map[string]any) string {
 	t.Helper()
 	encode := func(doc map[string]any) string {
@@ -316,7 +315,6 @@ func TestIssuerRejectsTheSingularProofMember(t *testing.T) {
 	}
 }
 
-// newIssuanceWallet builds a wallet that enforces HAIP on issuance.
 func newIssuanceWallet(t *testing.T) *wallet.Wallet {
 	t.Helper()
 	holderKey, err := mock.GenerateKey()
@@ -337,8 +335,6 @@ func jsonString(v string) string {
 	return string(raw)
 }
 
-// presentTicket builds a full SD-JWT+KB presentation for the given request
-// parameters, exactly as a wallet would.
 func presentTicket(t *testing.T, d *DemoRP, holderKey *ecdsa.PrivateKey, clientID, nonce string) string {
 	t.Helper()
 	credential, err := d.signTicket(&holderKey.PublicKey, ticketGrant{})
@@ -373,17 +369,13 @@ func TestTicketTimeClaimsAreRounded(t *testing.T) {
 	}
 }
 
-// presentCredential builds an SD-JWT+KB presentation of the given credential.
 func presentCredential(t *testing.T, holderKey *ecdsa.PrivateKey, credential, clientID, nonce string) string {
 	t.Helper()
 	return presentCredentialAt(t, holderKey, credential, clientID, nonce, time.Now())
 }
 
-// presentCredentialAt is presentCredential with the key binding JWT created at
-// the given time, so a stale or predated binding can be presented.
 func presentCredentialAt(t *testing.T, holderKey *ecdsa.PrivateKey, credential, clientID, nonce string, iat time.Time) string {
 	t.Helper()
-	// Present with all disclosures: credential already ends with ~.
 	prefix := credential
 	if !strings.HasSuffix(prefix, "~") {
 		prefix += "~"
@@ -458,10 +450,8 @@ func TestVerifierFlow(t *testing.T) {
 	}
 }
 
-// The demo verifier accepts issuer chains under the wallet CA plus whatever
-// extra anchors the deployment added, which is how a presentation issued by an
-// external issuer verifies. The anchor decides the outcome: the same
-// presentation fails without it and verifies with it.
+// An external issuer's credential must fail without its CA and verify after that CA is
+// configured.
 func TestVerifierTrustAnchors(t *testing.T) {
 	foreignCAKey, err := mock.GenerateKey()
 	if err != nil {
@@ -533,8 +523,6 @@ func TestVerifierRejectsWrongNonce(t *testing.T) {
 	}
 }
 
-// serveStatusList starts a status list endpoint where index 0 is valid and
-// index 1 is revoked, signed by the wallet's issuer key under its CA chain.
 func serveStatusList(t *testing.T, d *DemoRP, w *wallet.Wallet) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(nil)
@@ -560,7 +548,6 @@ func serveStatusList(t *testing.T, d *DemoRP, w *wallet.Wallet) *httptest.Server
 	return srv
 }
 
-// signTicketWithStatus issues a ticket carrying a status list reference.
 func signTicketWithStatus(t *testing.T, d *DemoRP, holderKey *ecdsa.PrivateKey, uri string, idx int) string {
 	t.Helper()
 	chain, err := d.wallet.DefaultSigningCertChain()
@@ -584,9 +571,7 @@ func signTicketWithStatus(t *testing.T, d *DemoRP, holderKey *ecdsa.PrivateKey, 
 	return raw
 }
 
-// TestVerifierRejectsRevokedCredential: the demo verifier resolves the status
-// list, so a credential the wallet revoked fails verification even though its
-// signatures verify.
+// A revoked credential must fail verification even when its signature is valid.
 func TestVerifierRejectsRevokedCredential(t *testing.T) {
 	d, w, holderKey := newDemoRP(t)
 	statusSrv := serveStatusList(t, d, w)
@@ -616,18 +601,13 @@ func TestVerifierRejectsRevokedCredential(t *testing.T) {
 	}
 }
 
-// startVerification creates a request and returns its id plus the parameters
-// of the signed request object. The demo verifier is HAIP-compliant, so the
-// authorization parameters live inside the JAR served from request_uri rather
-// than in the URL: the tests have to fetch and parse it exactly as the wallet
-// does.
+// HAIP request parameters are inside the signed request object. Fetch and parse it as
+// the wallet does.
 func startVerification(t *testing.T, h http.Handler, kind string) (string, url.Values) {
 	t.Helper()
 	return startVerificationWith(t, h, `{"type":"`+kind+`"}`)
 }
 
-// startVerificationWith is startVerification with the request body spelled
-// out, for the parameters beyond the credential type.
 func startVerificationWith(t *testing.T, h http.Handler, body string) (string, url.Values) {
 	t.Helper()
 	_, doc := doJSON(t, h, "POST", "/api/requests", body, map[string]string{"Content-Type": "application/json"})
@@ -650,7 +630,6 @@ func startVerificationWith(t *testing.T, h http.Handler, body string) (string, u
 	return params.Get("state"), params
 }
 
-// fetchRequestObject GETs the JAR and returns its (unverified) payload.
 func fetchRequestObject(t *testing.T, h http.Handler, requestURI string) map[string]any {
 	t.Helper()
 	parsed, err := url.Parse(requestURI)
@@ -682,8 +661,6 @@ func fetchRequestObject(t *testing.T, h http.Handler, requestURI string) map[str
 	return payload
 }
 
-// responseEncryptionKey pulls the verifier's public encryption key out of the
-// request object's client_metadata.
 func responseEncryptionKey(t *testing.T, payload map[string]any) (*ecdsa.PublicKey, string) {
 	t.Helper()
 	meta, ok := payload["client_metadata"].(map[string]any)
@@ -721,8 +698,6 @@ func responseEncryptionKey(t *testing.T, payload map[string]any) (*ecdsa.PublicK
 	return pub, kid
 }
 
-// postPresentation submits a presentation the way a HAIP wallet does: the
-// response is a JWE encrypted to the verifier's per-request key.
 func postPresentation(t *testing.T, h http.Handler, id, queryID, presentation string) int {
 	t.Helper()
 	return postPresentationTo(t, h, id, id, queryID, presentation)
@@ -767,7 +742,7 @@ func TestVerifierRejectsWrongCredentialType(t *testing.T) {
 	}
 	pid, err := mock.GenerateSDJWT(mock.SDJWTConfig{
 		Issuer:    d.issuerID(),
-		VCT:       PIDVCT, // not the requested ticket type
+		VCT:       PIDVCT,
 		ExpiresIn: time.Hour,
 		Claims:    map[string]any{"given_name": "Erika", "family_name": "Mustermann"},
 		Key:       d.wallet.IssuerKey,
@@ -787,9 +762,7 @@ func TestVerifierRejectsWrongCredentialType(t *testing.T) {
 	}
 }
 
-// A request for the country-independent PID is answered by the German PID,
-// which extends it. Refusing that credential would make the demo verifier
-// reject exactly what a German wallet holds.
+// The German PID extends the base PID type and must satisfy a request for it.
 func TestVerifierAcceptsAnExtendingCredentialType(t *testing.T) {
 	d, _, holderKey := newDemoRP(t)
 	h := d.VerifierHandler()
@@ -822,9 +795,8 @@ func TestVerifierAcceptsAnExtendingCredentialType(t *testing.T) {
 	}
 }
 
-// A request naming a national type is answered only by a credential of that
-// type. The country-independent PID must not answer it: inheritance runs one
-// way, and a verifier asking for the national type wants what it adds.
+// A base PID cannot satisfy a request for national attributes. Inheritance works only
+// from the domestic type to its base.
 func TestVerifierDomesticPIDRequestRefusesTheCountryIndependentPID(t *testing.T) {
 	d, _, holderKey := newDemoRP(t)
 	h := d.VerifierHandler()
@@ -921,8 +893,8 @@ func TestVerifierPIDRequestRefusesATypeOutsideThePIDNamespace(t *testing.T) {
 	}
 }
 
-// Nothing here knows the countries: a type PID_14 makes domestic is asked for
-// and answered like any other, whether or not this tool ever heard of it.
+// PID_14 applies to domestic types even when this tool has no country-specific
+// definition.
 func TestVerifierPIDRequestTakesAnyDomesticType(t *testing.T) {
 	d, _, holderKey := newDemoRP(t)
 	h := d.VerifierHandler()
@@ -1008,8 +980,7 @@ func TestVerifierWarnsWhenTheCredentialChainCarriesTheTrustAnchor(t *testing.T) 
 	}
 }
 
-// TestVerifierRejectsReplay: the nonce is fixed per request, so a captured
-// response would verify again unless the request is single use.
+// Consume verification requests after use so captured responses cannot be replayed.
 func TestVerifierRejectsReplay(t *testing.T) {
 	d, _, holderKey := newDemoRP(t)
 	h := d.VerifierHandler()
@@ -1030,9 +1001,7 @@ func TestVerifierRejectsReplay(t *testing.T) {
 	}
 }
 
-// An unanswered request must stop reporting "pending" once it expires: the
-// verifier page polls while pending, so a request that never expires makes an
-// abandoned tab poll forever.
+// Expire unanswered requests so abandoned browser tabs stop polling.
 func TestVerifierRequestExpires(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 	h := d.VerifierHandler()
@@ -1054,9 +1023,8 @@ func TestVerifierRequestExpires(t *testing.T) {
 	}
 }
 
-// A result that already exists must survive past the expiry window: the
-// wallet redirects the browser back to the page, and that page must still be
-// able to show what happened.
+// Keep completed results available after request expiry so the redirected browser can
+// still display them.
 func TestVerifierKeepsResultOfAnsweredRequest(t *testing.T) {
 	d, _, holderKey := newDemoRP(t)
 	h := d.VerifierHandler()
@@ -1116,10 +1084,8 @@ func TestVerifierRejectsInjectedDisclosure(t *testing.T) {
 	if status["status"] != "failed" {
 		t.Fatalf("status = %v, want failed for an injected disclosure (checks: %v)", status["status"], status["checks"])
 	}
-	// RFC 9901 §7.1 step 5 makes an unreferenced disclosure a reason to reject
-	// the credential outright, so parsing refuses it and the verifier never
-	// reaches its own reference check. What matters is that the failure names
-	// the injected disclosure rather than something vague.
+	// RFC 9901 §7.1 step 5 rejects unreferenced disclosures during parsing. The error
+	// must identify the injected disclosure.
 	checks := status["checks"].([]any)
 	last := checks[len(checks)-1].(map[string]any)
 	if last["ok"] != false {
@@ -1131,9 +1097,6 @@ func TestVerifierRejectsInjectedDisclosure(t *testing.T) {
 	}
 }
 
-// serveDemoStack runs the wallet and the demo verifier on one origin, the way
-// `wallet serve` mounts them, so a request can be driven end to end over real
-// HTTP.
 func serveDemoStack(t *testing.T, w *wallet.Wallet) (*DemoRP, *httptest.Server) {
 	t.Helper()
 	srv := wallet.NewServer(w, 0, nil)
@@ -1165,11 +1128,8 @@ func serveDemoStack(t *testing.T, w *wallet.Wallet) (*DemoRP, *httptest.Server) 
 	return d, ts
 }
 
-// The built-in demo verifier must satisfy HAIP, so that enforcing it on the
-// public demo does not break the demo itself. This drives a real request
-// through a wallet with RequireHAIP on (signed request object fetched over
-// request_uri, x509_hash client id, encrypted response) and expects a verified
-// presentation at the end.
+// Exercise a real HAIP presentation with a signed request by reference, x509_hash
+// client ID and encrypted response.
 func TestVerifierIsHAIPCompliantEndToEnd(t *testing.T) {
 	holderKey, err := mock.GenerateKey()
 	if err != nil {
@@ -1205,8 +1165,6 @@ func TestVerifierIsHAIPCompliantEndToEnd(t *testing.T) {
 		t.Fatalf("authorize returned %d: %s", resp.StatusCode, body)
 	}
 
-	// The verified status below is what proves the wallet accepted the demo
-	// verifier's request, so a HAIP violation would show as a failed status.
 	status := getJSONFrom(t, ts.URL+"/verifier/api/requests/"+id)
 	if status["status"] != "verified" {
 		t.Fatalf("status = %v, want verified (error: %v, checks: %v)", status["status"], status["error"], status["checks"])
@@ -1217,21 +1175,18 @@ func TestVerifierIsHAIPCompliantEndToEnd(t *testing.T) {
 	}
 }
 
-// The same wallet must still reject a verifier that ignores the profile.
 func TestHAIPEnforcementRejectsPlainRequest(t *testing.T) {
 	holderKey, _ := mock.GenerateKey()
 	issuerKey, _ := mock.GenerateKey()
 	w := wallet.New(holderKey, issuerKey, true)
 	w.RequireHAIP = true
-	// --haip decides how many checks run, the mode decides what a violation
-	// does. Refusing the request is the strict reading.
+	// Use strict mode so HAIP findings reject the request.
 	w.ValidationMode = wallet.ValidationModeStrict
 	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
 		t.Fatalf("generating PID: %v", err)
 	}
 	_, ts := serveDemoStack(t, w)
 
-	// A plain direct_post request with a redirect_uri client id.
 	params := url.Values{
 		"client_id":     {"redirect_uri:" + ts.URL + "/nowhere"},
 		"response_type": {"vp_token"},
@@ -1306,14 +1261,8 @@ func TestIssuanceHAIPAcceptsPreAuthorizedOffer(t *testing.T) {
 	}
 }
 
-// The demo issuer is its own authorization server, so the whole HAIP
-// authorization code flow has to work against it: pushed authorization
-// request with a wallet attestation and DPoP, a login the user completes
-// while the wallet waits, PKCE, code exchange, DPoP-bound credential request.
-//
-// The point of the test is the ordering. The offer is created with nobody
-// signed in. Authentication happens during redemption, at the authorization
-// endpoint, which is where the authorization code flow puts it.
+// Create the offer before sign-in, then authenticate during redemption. This checks
+// the ordering of PAR, login, PKCE code exchange and the DPoP credential request.
 func TestIssuerAuthorizationCodeFlowEndToEnd(t *testing.T) {
 	w := newIssuanceWallet(t)
 	w.RequireHAIP = true
@@ -1326,8 +1275,7 @@ func TestIssuerAuthorizationCodeFlowEndToEnd(t *testing.T) {
 		t.Fatalf("unexpected offer response: %v", created)
 	}
 
-	// The wallet never opens a browser itself, so redeeming the offer answers
-	// with the URL the user has to sign in at and leaves the flow running.
+	// The wallet returns the sign-in URL while issuance waits for the callback.
 	accepted := postJSONTo(t, ts.URL+"/api/offers", `{"uri":`+jsonString(schemeURI)+`}`)
 	if accepted["status"] != "authorization_required" {
 		t.Fatalf("redeeming the offer did not ask for a sign-in: %v", accepted)
@@ -1370,7 +1318,6 @@ func TestIssuerAuthorizationCodeFlowEndToEnd(t *testing.T) {
 	if !strings.Contains(callback, "code=") {
 		t.Fatalf("login redirect %q carries no authorization code", callback)
 	}
-	// The browser follows the redirect. That is what resumes the flow.
 	cb, err := client.Get(callback)
 	if err != nil {
 		t.Fatalf("following the callback: %v", err)
@@ -1393,8 +1340,7 @@ func TestIssuerAuthorizationCodeFlowEndToEnd(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// The ticket carries the authenticated account, which is only knowable
-	// if the login actually drove the flow.
+	// The ticket must identify the account authenticated during this flow.
 	var ticket *wallet.StoredCredential
 	for _, c := range w.GetCredentials() {
 		if c.VCT == TicketVCT {
@@ -1408,9 +1354,8 @@ func TestIssuerAuthorizationCodeFlowEndToEnd(t *testing.T) {
 	if got := ticket.Claims["given_name"]; got != demoAccountGivenName {
 		t.Errorf("ticket given_name = %v, want %q from the logged-in account", got, demoAccountGivenName)
 	}
-	// This wallet's attestation is signed under the CA the issuer reads
-	// directly, so this is the one flow where the attester is one the issuer
-	// was given, and the ticket says so.
+	// The issuer trusts the wallet attestation through its configured CA. The ticket
+	// records that trust result.
 	if got := ticket.Claims["wallet_attestation"]; got != "trusted" {
 		t.Errorf("ticket wallet_attestation = %v, want trusted", got)
 	}
@@ -1440,8 +1385,6 @@ func TestIssuerAuthorizationCodeFlowEndToEnd(t *testing.T) {
 	}
 }
 
-// requestURIFromLoginPage reads the hidden field that ties the login form back
-// to the pushed authorization request.
 func requestURIFromLoginPage(t *testing.T, page string) string {
 	t.Helper()
 	const marker = `name="request_uri" value="`
@@ -1507,7 +1450,6 @@ func TestPushedAuthorizationRequestRequiresWalletAttestation(t *testing.T) {
 	}
 }
 
-// legacyIssuerHandler serves just enough metadata for the offer to be parsed.
 func legacyIssuerHandler(t *testing.T) http.Handler {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -1525,10 +1467,8 @@ func legacyIssuerHandler(t *testing.T) http.Handler {
 	return mux
 }
 
-// An offer carrying a profile override runs on a per-request clone of the
-// wallet. The credential it collects still has to land in the real wallet:
-// the clone holds its own credential slice, so without forwarding, issuance
-// would report success and store nothing.
+// Issuance with a profile override runs on a wallet clone. Forward the credential to
+// the real wallet or the successful flow would store nothing.
 func TestIssuanceWithOverrideStillStoresTheCredential(t *testing.T) {
 	w := newIssuanceWallet(t)
 	_, ts := serveDemoStack(t, w)
@@ -1559,9 +1499,8 @@ func TestIssuanceWithOverrideStillStoresTheCredential(t *testing.T) {
 	}
 }
 
-// A batch offer hands the wallet several copies of one credential, each on its
-// own key, tied into one batch group so the wallet can present an unused copy
-// each time.
+// Batch copies use separate holder keys so presentations can rotate through unused
+// copies.
 func TestIssuerBatchOfferStoresEveryCopy(t *testing.T) {
 	w := newIssuanceWallet(t)
 	_, ts := serveDemoStack(t, w)
@@ -1595,8 +1534,6 @@ func TestIssuerBatchOfferStoresEveryCopy(t *testing.T) {
 	}
 }
 
-// A batch offer issues the number of copies it asks for, up to what the issuer
-// signs, so the size is chosen per offer.
 func TestIssuerBatchSizeIsHonored(t *testing.T) {
 	w := newIssuanceWallet(t)
 	_, ts := serveDemoStack(t, w)
@@ -1613,8 +1550,8 @@ func TestIssuerBatchSizeIsHonored(t *testing.T) {
 	}
 }
 
-// A plain offer stays a single credential even though the issuer advertises
-// batch support, so the wallet only holds a batch when the offer asks for one.
+// Advertising batch support alone must not make a single-credential offer issue a
+// batch.
 func TestIssuerPlainOfferStaysSingle(t *testing.T) {
 	w := newIssuanceWallet(t)
 	_, ts := serveDemoStack(t, w)
@@ -1634,8 +1571,6 @@ func TestIssuerPlainOfferStaysSingle(t *testing.T) {
 	}
 }
 
-// A ticket offered without the status toggle carries no status reference at
-// all.
 func TestIssuerOffersTicketWithoutStatusByDefault(t *testing.T) {
 	w := newIssuanceWallet(t)
 	_, ts := serveDemoStack(t, w)
@@ -1649,10 +1584,7 @@ func TestIssuerOffersTicketWithoutStatusByDefault(t *testing.T) {
 	}
 }
 
-// TestIssuerOffersRevocableTicket: a ticket issued with a status reference
-// lands in the wallet as a credential
-// the wallet governs, verifies at the demo verifier, and stops verifying once
-// it is revoked there.
+// A ticket with a wallet status reference must verify until the wallet revokes it.
 func TestIssuerOffersRevocableTicket(t *testing.T) {
 	w := newIssuanceWallet(t)
 	_, ts := serveDemoStack(t, w)
@@ -1691,10 +1623,8 @@ func TestIssuerOffersRevocableTicket(t *testing.T) {
 	}
 }
 
-// A batch revokes as one credential: its copies each sit on a distinct status
-// index (so two presentations cannot be linked by a shared index), and revoking
-// the batch flips every one, so whichever copy the wallet rotates to next also
-// reads as revoked.
+// Each batch copy needs a distinct status index to avoid correlation. Revoking the
+// batch must revoke every copy.
 func TestIssuerRevokesAWholeBatch(t *testing.T) {
 	w := newIssuanceWallet(t)
 	_, ts := serveDemoStack(t, w)
@@ -1721,7 +1651,6 @@ func TestIssuerRevokesAWholeBatch(t *testing.T) {
 		seenIdx[ref.Idx] = true
 	}
 
-	// Fresh, every rotated copy verifies.
 	for round := 0; round <= len(copies); round++ {
 		if got := presentDemoTicket(t, ts); got["status"] != "verified" {
 			t.Fatalf("a fresh batch copy did not verify on round %d: %v", round, got["checks"])
@@ -1732,7 +1661,6 @@ func TestIssuerRevokesAWholeBatch(t *testing.T) {
 		t.Fatal("revoking the batch failed")
 	}
 
-	// Revoked, every rotated copy fails, so the batch cannot be presented at all.
 	for round := 0; round <= len(copies); round++ {
 		result := presentDemoTicket(t, ts)
 		if result["status"] != "failed" {
@@ -1816,8 +1744,6 @@ func TestAuthorizationCodeOfferKeepsTheStatusChoice(t *testing.T) {
 	}
 }
 
-// redeemDemoTicket creates a demo issuer offer with the given query string,
-// redeems it through the wallet, and returns the stored ticket.
 func redeemDemoTicket(t *testing.T, w *wallet.Wallet, ts *httptest.Server, query string) *wallet.StoredCredential {
 	t.Helper()
 	created := postJSONTo(t, ts.URL+"/issuer/api/offers"+query, "")
@@ -1844,8 +1770,6 @@ func redeemDemoTicket(t *testing.T, w *wallet.Wallet, ts *httptest.Server, query
 	return nil
 }
 
-// presentDemoTicket drives one demo verifier ticket request through the
-// wallet and returns the verification result.
 func presentDemoTicket(t *testing.T, ts *httptest.Server) map[string]any {
 	t.Helper()
 	created := postJSONTo(t, ts.URL+"/verifier/api/requests", `{"type":"ticket"}`)
@@ -1862,8 +1786,6 @@ func presentDemoTicket(t *testing.T, ts *httptest.Server) map[string]any {
 	return getJSONFrom(t, ts.URL+"/verifier/api/requests/"+id)
 }
 
-// The PID exists in two formats, so the request the verifier signs has to say
-// which of them it will accept.
 func TestVerifierPIDRequestAsksForTheChosenFormats(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 	h := d.VerifierHandler()
@@ -1910,8 +1832,6 @@ func TestVerifierPIDRequestAsksForTheChosenFormats(t *testing.T) {
 	}
 }
 
-// A format the verifier cannot ask for is refused when the request is
-// created, rather than producing a request no wallet can answer.
 func TestVerifierRejectsAnImpossibleFormat(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 	h := d.VerifierHandler()
@@ -1929,8 +1849,6 @@ func TestVerifierRejectsAnImpossibleFormat(t *testing.T) {
 	}
 }
 
-// The wallet holds the PID in both formats, so which one comes back is the
-// verifier's choice and has to be verified as that format.
 func TestVerifierSteersThePIDFormatEndToEnd(t *testing.T) {
 	for _, tc := range []struct{ name, format, wantCheck string }{
 		{"sd-jwt only", "sd-jwt", "presentation parses as SD-JWT"},
@@ -1977,7 +1895,6 @@ func TestVerifierSteersThePIDFormatEndToEnd(t *testing.T) {
 	}
 }
 
-// hasCheck reports whether the verification log records a step by that name.
 func hasCheck(status map[string]any, name string) bool {
 	checks, _ := status["checks"].([]any)
 	for _, entry := range checks {
@@ -1989,9 +1906,8 @@ func hasCheck(status map[string]any, name string) bool {
 	return false
 }
 
-// Whatever the wallet returned has to come back with the result, so the page
-// can offer it to the decoder. A presentation that failed verification is the
-// one most worth looking at, so it is kept too.
+// Return the presented credential even when verification fails so it can be inspected
+// in the decoder.
 func TestVerifierReportsTheReceivedPresentation(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -2020,7 +1936,6 @@ func TestVerifierReportsTheReceivedPresentation(t *testing.T) {
 	}
 }
 
-// A request nobody answered has no presentation to offer.
 func TestVerifierReportsNoPresentationWhilePending(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 	h := d.VerifierHandler()
@@ -2032,9 +1947,8 @@ func TestVerifierReportsNoPresentationWhilePending(t *testing.T) {
 	}
 }
 
-// The mdoc answer is a DeviceResponse, not a credential: it carries the
-// device auth the wallet signed over this request. That is what the link has
-// to open, so it has to arrive whole.
+// Keep the full mdoc DeviceResponse for the decoder, including the device
+// authentication bound to this request.
 func TestVerifierReportsTheReceivedMDOCPresentation(t *testing.T) {
 	holderKey, err := mock.GenerateKey()
 	if err != nil {

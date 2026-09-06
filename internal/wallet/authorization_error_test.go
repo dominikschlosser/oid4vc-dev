@@ -113,7 +113,6 @@ func TestNoMatchingCredentialsReturnsAccessDeniedToTheVerifier(t *testing.T) {
 		t.Fatalf("verifier received state %q, want s", got)
 	}
 
-	// The local caller still learns what happened.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("local caller got %d, want 200: %s", rec.Code, rec.Body.String())
 	}
@@ -392,7 +391,6 @@ func TestDCAPIMalformedRequestIsRefusedWithoutAProtocolResponse(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "invalid_request") {
 		t.Errorf("body = %s, want it to name invalid_request", rec.Body.String())
 	}
-	// Nothing that looks like a presentation may come back.
 	if strings.Contains(rec.Body.String(), "vp_token") {
 		t.Errorf("a refused request produced a presentation: %s", rec.Body.String())
 	}

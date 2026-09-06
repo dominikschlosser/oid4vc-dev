@@ -25,17 +25,13 @@ import (
 	"testing"
 )
 
-// grantMismatchIssuer serves an issuer that advertises three authorization
-// servers: one whose metadata is unreachable, its own, and a limited one that
-// only does authorization_code. The offer names the limited one for a
-// pre-authorized grant, the shape a real issuer produced. The limited token
-// endpoint refuses in its own error format, so the error code is the HTTP
-// status text and the reason is only in the body.
+// Advertise three authorization servers to test fallback: one unreachable, one
+// supporting pre-authorized codes and one limited to authorization_code. The offer
+// names the limited server. Its refusal uses HTTP status text plus a separate message
+// field.
 //
-// limitedNamesGrants leaves grant_types_supported off the limited server,
-// which RFC 8414 §2 allows: then nothing was stated, and the flow proceeds.
-// ownStatesPreAuth controls whether the issuer's own server states support
-// for the pre-authorized code grant, making it a fallback candidate.
+// The flags control whether servers advertise their grant support, distinguishing an
+// absent claim from an explicit incompatibility.
 func grantMismatchIssuer(t *testing.T, w *Wallet, limitedNamesGrants, ownStatesPreAuth bool) (*httptest.Server, string, *atomic.Int32, *atomic.Int32) {
 	t.Helper()
 
@@ -134,7 +130,6 @@ func grantMismatchIssuer(t *testing.T, w *Wallet, limitedNamesGrants, ownStatesP
 	return srv, "openid-credential-offer://?credential_offer=" + url.QueryEscape(string(offerJSON)), &limitedTokenCalls, &ownTokenCalls
 }
 
-// findLogEntry returns the first entry with the given event, or nil.
 func findLogEntry(entries []LogEntry, event string) *LogEntry {
 	for i, e := range entries {
 		if e.Details != nil && e.Details["event"] == event {
@@ -244,8 +239,6 @@ func TestProcessCredentialOffer_AuthorizationServerCannotTakeGrant(t *testing.T)
 			t.Errorf("detail does not name the grant: %s", unavailable.Detail)
 		}
 
-		// The refusal the server sent, whole. Its own error field is the HTTP
-		// status text, and the reason is in a message member next to it.
 		var response *LogEntry
 		for i := range entries {
 			if entries[i].Action == "issuance" && strings.HasPrefix(entries[i].Detail, "Token response from") {
@@ -262,9 +255,8 @@ func TestProcessCredentialOffer_AuthorizationServerCannotTakeGrant(t *testing.T)
 		if !strings.Contains(body, "Invalid grant_type") {
 			t.Errorf("response_body does not carry the server's reason: %q", body)
 		}
-		// The headline carries the code and the sentence that explains it, the
-		// way an error_description would be read, and the rest of the body
-		// stays in the details. "Bad Request" alone names nothing.
+		// Include the server's explanation in the headline and keep remaining response
+		// fields in details.
 		msg, _ := response.Details["error"].(string)
 		if !strings.HasPrefix(msg, "Bad Request: ") || !strings.Contains(msg, "Invalid grant_type") {
 			t.Errorf("error = %q, want the refusal code and the server's reason", msg)
@@ -318,9 +310,8 @@ func TestProcessCredentialOffer_AuthorizationServerCannotTakeGrant(t *testing.T)
 	})
 }
 
-// TestFallbackAuthorizationServer_SingleAdvertisedServer pins that the
-// fallback handles any number of advertised servers: with a single entry
-// there is no candidate, so the wallet says so and stays.
+// With only the selected server advertised, no fallback exists. Report that and keep
+// the current server.
 func TestFallbackAuthorizationServer_SingleAdvertisedServer(t *testing.T) {
 	w := generateTestWallet(t)
 	metadata := map[string]any{"authorization_servers": []any{"https://as.example"}}

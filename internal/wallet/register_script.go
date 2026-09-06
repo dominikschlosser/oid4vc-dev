@@ -20,11 +20,8 @@ import (
 	"strings"
 )
 
-// stableBinaryPath prefers a package manager's stable symlink over the
-// versioned file it resolves to. Homebrew exposes …/Cellar/<name>/<version>/bin
-// through /opt/homebrew/bin/eudi, and baking the versioned path into the URL
-// handler would break it on the next `brew upgrade`. Any other layout uses the
-// resolved path, since a symlink in a build directory is no launch point.
+// Homebrew's stable symlink survives upgrades that replace the versioned binary. Other
+// symlinks may point into temporary build directories, so use their resolved targets.
 func stableBinaryPath(executable string) string {
 	resolved, err := filepath.EvalSymlinks(executable)
 	if err != nil {
@@ -36,21 +33,17 @@ func stableBinaryPath(executable string) string {
 	return resolved
 }
 
-// handlerScriptVersion is the release the installed script reports. It is set
-// by the cmd package, like the server's own version, so a wallet can tell a
-// handler written by this build from one written by an older one.
+// The script version lets the wallet detect an outdated installed handler.
 var handlerScriptVersion = "dev"
 
-// SetHandlerScriptVersion records the release written into handler scripts.
 func SetHandlerScriptVersion(v string) {
 	if v = strings.TrimSpace(v); v != "" {
 		handlerScriptVersion = v
 	}
 }
 
-// handlerScriptSource renders the bash script the .app bundle dispatches to.
-// Separate from writing it so its behavior can be tested without touching
-// Launch Services or the user's real handler registration.
+// Rendering separately allows tests to run without changing the machine's URL handler
+// registration.
 func handlerScriptSource(binaryPath string, opts RegisterOptions) string {
 	handler := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(`#!/bin/bash
 BINARY="{{BINARY_PATH}}"

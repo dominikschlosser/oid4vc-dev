@@ -23,14 +23,11 @@ import (
 	"testing"
 )
 
-// TestRemoteAcceptLeavesTheOfferForTheWallet covers a credential_offer_uri an
-// issuer serves once. Whoever reads it first spends it, so the CLI reads
-// nothing when a wallet is going to: a read here would leave that wallet with
-// a 404 for an offer the user is holding in front of them.
+// The issuer serves this offer once. Fetching it in the CLI would consume it before
+// the wallet can start issuance.
 func TestRemoteAcceptLeavesTheOfferForTheWallet(t *testing.T) {
 	var offerReads atomic.Int32
 	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The offer is served once.
 		if offerReads.Add(1) > 1 {
 			http.Error(w, `{"message":"Credential offer not found"}`, http.StatusNotFound)
 			return
@@ -52,7 +49,6 @@ func TestRemoteAcceptLeavesTheOfferForTheWallet(t *testing.T) {
 	walletSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/offers" {
 			walletCalls.Add(1)
-			// The offer is the wallet's to read, and this stands in for it.
 			_, _ = http.Get(issuer.URL + "/offer")
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "approved"})
 			return
@@ -69,7 +65,6 @@ func TestRemoteAcceptLeavesTheOfferForTheWallet(t *testing.T) {
 
 	offerURI := "openid-credential-offer://?credential_offer_uri=" +
 		url.QueryEscape(issuer.URL+"/offer")
-	// Interactive, which is the case a transaction-code prompt would run in.
 	if err := acceptOID4URI(offerURI, dispatchOID4Opts{}); err != nil {
 		t.Fatalf("accepting the offer: %v", err)
 	}

@@ -258,7 +258,6 @@ func TestBuildFragmentRedirect_IDTokenOnly(t *testing.T) {
 	}
 }
 
-// TestServerIDTokenFlow tests the full SIOPv2 id_token flow through the server.
 func TestServerIDTokenFlow(t *testing.T) {
 	srv := newTestServer(t, true)
 

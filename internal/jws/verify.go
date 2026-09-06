@@ -47,7 +47,6 @@ func Verify(compact string, key crypto.PublicKey) ([]byte, error) {
 	return payload, nil
 }
 
-// Valid reports whether a compact JWS verifies against key.
 func Valid(compact string, key crypto.PublicKey) bool {
 	_, err := Verify(compact, key)
 	return err == nil

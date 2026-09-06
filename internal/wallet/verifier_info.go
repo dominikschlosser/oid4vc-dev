@@ -27,26 +27,14 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/validate"
 )
 
-// registrationCertificateTyp is the typ of an EUDI wallet-relying-party
-// registration certificate (ETSI TS 119 475), the attestation this wallet
-// reads a verifier's registered purpose from. It travels in a verifier_info
-// entry whose format is "registration_cert" (ETSI TS 119 472-2), but the typ
-// is what identifies the JWT, so entries are selected by it alone.
+// ETSI TS 119 475 identifies registration certificates by rc-wrp+jwt. Select by this
+// typ even though the verifier_info format is registration_cert (ETSI TS 119 472-2).
 const registrationCertificateTyp = "rc-wrp+jwt"
 
-// verifierInfoPurposes reads the purposes a verifier registered out of the
-// registration certificates in a request's verifier_info (OpenID4VP 1.0
-// §5.1: attestations that "support authorization decisions, inform Wallet
-// policy enforcement, or enrich the End-User consent dialog"). The purpose of
-// the data request is what the consent dialog needs.
-//
-// A certificate is recognized by its rc-wrp+jwt typ. Its sub is the
-// registered legal entity rather than the request's client_id, so the only
-// check is the signature against the embedded x5c leaf. A signature that fails
-// or cannot be checked (no readable x5c) leaves a finding and hides the
-// purpose. The chain is not anchored to a trust list, like every other x5c
-// this wallet checks (see SECURITY.md). Other formats and JWT types are
-// skipped.
+// Read registered purposes from verifier_info for the consent dialog (OpenID4VP 1.0
+// §5.1). Only rc-wrp+jwt certificates with a valid signature against their x5c leaf
+// contribute purposes. Their sub identifies a legal entity and need not equal
+// client_id. The chain is not checked against a trust list. See SECURITY.md.
 func verifierInfoPurposes(payload map[string]any) (purposes []string, findings []string) {
 	certs, findings := verifiedRegistrationCertificates(payload)
 	for _, cert := range certs {
@@ -59,11 +47,8 @@ func verifierInfoPurposes(payload map[string]any) (purposes []string, findings [
 	return purposes, findings
 }
 
-// verifiedRegistrationCertificates decodes the rc-wrp+jwt registration
-// certificates in a request's verifier_info and returns the claims of the ones
-// whose signature verifies against their own x5c leaf. Findings name the
-// entries that could not be used. The chain is not anchored to a trust list,
-// like every other x5c this wallet checks (see SECURITY.md).
+// Verify signatures against each certificate's own x5c leaf. This does not establish
+// trust in the signer. See SECURITY.md.
 func verifiedRegistrationCertificates(payload map[string]any) (certs []map[string]any, findings []string) {
 	for _, entry := range verifierInfoEntries(payload) {
 		data, _ := entry["data"].(string)
@@ -91,16 +76,10 @@ func verifiedRegistrationCertificates(payload map[string]any) (certs []map[strin
 	return certs, findings
 }
 
-// consentPurposes reads the verifier's registered purposes for the consent
-// dialog and warns about the registration certificate. A request sent as plain
-// parameters has no payload document, so its verifier_info survives only as the
-// raw parameter. A signed request's outer parameters stay ignored (OID4VP 1.0
-// §5.10.1).
-//
-// The registration certificate is an ARF requirement (RPRC_19), so its absence
-// and its content are checked against ETSI TS 119 475 and the ARF. These are
-// always warnings, in every mode. Validation mode is OpenID4VP and HAIP strict.
-// The ARF rules are not part of it.
+// Unsigned requests carry verifier_info as a parameter. Signed requests use only the
+// Request Object (OID4VP 1.0 §5.10.1). Certificate content checks follow ETSI TS 119
+// 475 and ARF RPRC_19. They remain warnings in every mode because strict validation
+// covers OpenID4VP and HAIP, not ARF rules.
 func (w *Wallet) consentPurposes(scope string, authReq *AuthorizationRequestParams) []string {
 	if authReq == nil {
 		return nil
@@ -129,9 +108,8 @@ func (w *Wallet) consentPurposes(scope string, authReq *AuthorizationRequestPara
 	return purposes
 }
 
-// registrationCertificateContentFindings checks a verified WRPRC against the
-// mandatory content of ETSI TS 119 475 V1.2.1 §5.2.4 and the ARF (Topic 44).
-// Each missing member is a warning naming the rule.
+// Check required content from ETSI TS 119 475 V1.2.1 §5.2.4 and ARF Topic 44. Missing
+// fields produce warnings.
 func registrationCertificateContentFindings(cert map[string]any) []string {
 	var findings []string
 	miss := func(field, rule string) {
@@ -164,9 +142,8 @@ func registrationCertificateContentFindings(cert map[string]any) []string {
 	return append(findings, registrationValidityFindings(cert)...)
 }
 
-// registrationValidityFindings checks the certificate's validity window: iat is
-// required, and exp (when present) must be in the future and no more than 12
-// months after iat (ETSI TS 119 475 GEN-5.2.4-08, ARF RPRC_17).
+// ETSI TS 119 475 GEN-5.2.4-08 and ARF RPRC_17 require iat. If exp is present, it must
+// be in the future and within 12 months of iat.
 func registrationValidityFindings(cert map[string]any) []string {
 	var findings []string
 	iat, hasIat := numberClaim(cert["iat"])
@@ -187,16 +164,14 @@ func registrationValidityFindings(cert map[string]any) []string {
 	return findings
 }
 
-// overAskingFindings is the ARF RPRC_21 over-asking check: every claim the
-// request asks for has to be among the attributes the registration certificate
-// registered in its credentials. A credential type the certificate does not
-// register at all is one finding for the whole query, and a registered type
-// asked for an attribute it did not register is one finding per attribute.
+// ARF RPRC_21 requires requested claims to be registered. Report one finding for an
+// unregistered credential type, or one per unregistered attribute of a registered
+// type.
 func overAskingFindings(cert map[string]any, dcql map[string]any) []string {
 	registered := registeredCredentials(cert)
 	if len(registered) == 0 {
-		// The absent credentials list is already a content finding, and without
-		// it there is nothing to check the request against.
+		// A missing credentials list already has a content finding and provides
+		// nothing to compare.
 		return nil
 	}
 	var findings []string
@@ -223,8 +198,6 @@ func overAskingFindings(cert map[string]any, dcql map[string]any) []string {
 	return findings
 }
 
-// registersCredential reports whether the certificate registers a credential of
-// this format and type at all, regardless of which attributes it names.
 func registersCredential(registered []registeredCredential, format string, types []string) bool {
 	for _, rc := range registered {
 		if rc.matches(format, types) {
@@ -234,10 +207,8 @@ func registersCredential(registered []registeredCredential, format string, types
 	return false
 }
 
-// registeredCredential is one entry of a WRPRC credentials array: the format
-// and type it registers, and the claim paths the relying party may request. An
-// entry with no claim list registers the credential without restricting its
-// attributes (ETSI TS 119 475 §5.2.4 Table 9).
+// Without a claim list, the entry registers the credential without an attribute
+// restriction (ETSI TS 119 475 §5.2.4 Table 9).
 type registeredCredential struct {
 	format          string
 	types           []string
@@ -245,8 +216,7 @@ type registeredCredential struct {
 	anyClaimAllowed bool
 }
 
-// matches reports whether this registered credential covers the format and type
-// a request asks for. An empty format or type on either side is not a mismatch.
+// An omitted format or type on either side does not restrict matching.
 func (rc registeredCredential) matches(format string, types []string) bool {
 	if format != "" && rc.format != "" && rc.format != format {
 		return false
@@ -261,10 +231,8 @@ func registeredCredentials(cert map[string]any) []registeredCredential {
 		rc := registeredCredential{format: format, types: credentialTypes(entry["meta"])}
 		claims := listOfMaps(entry["claim"])
 		if len(claims) == 0 {
-			// ETSI TS 119 475 §5.2.4 Table 9 leaves a credential with no claim
-			// list as declaring no specific attributes. That is read as the
-			// relying party being registered for the credential without an
-			// attribute restriction, so the over-asking check does not flag it.
+			// ETSI TS 119 475 §5.2.4 Table 9 allows omitting specific attributes.
+			// Treat this as registration without an attribute restriction.
 			rc.anyClaimAllowed = true
 		}
 		for _, claim := range claims {
@@ -294,9 +262,7 @@ func registeredCovers(registered []registeredCredential, format string, types []
 	return false
 }
 
-// typesOverlap reports whether two credential type lists share a value. An
-// empty list on either side matches, so a request or a registration that names
-// no type is not treated as a mismatch.
+// An empty type list does not restrict matching.
 func typesOverlap(a, b []string) bool {
 	if len(a) == 0 || len(b) == 0 {
 		return true
@@ -311,9 +277,8 @@ func typesOverlap(a, b []string) bool {
 	return false
 }
 
-// pathPrefix reports whether registered is a prefix of requested, so a
-// registered parent path (address) covers a requested child (address,
-// street_address).
+// Registering a parent path such as address also covers children such as
+// address.street_address.
 func pathPrefix(registered, requested []any) bool {
 	if len(registered) > len(requested) {
 		return false
@@ -326,8 +291,7 @@ func pathPrefix(registered, requested []any) bool {
 	return true
 }
 
-// credentialTypes reads the type identifiers out of a DCQL or WRPRC meta
-// object: vct_values for SD-JWT VC, doctype_value for mdoc.
+// SD-JWT VC uses vct_values. mdoc uses doctype_value.
 func credentialTypes(meta any) []string {
 	m, ok := meta.(map[string]any)
 	if !ok {
@@ -358,8 +322,6 @@ func describeClaim(format string, types []string, path []any) string {
 	return fmt.Sprintf("%s of %s", claim, label)
 }
 
-// credentialTypeName names a credential by its first registered type, or its
-// format when no type is given.
 func credentialTypeName(format string, types []string) string {
 	if len(types) > 0 {
 		return types[0]
@@ -382,8 +344,7 @@ func nonEmptyList(v any) bool {
 	return ok && len(list) > 0
 }
 
-// hasContact accepts a single URL or address string or a non-empty list of
-// them, since ETSI TS 119 475 allows one or more.
+// ETSI TS 119 475 permits one or more contact addresses.
 func hasContact(v any) bool {
 	if stringClaim(v) != "" {
 		return true
@@ -415,10 +376,8 @@ func toAnyList(v any) []any {
 	return list
 }
 
-// SignRegistrationCertificateJWT signs a relying-party registration
-// certificate (typ rc-wrp+jwt) with the given key, carrying the signer's leaf
-// certificate in x5c. The demo verifier and issuer present one so the wallet
-// they run beside has a purpose to show.
+// SignRegistrationCertificateJWT includes the leaf in x5c so wallets can verify the
+// registered purpose.
 func SignRegistrationCertificateJWT(claims map[string]any, signingKey *ecdsa.PrivateKey, signerCerts []*x509.Certificate) (string, error) {
 	header := map[string]any{
 		"alg": "ES256",
@@ -430,8 +389,7 @@ func SignRegistrationCertificateJWT(claims map[string]any, signingKey *ecdsa.Pri
 	return signJSONWebSignature(claims, signingKey, header)
 }
 
-// verifierInfoEntries reads the verifier_info array out of a request payload.
-// Over plain request parameters the array arrives JSON-encoded in a string.
+// Plain request parameters carry verifier_info as a JSON string.
 func verifierInfoEntries(payload map[string]any) []map[string]any {
 	if payload == nil {
 		return nil
@@ -453,10 +411,8 @@ func verifierInfoEntries(payload map[string]any) []map[string]any {
 	return entries
 }
 
-// purposeStrings renders a purpose claim: one or more localized entries
-// ({lang, value} in the certificate profile, {lang, content} in the TS5 data
-// model it is gathered from), where English is preferred and the first entry
-// stands in without it. A plain string is taken as it is.
+// Prefer English, then the first available translation. Certificate entries use value.
+// The TS5 data model uses content. Plain strings pass through unchanged.
 func purposeStrings(raw any) []string {
 	switch value := raw.(type) {
 	case string:
@@ -509,8 +465,7 @@ func containsPurpose(purposes []string, purpose string) bool {
 	return false
 }
 
-// decodeCompactJWT decodes the header and payload of a compact JWT without
-// verifying it. Verification, where possible, is the caller's step.
+// Decoding does not verify the signature. The caller must verify it where possible.
 func decodeCompactJWT(compact string) (header, payload map[string]any, err error) {
 	parts := strings.Split(compact, ".")
 	if len(parts) != 3 {

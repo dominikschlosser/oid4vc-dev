@@ -23,8 +23,6 @@ import (
 	"testing"
 )
 
-// recorder answers every request with body and records the request, so each
-// wrapper can be checked against the endpoint it calls.
 type recorder struct {
 	method      string
 	path        string
@@ -303,8 +301,6 @@ func TestClientSendsARawStringBodyUnchanged(t *testing.T) {
 	}
 }
 
-// The server's own error message survives in the returned error next to the
-// status code.
 func TestClientReportsTheServerError(t *testing.T) {
 	rec := &recorder{status: http.StatusBadRequest, reply: `{"error":"credential is protected"}`}
 	client, closeFn := rec.server(t)
@@ -451,8 +447,6 @@ func TestClientReturnsRawBytesUnparsed(t *testing.T) {
 	}
 }
 
-// An interactive accept must tell the wallet to show its consent dialog rather
-// than auto-accept the request.
 func TestPresentAndAcceptOfferSendInteractive(t *testing.T) {
 	r := &recorder{reply: "{}"}
 	c, closeFn := r.server(t)

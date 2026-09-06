@@ -14,11 +14,8 @@
 
 package wallet
 
-// Credential template API. Templates are JSON documents (see the
-// credtemplate package). Pre-defined templates are compiled in and user templates
-// live in the wallet directory's templates/ subdirectory. PUT accepts a full
-// template document, which makes it double as an import endpoint for shared
-// templates.
+// User templates are stored under templates/ in the wallet directory. PUT accepts a
+// complete document, including templates shared by other users.
 
 import (
 	"encoding/json"
@@ -30,9 +27,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/credtemplate"
 )
 
-// handleListTemplates returns all credential templates (pre-defined and user),
-// including their claims so clients can pre-fill issuance forms without a
-// second request.
+// Include claims so clients can populate issuance forms without another request.
 func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 	templates, err := credtemplate.List(s.wallet.Templates)
 	if err != nil {
@@ -42,10 +37,8 @@ func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, templates)
 }
 
-// handleGetTemplate returns a single template by name, which must be a bare
-// name. credtemplate.Load takes a name or a path (the CLI documents
-// `templates show ./some-template.json`), so a URL segment handed to it would
-// be an arbitrary file read over HTTP.
+// Accept only a bare name. credtemplate.Load also accepts paths for CLI use, which
+// would allow arbitrary file reads through this endpoint.
 func (s *Server) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name != filepath.Base(name) || strings.HasPrefix(name, ".") {
@@ -61,8 +54,7 @@ func (s *Server) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tpl)
 }
 
-// handlePutTemplate creates or replaces a user template. The body is a full
-// template document. A name in the body is overridden by the URL name.
+// The URL name overrides the name in the document.
 func (s *Server) handlePutTemplate(w http.ResponseWriter, r *http.Request) {
 	var tpl credtemplate.Template
 	if err := json.NewDecoder(r.Body).Decode(&tpl); err != nil {
@@ -82,9 +74,8 @@ func (s *Server) handlePutTemplate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, saved)
 }
 
-// handleDeleteTemplate removes a user template. Pre-defined templates cannot be
-// deleted. Deleting a user template that overrides a pre-defined one restores the
-// pre-defined version.
+// Deleting an override restores the bundled template. Bundled templates themselves
+// cannot be deleted.
 func (s *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	if err := credtemplate.Delete(s.wallet.Templates, r.PathValue("name")); err != nil {
 		status := http.StatusBadRequest

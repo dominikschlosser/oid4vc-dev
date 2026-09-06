@@ -22,23 +22,19 @@ import (
 	"testing"
 )
 
-// The generated script is what runs on a scheme dispatch, and it is only
-// exercised by hand otherwise. Rendering it touches nothing: RegisterURLSchemes
-// writes files and talks to Launch Services, handlerScriptSource does not.
 func TestHandlerScriptSource(t *testing.T) {
 	script := handlerScriptSource("/usr/local/bin/eudi", RegisterOptions{ListenerPort: 8085})
 
-	// The handler names the page it opens on both acts, which is what ties
-	// the request it submits to that page rather than to every visitor.
+	// The browser session ID connects the submitted request to the tab opened by the
+	// handler.
 	if !strings.Contains(script, `open "$LISTENER/?focus=overview&owner=$OWNER"`) {
 		t.Error("the URL the handler opens must name the page")
 	}
 	if strings.Count(script, `-H "$OWNER_HEADER"`) != 2 {
 		t.Error("both submissions must carry the page name slot")
 	}
-	// A local wallet opens its own tab, which holds no name, so the request
-	// has to stay unowned to reach it. The name is created only in the branch
-	// that opens a page with it.
+	// Local wallet tabs have no browser session ID, so local submissions must leave it
+	// empty.
 	if !strings.Contains(script, `OWNER_HEADER="X-Eudi-Owner:"`) {
 		t.Error("the submission names no page until this script opens one")
 	}
@@ -49,7 +45,6 @@ func TestHandlerScriptSource(t *testing.T) {
 		t.Error("the name is minted inside the branch that opens the page")
 	}
 
-	// It runs on a user's machine as bash, so it has to parse as bash.
 	path := filepath.Join(t.TempDir(), "handler.sh")
 	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
 		t.Fatalf("writing the script: %v", err)
@@ -64,16 +59,13 @@ func TestHandlerScriptSource(t *testing.T) {
 		t.Error("the release the script reports must be substituted")
 	}
 
-	// Order matters: the submit blocks until consent is resolved, so the UI
-	// has to be open before it.
+	// Submission waits for consent, so the handler must open the UI first.
 	openIdx := strings.Index(script, "open_remote_ui")
 	submitIdx := strings.Index(script, "submit_presentation()")
 	if openIdx < 0 || submitIdx < 0 || openIdx > submitIdx {
 		t.Errorf("the UI must be opened before the blocking submit (open at %d, submit at %d)", openIdx, submitIdx)
 	}
 
-	// Without --auto-accept a dispatch stays interactive, which is what
-	// keeps the consent dialog for a user-initiated flow.
 	if !strings.Contains(script, "INTERACTIVE=true") {
 		t.Error("interactive dispatches must be submitted as interactive")
 	}
@@ -98,8 +90,8 @@ func TestHandlerScriptSourceAutoAccept(t *testing.T) {
 	}
 }
 
-// A Homebrew upgrade replaces the versioned Cellar file the stable symlink
-// points at. The handler must be registered with the symlink so it survives.
+// Homebrew upgrades replace the versioned binary. Registration must use the stable
+// symlink.
 func TestStableBinaryPathKeepsHomebrewSymlink(t *testing.T) {
 	root := t.TempDir()
 	cellarBin := filepath.Join(root, "Cellar", "eudi-dev", "1.2.3", "bin")
@@ -124,8 +116,6 @@ func TestStableBinaryPathKeepsHomebrewSymlink(t *testing.T) {
 	}
 }
 
-// A symlink outside a Cellar (a build or temp location) is not a stable launch
-// point, so the resolved target is used.
 func TestStableBinaryPathResolvesNonHomebrewSymlink(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "build", "eudi")
@@ -149,7 +139,6 @@ func TestStableBinaryPathResolvesNonHomebrewSymlink(t *testing.T) {
 	}
 }
 
-// A real binary (no symlink) is returned unchanged.
 func TestStableBinaryPathPlainFile(t *testing.T) {
 	root := t.TempDir()
 	bin := filepath.Join(root, "eudi")

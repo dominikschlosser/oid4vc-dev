@@ -15,8 +15,8 @@
 package main
 
 import (
-	// Embed the timezone database: the release image is built from scratch
-	// alpine without tzdata, and --demo-reset accepts named zones.
+	// Embed timezone data because the release image has no tzdata package and
+	// --demo-reset accepts named zones.
 	_ "time/tzdata"
 
 	"os"

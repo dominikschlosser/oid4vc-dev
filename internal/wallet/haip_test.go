@@ -32,14 +32,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/oid4vc"
 )
 
-// haipCompliantParams builds a request that satisfies HAIP 1.0: response type
-// vp_token, an encrypted response mode, a DCQL query for a profile format, and
-// a Request Object genuinely signed by a certificate that is neither
-// self-signed nor accompanied by its trust anchor.
-//
-// The signature has to be real. HAIP requires the x509_hash prefix, whose
-// value is a hash of the signing certificate, so a fixture that only looks
-// like one would let the checks pass without ever exercising them.
+// Use a real signed request with x509_hash and a CA-issued leaf. A fixture that merely
+// resembles a signed request would not exercise signature and certificate-hash checks.
 func haipCompliantParams(t *testing.T) (*AuthorizationRequestParams, *oid4vc.RequestObjectJWT) {
 	t.Helper()
 
@@ -110,10 +104,8 @@ func TestValidateHAIPCompliance(t *testing.T) {
 			wantContain:    "Client Identifier Prefix",
 		},
 		{
-			// x509_san_dns is a valid OID4VP prefix and appears nowhere in
-			// HAIP, which names x509_hash and only x509_hash for signed
-			// requests. Accepting it here would let --haip pass a request the
-			// profile does not allow, which is the one thing the flag is for.
+			// HAIP permits only x509_hash for signed requests, even though OpenID4VP
+			// also defines x509_san_dns.
 			name:           "x509_san_dns is not a HAIP prefix",
 			modifyParams:   func(p *AuthorizationRequestParams) { p.ClientID = "x509_san_dns:verifier.example" },
 			wantViolations: 1,
@@ -387,17 +379,14 @@ func TestHAIPIssuanceAcceptsCompliantPreAuthorizedOffer(t *testing.T) {
 		"grant_types_supported":                 []any{"authorization_code", "urn:ietf:params:oauth:grant-type:pre-authorized_code"},
 		"dpop_signing_alg_values_supported":     []any{"ES256"},
 		"token_endpoint_auth_methods_supported": []any{"attest_jwt_client_auth"},
-		// Deliberately absent: PAR and PKCE, which this offer never uses.
 	}
 	if violations := ValidateHAIPIssuanceCompliance(offer, meta); len(violations) != 0 {
 		t.Errorf("a compliant pre-authorized code offer was rejected: %v", violations)
 	}
 }
 
-// TestValidateHAIPIssuanceCompliance_SilentClientAuthIsNotAViolation covers an
-// authorization server that authenticates its clients without advertising it.
-// HAIP requires the issuer to require client authentication, but nothing
-// requires it to say so in metadata, so absence proves nothing.
+// HAIP requires client authentication but does not require its advertisement in
+// metadata. Missing metadata alone is not a violation.
 func TestValidateHAIPIssuanceCompliance_SilentClientAuthIsNotAViolation(t *testing.T) {
 	offer := &oid4vc.CredentialOffer{
 		CredentialIssuer: "https://issuer.example",
@@ -409,7 +398,6 @@ func TestValidateHAIPIssuanceCompliance_SilentClientAuthIsNotAViolation(t *testi
 		"pushed_authorization_request_endpoint": "https://issuer.example/par",
 		"code_challenge_methods_supported":      []any{"S256"},
 		"dpop_signing_alg_values_supported":     []any{"ES256"},
-		// No token_endpoint_auth_methods_supported at all.
 	}
 
 	if violations := ValidateHAIPIssuanceCompliance(offer, meta); len(violations) != 0 {
@@ -452,11 +440,8 @@ func TestHAIPIssuanceAcceptsPARWithoutTheRequireFlag(t *testing.T) {
 	}
 }
 
-// A --haip request under the x509_hash prefix stands on the signature the
-// prefix value names: the prefix value is a hash of the certificate that
-// signed the request. The signature and hash checks run for every request
-// through ValidateAuthorizationRequest, so that entry point is what proves
-// the flag catches a broken one.
+// Exercise ValidateAuthorizationRequest so the test includes the signature and
+// certificate hash checks used with HAIP.
 func TestHAIPEnforcesTheRequestSignature(t *testing.T) {
 	t.Run("a signature that does not verify", func(t *testing.T) {
 		params, reqObj := haipCompliantParams(t)
@@ -568,10 +553,8 @@ func TestHAIPRejectsSelfSignedAndAnchoredChains(t *testing.T) {
 		reqObj := &oid4vc.RequestObjectJWT{Raw: raw, Header: header, Payload: payload}
 
 		violations := ValidateHAIPCompliance(params, reqObj)
-		// The finding names what was seen, a certificate that signed itself,
-		// and where. Which certificate is a trust anchor depends on what the
-		// party checking was configured with, which the wallet has not been
-		// given, so the message must not assert it read one off the chain.
+		// Report the self-signed certificate that was observed. Without configured
+		// trust anchors, the wallet cannot identify a certificate as the trusted root.
 		if !containsSubstring(violations, "self-signed certificate at position 2") {
 			t.Errorf("violations = %v, want the self-signed certificate named with its position", violations)
 		}
@@ -646,9 +629,6 @@ func containsSubstring(values []string, want string) bool {
 	return false
 }
 
-// selfSignedCert builds a certificate that is its own issuer, which is what a
-// trust anchor looks like and what HAIP forbids a request from being signed
-// with.
 func selfSignedCert(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -675,10 +655,7 @@ func selfSignedCert(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
 	return cert, key
 }
 
-// The two switches are independent. --haip decides how many checks run, and
-// the validation mode decides what a finding does. A HAIP run in debug mode
-// therefore names every profile violation it sees and still lets the flow
-// continue.
+// HAIP selects checks. Validation mode decides whether their findings stop the flow.
 func TestHAIPChecksRunInBothModesAndTheModeDecidesSeverity(t *testing.T) {
 	violating := func(t *testing.T) *AuthorizationRequestParams {
 		t.Helper()

@@ -37,9 +37,7 @@
   box-sizing: border-box;
 }
 
-/* Base link color: without this, links inside dialogs and other unstyled
-   containers fall back to the browser default dark blue, which is unreadable
-   on the dark theme. Scoped rules below override where needed. */
+/* Set a readable default link color for dark backgrounds. */
 a {
   color: var(--accent);
 }
@@ -48,9 +46,6 @@ a {
   display: none !important;
 }
 
-/* One thin, theme-aware scrollbar for every scroll region, so a long
-   credential list, a dialog, and the decoder all read the same instead of
-   falling back to the platform's default bar. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
@@ -75,9 +70,7 @@ body {
   background: var(--bg);
   color: var(--text);
   height: 100vh;
-  /* Mobile browsers count the URL bar into 100vh, so the footer would sit
-     below the visible area with no way to scroll to it. dvh tracks the
-     actually visible height. */
+  /* Use the visible viewport height so mobile browser controls do not hide the footer. */
   height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -92,7 +85,6 @@ header {
   border-bottom: 1px solid var(--border);
   background: var(--bg-surface);
   flex-shrink: 0;
-  /* Anchor the mobile menu dropdown, which is absolutely positioned. */
   position: relative;
 }
 
@@ -102,8 +94,7 @@ header h1 {
   color: var(--accent);
 }
 
-/* The mark is 46:51, so give it that ratio instead of a square box that
-   would letterbox it and add phantom padding next to the title. */
+/* Match the logo's 46:51 aspect ratio to avoid padding from a square box. */
 .header-logo {
   width: 26px;
   height: 29px;
@@ -113,7 +104,6 @@ header h1 {
 .header-left {
   display: flex;
   align-items: center;
-  /* Wordmark reads as its own unit, then the links with their own rhythm. */
   gap: 28px;
 }
 
@@ -127,8 +117,6 @@ header h1 {
   font-size: 11px;
 }
 
-/* The menu toggle only exists for narrow screens. The media query below
-   reveals it and turns the link row into a dropdown. */
 .header-menu-toggle {
   display: none;
   background: none;
@@ -193,8 +181,8 @@ header h1 {
 .main {
   flex: 1;
   overflow-y: auto;
-  /* Reserve the scrollbar's width whether or not it is showing, so the content
-     does not jump sideways the moment the list grows past one screen. */
+  /* Reserve scrollbar space so content does not move sideways when scrolling becomes
+     necessary. */
   scrollbar-gutter: stable;
   padding: 16px;
   display: flex;
@@ -202,7 +190,6 @@ header h1 {
   gap: 16px;
 }
 
-/* Credential Cards */
 .section-title {
   font-size: 12px;
   color: var(--text-dim);
@@ -217,13 +204,8 @@ header h1 {
   gap: 8px;
 }
 
-/* The credential card is a single background slot (the face) plus a body of
-   debug detail. It lays itself out from its own width: a dense row on a wide
-   list, a wallet-style card with the face as a hero on a phone. */
-/* The list is the query container: every card lays itself out from the list
-   width, so the whole stack switches between the row and the wallet-card form
-   together. A card cannot size itself from its own width, so the container has
-   to be the parent. */
+/* Container queries read the parent width. Using the list as the container makes all cards
+   switch layouts together. */
 .credentials {
   display: flex;
   flex-direction: column;
@@ -238,9 +220,6 @@ header h1 {
   overflow: hidden;
 }
 
-/* The card face carries the issuer-declared appearance. background_image over
-   background_color as its base, or a solid color, or a plain tile, painted by
-   applyCredentialDisplay. */
 .card-face {
   position: relative;
   background-size: cover;
@@ -253,12 +232,8 @@ header h1 {
   color: var(--text);
 }
 
-/* A batch is drawn as a small stack: two sheets peek from the lower right of
-   the card face, drawn as offset box-shadows so they sit behind the art and
-   are never clipped. The stack is the only cue that a credential was batch
-   issued (no count, since a batch cycles and reuses). It shows on the desktop
-   list row and in the consent dialog. The mobile hero drops it, where a
-   full-width tile has no room for the offset. */
+/* Show batches as a stack on desktop and in consent. A count would be misleading because
+   copies are reused. Phone cards have no space for the offset. */
 .credential-card.batch .card-face {
   box-shadow:
     3px 4px 0 -1px var(--bg-surface),
@@ -268,8 +243,6 @@ header h1 {
     0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
-/* The issuer logo, a monogram from the display name, or a generic glyph, each
-   sitting on the face. */
 .credential-logo {
   position: absolute;
   object-fit: contain;
@@ -292,9 +265,6 @@ header h1 {
   letter-spacing: -0.01em;
 }
 
-/* One accent-blue format pill for every format, so the format reads without
-   the noise of a color per type. The face variant overlays the art with a
-   scrim (set inline to match the declared text color). */
 .format-badge {
   font-family: var(--font-mono, monospace);
   font-weight: 500;
@@ -321,14 +291,11 @@ header h1 {
 }
 
 .credential-info { min-width: 0; }
-/* Only in the list does the card body open the decoder. On a consent
-   candidate the click picks the credential, and the decoder has a link of its
-   own. */
+/* List cards open the decoder. Consent cards select a credential and use a separate
+   decoder link. */
 .credential-card .credential-info { cursor: pointer; }
 .credential-card .credential-info:hover .credential-name { color: var(--accent); }
 
-/* The header: the format pill baseline-aligned with the display name, and the
-   technical type dimmed beside it (the vct is what a DCQL query matches on). */
 .cred-hdr {
   display: flex;
   align-items: baseline;
@@ -347,8 +314,6 @@ header h1 {
   margin-top: 8px;
 }
 
-/* The meta line: the technical type, the issuer as the format carries it, and
-   the claim counts. */
 .cred-meta {
   display: flex;
   gap: 8px 16px;
@@ -367,20 +332,13 @@ header h1 {
 }
 .mono { font-family: var(--font-mono, monospace); font-size: 11px; }
 
-/* The About control opens the credential's issuer-declared description. It is an
-   ordinary action button carrying an info glyph, so it sits with Show and Revoke
-   yet reads as info, and shows only when a description exists. These base rules
-   precede the container queries below, which choose the glyph per width (info on
-   a phone that flips, a rotating chevron on a wide list that expands in place). */
+/* Place shared description rules before container queries that choose the phone and
+   desktop controls. */
 .about-btn { display: inline-flex; align-items: center; gap: 5px; }
 .about-btn .ic { display: block; width: 13px; height: 13px; }
 .about-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
 .about-btn .ic-chev { transition: transform 0.2s ease; }
 
-/* The description pane: a small label and a bounded body that scrolls with the
-   one themed scrollbar every scroll region shares. The Back control belongs to
-   the phone flip (the desktop query hides it, since a wide list toggles the pane
-   from the About button). */
 .cred-desc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .cred-desc-label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); }
 .cred-desc-body { font-size: 12px; line-height: 1.55; color: var(--text); overscroll-behavior: contain; }
@@ -393,9 +351,6 @@ header h1 {
 .cred-desc-back:hover { color: var(--text); }
 .cred-desc-back .ic { width: 13px; height: 13px; display: block; }
 
-/* DESKTOP: a dense row with a fixed card-art thumbnail and the body beside it.
-   The art is a stable size, so a card whose body wraps grows a little without
-   the art resizing with it. */
 @container (min-width: 601px) {
   .cred-front {
     display: flex;
@@ -416,25 +371,18 @@ header h1 {
   .credential-info { flex: 1; }
   .credential-actions { flex: 0 0 auto; margin-left: 6px; }
 
-  /* The description opens as an inline pane below the row, indented past the
-     art thumbnail and held to a readable measure though the row is wide. The
-     About button toggles it, so the pane's Back control is not shown. */
   .cred-desc { max-height: 0; overflow: hidden; opacity: 0; transition: max-height 0.26s ease, opacity 0.2s ease; }
   .credential-card.desc-open .cred-desc { max-height: 180px; opacity: 1; }
   .cred-desc-in { margin: 0 14px 0 120px; padding: 11px 0 13px; border-top: 1px solid var(--border); }
   .cred-desc-body { max-height: 120px; max-width: 76ch; overflow-y: auto; }
-  /* No Back control on a wide list: the About button opens and closes the pane. */
+  /* The About button closes the desktop description, so it needs no separate Back button. */
   .cred-desc-back { display: none; }
 
-  /* The pane expands in place, so the chevron replaces the info glyph and turns
-     to point up while it is open. */
   .about-btn .ic-info { display: none; }
   .about-btn .ic-chev { display: block; }
   .about-btn[aria-expanded="true"] .ic-chev { transform: rotate(180deg); }
 }
 
-/* MOBILE: a wallet card, the face a full-width hero with the name on it, the
-   debug detail stacked below, actions full width. */
 @container (max-width: 600px) {
   .card-face {
     width: 100%;
@@ -442,8 +390,6 @@ header h1 {
     border-radius: 12px 12px 0 0;
     overflow: hidden;
   }
-  /* The full-width hero has no room for the offset stack, so a batch reads as a
-     plain card on a phone (the stack stays a desktop and consent cue). */
   .credential-card.batch .card-face {
     box-shadow: none;
   }
@@ -452,7 +398,6 @@ header h1 {
   .face-name { left: 15px; bottom: 10px; right: 15px; font-size: 18px; }
   .cred-hdr { display: none; }
   .credential-info { padding: 10px 15px 4px; }
-  /* Full-width action buttons, sized for touch without eating vertical space. */
   .credential-actions { padding: 8px 15px 11px; gap: 8px; }
   .credential-actions .btn {
     flex: 1;
@@ -461,18 +406,14 @@ header h1 {
     border-radius: 8px;
   }
 
-  /* On a phone a tall hero card turns over to read its description: the card is
-     the 3D holder, so the border and the clip move to the two faces. */
   .credential-card {
     background: transparent;
     border: 0;
     overflow: visible;
     transform-style: preserve-3d;
     -webkit-transform-style: preserve-3d;
-    /* Perspective is set in the resting transform too, so only the rotation
-       animates. A perspective that appeared only in the open state would leave
-       the 3D context unstable through the flip, and the mirrored front face
-       would show until the animation finished. */
+    /* Keep perspective in both states. Adding it only during the flip exposes the mirrored
+       front until the animation ends. */
     transform: perspective(1000px) rotateY(0deg);
     -webkit-transform: perspective(1000px) rotateY(0deg);
     transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -481,20 +422,15 @@ header h1 {
     transform: perspective(1000px) rotateY(180deg);
     -webkit-transform: perspective(1000px) rotateY(180deg);
   }
-  /* The faces carry no overflow clip: iOS WebKit stops honoring
-     backface-visibility on an element that also has overflow other than
-     visible, and the hidden front face would show through the flip. The card art
-     clips itself to its border radius, and the description body scrolls on its
-     own, so the clip is not needed here. */
+  /* iOS WebKit can ignore backface-visibility when these faces also clip overflow. Clip
+     the artwork and scroll the description separately. */
   .cred-front {
     position: relative;
     border: 1px solid var(--border);
     border-radius: 12px;
     background: var(--bg-surface);
-    /* iOS WebKit only culls a hidden backface on an element that is itself
-       3D-transformed. The back face rotates, so it is culled. The front face
-       needs this identity rotation to get the same 3D layer, or its mirrored
-       name and logo show through the whole flip. */
+    /* iOS WebKit needs a 3D transform on the front face to hide its reverse. The identity
+       rotation supplies it without moving the card. */
     transform: rotateY(0deg);
     -webkit-transform: rotateY(0deg);
     backface-visibility: hidden;
@@ -516,9 +452,6 @@ header h1 {
   .cred-desc-in { display: flex; flex-direction: column; min-height: 0; flex: 1; padding: 12px 14px; }
   .cred-desc-body { flex: 1; min-height: 0; overflow-y: auto; }
 
-  /* The About button leads the full-width action row and stays its own size so
-     Revoke, Show and Delete keep sharing the rest. It flips the card, so it
-     reads as info and the chevron is hidden. */
   .credential-actions { flex-wrap: wrap; }
   .credential-actions .about-btn { flex: 0 0 auto; }
   .about-btn .ic-chev { display: none; }
@@ -528,7 +461,6 @@ header h1 {
   flex-shrink: 0;
   display: flex;
   gap: 6px;
-  /* Keeps the actions on the right edge, on their own row too. */
   margin-left: auto;
 }
 
@@ -550,7 +482,6 @@ header h1 {
   cursor: default;
 }
 
-/* Actions Bar */
 .actions-bar {
   display: flex;
   gap: 8px;
@@ -574,8 +505,6 @@ header h1 {
   color: var(--text-dim);
 }
 
-/* Pointer to the built-in demo issuer and verifier, at the moment someone
-   wants to run a flow but has no offer or request URI at hand. */
 .actions-hint {
   margin-top: 6px;
   font-size: 11px;
@@ -739,7 +668,6 @@ header h1 {
   user-select: all;
 }
 
-/* Dialog Forms */
 .dialog-hint {
   font-size: 12px;
   color: var(--text-dim);
@@ -796,7 +724,6 @@ header h1 {
   margin-top: 6px;
 }
 
-/* A divider heading that spans both columns of the form grid. */
 .form-section-label {
   grid-column: 1 / -1;
   font-size: 10px;
@@ -809,8 +736,7 @@ header h1 {
   border-top: 1px solid var(--border);
 }
 
-/* A note that spans the whole form width, so it does not shift the label and
-   input columns of the grid. */
+/* Span the grid so notes do not shift the label and input columns. */
 .form-hint {
   grid-column: 1 / -1;
   margin: 0;
@@ -819,8 +745,6 @@ header h1 {
   color: var(--text-dim);
 }
 
-/* A color or image field: the text input carries the value, with a picker or an
-   upload beside it as a convenience. */
 .form-color-row,
 .form-image-row {
   display: flex;
@@ -927,18 +851,15 @@ header h1 {
   font-size: 10px;
   font-weight: 600;
   vertical-align: middle;
-  /* A badge is a unit: it wraps to the next line whole. */
+  /* Keep badges whole when wrapping. */
   white-space: nowrap;
 }
 
-/* Any badge or chip that carries an explanatory tooltip invites a hover. */
 .status-badge[title],
 .who-chip[title] {
   cursor: help;
 }
 
-/* In the card's pill row the gap sets the spacing and the pills read as a
-   rounded set. */
 .cred-pills .status-badge {
   margin-left: 0;
   padding: 2px 9px;
@@ -954,8 +875,7 @@ header h1 {
   color: var(--text-dim);
 }
 
-/* Pill icons render as pseudo-elements so the badge text stays the plain word
-   (Active, Protected, Signed), which keeps text-based automation matching. */
+/* Pseudo-elements keep icons out of badge text used by browser tests. */
 .pill-ico { flex: 0 0 auto; }
 .ico-dot::before { content: "● "; }
 .ico-block::before { content: "⊘ "; }
@@ -1046,7 +966,6 @@ header h1 {
   display: none;
 }
 
-/* Consent Dialog */
 .consent-overlay {
   display: none;
   position: fixed;
@@ -1072,7 +991,6 @@ header h1 {
   overflow-y: auto;
 }
 
-/* A small kicker, so the who block leads. */
 .consent-title {
   font-size: 11px;
   font-weight: 600;
@@ -1082,9 +1000,6 @@ header h1 {
   margin-bottom: 10px;
 }
 
-/* Who is asking: the self-asserted name when the request carried one, the
-   authenticated client_id (or the issuer) beneath it, and the request-object
-   authentication state. */
 .who {
   display: flex;
   align-items: center;
@@ -1143,9 +1058,6 @@ header h1 {
   margin-bottom: 2px;
 }
 
-/* A consent credential is a block: the reused card, then the disclosed fields.
-   The query-group wrapper is also a .consent-credential but only holds the
-   candidate list, so it stays a plain stacking block. */
 .consent-credential {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1154,10 +1066,6 @@ header h1 {
   background: var(--bg);
 }
 
-/* The same card the list renders, laid out compactly in the dialog. The list's
-   responsive layout is scoped to the list container, so the dialog sizes the
-   face itself (a fixed thumbnail) rather than the row/hero the list switches
-   between. */
 .consent-credential .credential-card,
 .candidate .credential-card {
   display: flex;
@@ -1184,8 +1092,7 @@ header h1 {
 .candidate .face-name,
 .consent-credential .format-badge-face,
 .candidate .format-badge-face { display: none; }
-/* The logo is a small corner badge, so the face's color or art shows behind it
-   (the list sizes it through a container query that does not reach the dialog). */
+/* List container queries do not apply inside consent, so set the logo size here. */
 .consent-credential .credential-logo,
 .candidate .credential-logo {
   top: 5px;
@@ -1198,12 +1105,11 @@ header h1 {
 .candidate .face-init,
 .consent-credential .face-generic,
 .candidate .face-generic { font-size: 18px; }
-/* The dialog card is narrow, so its meta keeps only what helps pick the right
-   credential (id, iat, type) and drops the long issuer that would wrap it tall. */
+/* Keep compact consent cards to ID, issuance time and type. Long issuer names would make
+   them too tall. */
 .consent-credential .cred-m-iss,
 .candidate .cred-m-iss { display: none; }
 
-/* The header above the disclosed fields (and the offer's claim list). */
 .cl-hd {
   display: flex;
   justify-content: space-between;
@@ -1223,7 +1129,6 @@ header h1 {
   color: var(--text-dim);
 }
 
-/* The disclosed fields, as selective-disclosure checkboxes. */
 .consent-claims {
   display: flex;
   flex-direction: column;
@@ -1267,8 +1172,7 @@ header h1 {
   white-space: nowrap;
 }
 .consent-claim-warn { color: var(--yellow); margin-right: 6px; }
-/* The note sits on a full row of its own below the claim, always shown so it
-   needs neither a hover (touch has none) nor a tap. */
+/* Show warnings without hover so they remain accessible on touch screens. */
 .consent-claim-hint {
   flex-basis: 100%;
   font-size: 11px;
@@ -1279,9 +1183,6 @@ header h1 {
 .consent-claim-missing .consent-claim-value {
   color: var(--text-dim);
 }
-/* The offer preview lists claim names only (no value, not selectable), so the
-   name spans the whole row instead of the 42% the presentation dialog reserves
-   for a value column. A long mdoc path then fits on one line. */
 .offer-claims .consent-claim { cursor: default; }
 .offer-claims .consent-claim-name { flex: 1 1 auto; }
 .offer-description {
@@ -1290,8 +1191,6 @@ header h1 {
   margin-top: 4px;
 }
 
-/* The consent dialog's credential selection: one quiet row on the main
-   screen, the set options and candidate rows on the Edit screen. */
 .consent-selection-row {
   display: flex;
   align-items: center;
@@ -1362,12 +1261,9 @@ header h1 {
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.4px;
-  /* A surface behind it so it reads over a candidate card's background art,
-     the way the credential list's buttons do. */
   background: var(--bg-surface);
 }
 
-/* The query group's header: the query id and how many credentials match. */
 .consent-credential-header {
   display: flex;
   align-items: center;
@@ -1399,15 +1295,12 @@ header h1 {
   background: var(--bg-hover);
 }
 
-/* The selected candidate is highlighted rather than the others dimmed: the
-   honest pills (Revoked, Bound to another key) carry that on their own. */
 .candidate.selected {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-surface));
   cursor: default;
 }
 
-/* A candidate holds the reused card between its radio and the decoder link. */
 .candidate-row {
   display: flex;
   align-items: center;
@@ -1421,8 +1314,6 @@ header h1 {
   flex-shrink: 0;
 }
 
-/* The wallet's own choice at the top, the decoder link at the bottom, so the
-   auto chip keeps the corner to itself. */
 .candidate-actions {
   flex-shrink: 0;
   align-self: stretch;
@@ -1433,15 +1324,12 @@ header h1 {
   justify-content: center;
   gap: 8px;
 }
-/* The auto chip stays pinned to the top right, out of the flow, so the Show
-   button below it centers beside the card on its own. */
 .candidate-actions .auto-chip {
   position: absolute;
   top: 0;
   right: 0;
 }
 
-/* The Show link matches the credential list's action button (.btn.btn-sm). */
 .candidate-decode {
   white-space: nowrap;
   text-decoration: none;
@@ -1470,10 +1358,6 @@ header h1 {
   margin-top: 12px;
 }
 
-/* Activity Log */
-/* The activity log lives in a drawer pinned above the footer: the credentials
-   own the main scroll, and the log is a bounded, collapsible region of its own,
-   so it is a glance away without ever pushing the cards down. */
 .activity-drawer {
   flex: 0 0 auto;
   display: flex;
@@ -1533,8 +1417,7 @@ header h1 {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   overflow: hidden;
-  /* Keep each entry its natural height inside the bounded, scrolling drawer,
-     so a full log overflows and scrolls rather than squeezing every row flat. */
+  /* Prevent flex shrinking so full logs scroll instead of compressing their rows. */
   flex-shrink: 0;
 }
 
@@ -1641,7 +1524,6 @@ header h1 {
   font-size: 13px;
 }
 
-/* Responsive */
 @media (max-width: 768px) {
   body {
     overflow: auto;
@@ -1659,10 +1541,8 @@ header h1 {
     gap: 8px;
   }
 
-  /* Narrow screens: the six links do not fit on one line, so the toggle (which
-     sits with Theme on the right) reveals them as a dropdown. It is absolutely
-     positioned below the header so it never reflows the logo, wordmark or the
-     Menu/Theme buttons on the top row. */
+  /* Position the mobile dropdown outside normal flow so opening it does not move the
+     header. */
   .header-menu-toggle {
     display: inline-flex;
     align-items: center;
@@ -1714,7 +1594,6 @@ header h1 {
   }
 }
 
-/* Conformance dialog: what incoming requests are held to. */
 .conformance-table {
   width: 100%;
   border-collapse: collapse;
@@ -1735,9 +1614,6 @@ header h1 {
 .conformance-table td:last-child {
   color: var(--text);
 }
-/* Green is reserved for something being enforced. Anything that is off reads
-   as neutral, and plain settings stay plain so the enforcement rows stand
-   out. */
 .conformance-table td.conf-on {
   font-weight: 600;
   color: var(--green);
@@ -1746,7 +1622,6 @@ header h1 {
   color: var(--text-dim);
 }
 
-/* Editable conformance controls. */
 .conf-input {
   background: var(--bg-surface);
   color: var(--text);
@@ -1764,9 +1639,7 @@ header h1 {
   color: var(--text);
   cursor: pointer;
 }
-/* Keep the read-only demo controls legible: an accent-coloured box reads
-   clearly checked or unchecked, and the label text stays full strength rather
-   than the browser's greyed-out default. */
+/* Keep disabled demo controls readable instead of using the browser's dimmed default. */
 .conf-toggle input,
 .conf-input {
   accent-color: var(--accent);
@@ -1781,7 +1654,6 @@ header h1 {
   opacity: 1;
 }
 
-/* Credential offer details in the consent dialog. */
 .offer-facts {
   font-size: 11px;
   margin: 8px 0 4px;
@@ -1795,8 +1667,6 @@ header h1 {
   color: var(--text-dim);
   min-width: 120px;
 }
-/* The error and submission-result dialogs share the consent overlay but keep
-   a prominent title of their own (the consent title is a small kicker). */
 .dialog-title {
   font-size: 15px;
   font-weight: 700;
@@ -1809,9 +1679,6 @@ header h1 {
   margin-bottom: 12px;
 }
 
-/* Trust & certificates dialog: two labelled sections, each item on its own
-   row with a one-line explanation, so the dialog can be scanned instead of
-   read start to finish. */
 .trust-section {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1851,7 +1718,6 @@ header h1 {
   gap: 2px;
   min-width: 0;
 }
-/* A trust-list group lists several entries under one term. */
 .trust-items dd .trust-links + .trust-item-hint {
   margin-bottom: 4px;
 }
@@ -1883,16 +1749,12 @@ header h1 {
   }
 }
 
-/* Credentials an issuer deferred, still being collected. */
 .deferred-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-bottom: 12px;
 }
-/* An awaiting item reads like a credential row: the card face the offer
-   declared on the left, dimmed while the credential is still on its way, and
-   the detail beside it. */
 .deferred-item {
   display: flex;
   align-items: center;
@@ -1908,7 +1770,6 @@ header h1 {
   border-radius: 8px;
   flex: 0 0 auto;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-  /* The credential is not here yet, so the art is held back until it arrives. */
   opacity: 0.6;
   filter: saturate(0.85);
 }
@@ -1985,7 +1846,6 @@ header h1 {
   padding: 2px 8px;
 }
 
-/* Transaction code entry, for an offer that requires one. */
 .offer-tx-code {
   margin: 10px 0 4px;
 }

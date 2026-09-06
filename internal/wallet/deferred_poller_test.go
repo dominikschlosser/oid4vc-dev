@@ -28,8 +28,6 @@ import (
 	"time"
 )
 
-// deferredCollectionIssuer serves only a deferred credential endpoint, which
-// stays pending for pendingRounds polls and then hands over the credential.
 func deferredCollectionIssuer(t *testing.T, credRaw string, pendingRounds, intervalSeconds int) (*httptest.Server, func() int) {
 	t.Helper()
 	var mu sync.Mutex
@@ -93,7 +91,6 @@ func TestCollectDeferredNow_SkipsWhenCollectionInFlight(t *testing.T) {
 	pending := pendingFor(t, w, "https://issuer.example/deferred", 1)
 	w.AddDeferredIssuance(pending)
 
-	// Stand in for a collection already running for this record.
 	if !server.beginDeferredCollection(pending.ID) {
 		t.Fatal("expected to acquire the in-flight guard")
 	}
@@ -106,7 +103,6 @@ func TestCollectDeferredNow_SkipsWhenCollectionInFlight(t *testing.T) {
 	if !attempt.Pending {
 		t.Fatalf("a collect that races an in-flight one should be skipped as pending, got %+v", attempt)
 	}
-	// The bogus issuer URL is never contacted, so nothing is imported.
 	if got := len(w.GetCredentials()); got != 0 {
 		t.Fatalf("no credential should be imported while a collection is in flight, got %d", got)
 	}
@@ -129,9 +125,7 @@ func TestDeferredCollectionInFlightGuard(t *testing.T) {
 	}
 }
 
-// TestDeferredPoller_CollectsWhenReady covers the whole point of the poller:
-// a credential the issuer was not ready to hand over lands in the wallet
-// later, without anyone asking again.
+// Collect a deferred credential in the background once the issuer makes it available.
 func TestDeferredPoller_CollectsWhenReady(t *testing.T) {
 	w := generateTestWallet(t)
 	credRaw := generateTestCredential(t, w)
@@ -145,11 +139,9 @@ func TestDeferredPoller_CollectsWhenReady(t *testing.T) {
 	saves := 0
 	server := NewServer(w, 0, func() { saves++ })
 	pending := pendingFor(t, w, srv.URL, 1)
-	pending.NextAttemptAt = time.Now().Add(-time.Second) // due now
+	pending.NextAttemptAt = time.Now().Add(-time.Second)
 	w.AddDeferredIssuance(pending)
 
-	// First sweep: the issuer is still working, so the record stays and is
-	// rescheduled rather than dropped.
 	server.collectDueDeferredCredentials(time.Now())
 	if got := len(w.DeferredIssuanceList()); got != 1 {
 		t.Fatalf("after a pending answer the wallet holds %d records, want 1", got)
@@ -165,13 +157,11 @@ func TestDeferredPoller_CollectsWhenReady(t *testing.T) {
 		t.Error("next attempt should have been pushed into the future")
 	}
 
-	// Not due yet: nothing happens, and the issuer is left alone.
 	server.collectDueDeferredCredentials(time.Now())
 	if got := polls(); got != 1 {
 		t.Errorf("issuer polled %d times, want 1 while the wait is not over", got)
 	}
 
-	// Due again: the credential arrives and the record is gone.
 	server.collectDueDeferredCredentials(time.Now().Add(2 * time.Second))
 	if got := len(w.DeferredIssuanceList()); got != 0 {
 		t.Errorf("wallet still holds %d pending records, want 0", got)
@@ -250,9 +240,7 @@ func TestDeferredPoller_NotifiesAfterCollecting(t *testing.T) {
 	}
 }
 
-// TestDeferredPoller_GivesUpOnFatalAnswers covers answers that will not get
-// better by asking again: the record has to go, with a reason, rather than
-// hammering the issuer on a timer forever.
+// Stop polling after final errors and record the reason.
 func TestDeferredPoller_GivesUpOnFatalAnswers(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -287,8 +275,6 @@ func TestDeferredPoller_GivesUpOnFatalAnswers(t *testing.T) {
 	}
 }
 
-// TestDeferredPoller_DropsExpiredRecords covers a deferral the wallet has
-// carried for longer than it is worth.
 func TestDeferredPoller_DropsExpiredRecords(t *testing.T) {
 	w := generateTestWallet(t)
 	polled := false
@@ -317,9 +303,8 @@ func TestDeferredPoller_DropsExpiredRecords(t *testing.T) {
 	}
 }
 
-// TestDeferredIssuance_SurvivesAStoreRoundTrip covers the persistence a long
-// deferral depends on: a wallet that restarts has to be able to finish
-// collecting, which means the ticket and the keys it was bound to come back.
+// Persist both the deferred transaction and its proof keys so collection can resume
+// after restart.
 func TestDeferredIssuance_SurvivesAStoreRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	store := NewWalletStore(dir)
@@ -357,7 +342,6 @@ func TestDeferredIssuance_SurvivesAStoreRoundTrip(t *testing.T) {
 	}
 }
 
-// TestIsRetryableDeferredError covers which answers are worth another attempt.
 func TestIsRetryableDeferredError(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -382,8 +366,6 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
-// TestCollectDeferredNow covers asking an issuer straight away instead of
-// waiting for the next scheduled attempt, and what the caller is told.
 func TestCollectDeferredNow(t *testing.T) {
 	w := generateTestWallet(t)
 	credRaw := generateTestCredential(t, w)
@@ -396,11 +378,9 @@ func TestCollectDeferredNow(t *testing.T) {
 
 	server := NewServer(w, 0, func() {})
 	pending := pendingFor(t, w, srv.URL, 30)
-	// Far in the future: the poller would not touch this for half a minute.
 	pending.NextAttemptAt = time.Now().Add(30 * time.Second)
 	w.AddDeferredIssuance(pending)
 
-	// First check: the issuer is still working, so the caller is told so.
 	attempt, ok := server.CollectDeferredNow(pending.ID)
 	if !ok {
 		t.Fatal("CollectDeferredNow did not find the pending issuance")
@@ -415,8 +395,6 @@ func TestCollectDeferredNow(t *testing.T) {
 		t.Errorf("issuer polled %d times, want 1", polls())
 	}
 
-	// Second check: ready now, so the credential arrives without the schedule
-	// having come round.
 	attempt, ok = server.CollectDeferredNow(pending.ID)
 	if !ok {
 		t.Fatal("CollectDeferredNow did not find the pending issuance on the second try")
@@ -439,8 +417,7 @@ func TestCollectDeferredNow(t *testing.T) {
 	}
 }
 
-// TestAbandonDeferredNow covers dropping a deferred issuance on request: the
-// wallet stops asking, and does not go near the issuer to do it.
+// Abandoning stops local polling without contacting the issuer.
 func TestAbandonDeferredNow(t *testing.T) {
 	w := generateTestWallet(t)
 	polled := false
@@ -482,9 +459,8 @@ func TestAbandonDeferredNow(t *testing.T) {
 	}
 }
 
-// The poller only collects if something starts its goroutine. Every other test
-// here calls the sweep directly, which passes whether or not the server ever
-// runs it, so this one checks that the server does.
+// Exercise server startup because calling the sweep directly cannot prove the
+// background loop starts.
 func TestDeferredPollerRunsFromTheServer(t *testing.T) {
 	w := generateTestWallet(t)
 	credRaw := generateTestCredential(t, w)
@@ -516,9 +492,8 @@ func TestDeferredPollerRunsFromTheServer(t *testing.T) {
 	}
 }
 
-// A credential offer names configurations, not credential types, so a deferred
-// row takes its credential type from the issuer's metadata rather than
-// carrying the configuration id until the credential arrives.
+// Label deferred credentials from issuer metadata because offers name configurations
+// only.
 func TestDeferredIssuanceRecordsTheCredentialType(t *testing.T) {
 	metadata := map[string]any{
 		"credential_configurations_supported": map[string]any{
@@ -543,7 +518,6 @@ func TestDeferredIssuanceRecordsTheCredentialType(t *testing.T) {
 		t.Errorf("mdoc configuration resolved to vct=%q doctype=%q", vct, docType)
 	}
 
-	// An issuer that declares nothing leaves the row on its configuration id.
 	if vct, docType = credentialTypeForConfiguration(metadata, "unknown"); vct != "" || docType != "" {
 		t.Errorf("unknown configuration resolved to vct=%q doctype=%q, want empty", vct, docType)
 	}
@@ -552,17 +526,14 @@ func TestDeferredIssuanceRecordsTheCredentialType(t *testing.T) {
 	}
 }
 
-// A long deferral outlives its access token: the token is issued for the
-// credential request and expires in minutes, while the issuer may ask the
-// wallet back in an hour. Repeating the request with a dead token cannot
-// succeed, so it must not be retried hourly until the 24 hour cap.
+// Stop retrying expired authorization when it cannot be refreshed. Deferred collection
+// may outlast an access token by hours.
 func TestDeferredGivesUpOnARejectedToken(t *testing.T) {
 	for _, status := range []string{"HTTP 401", "HTTP 403"} {
 		if isRetryableDeferredError(fmt.Errorf("deferred credential request: %s: ", status)) {
 			t.Errorf("%s is treated as retryable, so the wallet keeps asking with a token the issuer already refused", status)
 		}
 	}
-	// A server-side fault is still worth another attempt.
 	for _, status := range []string{"HTTP 500", "HTTP 502", "connection refused"} {
 		if !isRetryableDeferredError(fmt.Errorf("deferred credential request: %s", status)) {
 			t.Errorf("%s should stay retryable", status)
@@ -570,9 +541,7 @@ func TestDeferredGivesUpOnARejectedToken(t *testing.T) {
 	}
 }
 
-// A deferral outlives its access token, so the collection has to obtain a new
-// one. Without this the wallet asks with an authorization the issuer already
-// expired and the credential it is owed never arrives.
+// Refresh an expired access token before collecting a deferred credential.
 func TestDeferredCollectionRefreshesAnExpiredToken(t *testing.T) {
 	w := generateTestWallet(t)
 	credRaw := generateTestCredential(t, w)
@@ -594,7 +563,6 @@ func TestDeferredCollectionRefreshesAnExpiredToken(t *testing.T) {
 				"access_token": "fresh-token", "token_type": "Bearer", "expires_in": 300,
 			})
 		case strings.HasSuffix(r.URL.Path, "/deferred"):
-			// The issuer only honours the renewed token.
 			if r.Header.Get("Authorization") != "Bearer fresh-token" {
 				refusedWithOldToken++
 				rw.WriteHeader(http.StatusForbidden)
@@ -620,7 +588,7 @@ func TestDeferredCollectionRefreshesAnExpiredToken(t *testing.T) {
 	pending.AuthScheme = "Bearer"
 	pending.RefreshToken = "refresh-1"
 	pending.TokenEndpoint = srvURL + "/token"
-	pending.AccessTokenExpiresAt = time.Now().Add(-time.Minute) // already expired
+	pending.AccessTokenExpiresAt = time.Now().Add(-time.Minute)
 	w.AddDeferredIssuance(pending)
 
 	server.collectDueDeferredCredentials(time.Now())
@@ -639,9 +607,7 @@ func TestDeferredCollectionRefreshesAnExpiredToken(t *testing.T) {
 	}
 }
 
-// One task failing must not stop the others. A loop that dies leaves the
-// wallet serving requests while quietly doing none of its own work, which is
-// the failure hardest to notice from outside.
+// Keep other background tasks running when one fails.
 func TestBackgroundTaskPanicDoesNotStopTheLoop(t *testing.T) {
 	w := generateTestWallet(t)
 	server := NewServer(w, 0, nil)
@@ -690,7 +656,6 @@ func TestBackgroundTasksRunOffTheRequestPath(t *testing.T) {
 	<-blocked
 	defer close(release)
 
-	// A request is served while that task is still in flight.
 	rec := httptest.NewRecorder()
 	server.handleListCredentials(rec, httptest.NewRequest(http.MethodGet, "/api/credentials", nil))
 	if rec.Code != http.StatusOK {
@@ -698,9 +663,8 @@ func TestBackgroundTasksRunOffTheRequestPath(t *testing.T) {
 	}
 }
 
-// A failing task is retried on the next tick rather than waiting out its
-// interval, and dropped once it has clearly stopped working. Retrying forever
-// buries the reason, and giving up silently loses the work.
+// Retry failures on the next tick, then log and abandon a task after repeated
+// failures.
 func TestFailingBackgroundTaskIsRetriedThenAbandoned(t *testing.T) {
 	w := generateTestWallet(t)
 	server := NewServer(w, 0, nil)
@@ -715,8 +679,7 @@ func TestFailingBackgroundTaskIsRetriedThenAbandoned(t *testing.T) {
 		return fmt.Errorf("nope")
 	}}
 
-	// Drive the same schedule the loop uses, so the retry rule is what is
-	// under test rather than the ticker.
+	// Exercise the scheduler directly to isolate retry behavior from ticker timing.
 	state := taskState{}
 	now := time.Now()
 	for range maxTaskFailures + 3 {

@@ -33,10 +33,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/config"
 )
 
-// Authorization Error Response codes. invalid_request and access_denied are
-// the OAuth 2.0 codes OpenID4VP 1.0 §8.5 clarifies for this protocol. The
-// other three are codes §8.5 adds and Appendix E.3 registers in the IANA
-// "OAuth Extensions Error" registry.
+// OpenID4VP 1.0 §8.5 uses invalid_request and access_denied from OAuth 2.0. Appendix
+// E.3 registers the additional error codes.
 const (
 	errorCodeInvalidRequest          = "invalid_request"
 	errorCodeAccessDenied            = "access_denied"
@@ -45,9 +43,7 @@ const (
 	errorCodeInvalidTransactionData  = "invalid_transaction_data"
 )
 
-// authorizationError is a refusal that already knows which OpenID4VP 1.0 §8.5
-// error code the Verifier should be told. Refusals that carry no code are
-// reported as invalid_request.
+// Errors without an explicit protocol code are reported as invalid_request.
 type authorizationError struct {
 	Code string
 	Err  error
@@ -56,9 +52,8 @@ type authorizationError struct {
 func (e *authorizationError) Error() string { return e.Err.Error() }
 func (e *authorizationError) Unwrap() error { return e.Err }
 
-// authorizationErrorCode returns the §8.5 error code err asks for, defaulting
-// to invalid_request: §8.5 lists the malformed-request cases under that code,
-// and a request the wallet could not make sense of is one of them.
+// Default to invalid_request for requests the wallet cannot parse (OpenID4VP 1.0
+// §8.5).
 func authorizationErrorCode(err error) string {
 	var authErr *authorizationError
 	if errors.As(err, &authErr) && authErr.Code != "" {
@@ -67,17 +62,14 @@ func authorizationErrorCode(err error) string {
 	return errorCodeInvalidRequest
 }
 
-// walletPresentationFormats are the Credential Formats this wallet can put in
-// a VP Token. A query naming only formats outside this set can never match.
 var walletPresentationFormats = map[string]bool{
 	"dc+sd-jwt":   true,
 	"mso_mdoc":    true,
 	"jwt_vc_json": true,
 }
 
-// unsatisfiableQueryError picks the §8.5 error code for a DCQL query no stored
-// credential matched: vp_formats_not_supported when every Credential Query
-// names a format the wallet cannot present, access_denied otherwise.
+// OpenID4VP 1.0 §8.5 uses vp_formats_not_supported when every query requests an
+// unsupported format. Other unmatched queries use access_denied.
 func unsatisfiableQueryError(query map[string]any) (string, string) {
 	credQueries, _ := query["credentials"].([]any)
 	unsupported := map[string]bool{}
@@ -103,9 +95,8 @@ func unsatisfiableQueryError(query map[string]any) (string, string) {
 	return errorCodeVPFormatsNotSupported, "unsupported credential format(s): " + strings.Join(formats, ", ")
 }
 
-// refusalCodeForRequest maps a rejected request to its OpenID4VP 1.0 §8.5
-// error code. A code the error already carries wins. Otherwise the request
-// itself is inspected for the two cases §8.5 singles out by parameter.
+// An explicit error code takes precedence. Otherwise inspect the request for the
+// parameter errors defined by OpenID4VP 1.0 §8.5.
 func refusalCodeForRequest(authReq *AuthorizationRequestParams, err error) string {
 	if code := authorizationErrorCode(err); code != errorCodeInvalidRequest {
 		return code
@@ -120,10 +111,8 @@ func refusalCodeForRequest(authReq *AuthorizationRequestParams, err error) strin
 	default:
 		return errorCodeInvalidRequestURIMethod
 	}
-	// §8.5 invalid_transaction_data covers a transaction_data object that
-	// "contains an unknown or unsupported transaction data type value". This
-	// wallet supports no transaction data type at all, so any object in the
-	// structure is of an unsupported type.
+	// OpenID4VP 1.0 §8.5 uses invalid_transaction_data for unsupported transaction
+	// types. This wallet supports none.
 	if payloadHasKey(authReq.RequestPayload, "transaction_data") {
 		return errorCodeInvalidTransactionData
 	}
@@ -134,14 +123,10 @@ func newConsentID() string {
 	return uuid.New().String()
 }
 
-// isBrowserNavigation reports whether the request looks like a top-level
-// browser navigation rather than an API call.
 func isBrowserNavigation(r *http.Request) bool {
 	return r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept"), "text/html")
 }
 
-// redirectBrowser sends the browser to the verifier's redirect_uri, or to the
-// wallet UI when the verifier did not provide one.
 func redirectBrowser(w http.ResponseWriter, redirectURI string) {
 	if redirectURI == "" {
 		redirectURI = "/"
@@ -150,7 +135,6 @@ func redirectBrowser(w http.ResponseWriter, redirectURI string) {
 	w.WriteHeader(http.StatusSeeOther)
 }
 
-// AuthorizationRequestParams holds the extracted fields from an authorization request.
 type AuthorizationRequestParams struct {
 	ClientID      string
 	ResponseType  string
@@ -158,32 +142,27 @@ type AuthorizationRequestParams struct {
 	Nonce         string
 	State         string
 	RequestOrigin string
-	// Session is the browser this request came from, empty when it did not
-	// come from one. It becomes the consent request's owner.
+	// Session identifies the browser that owns the consent request. Empty for requests
+	// without a browser session.
 	Session          string
 	RedirectURI      string
 	ResponseURI      string
 	Scope            string
 	RequestURIMethod string
-	// RequestURI is where the request object was fetched from, empty when it
-	// was not delivered by reference.
+	// Empty when the Request Object was not fetched by reference.
 	RequestURI     string
 	ClientMetadata map[string]any
 	DCQLQuery      map[string]any
 	RequestObject  *oid4vc.RequestObjectJWT
 	RequestPayload map[string]any
-	// FullParams are the raw request parameters as received, for the
-	// undefined-parameter check.
+	// Preserved to detect undefined parameters.
 	FullParams map[string]string
 	Source     string
-	// UnsignedDCAPI marks a request that arrived unsigned over the Digital
-	// Credentials API (OpenID4VP 1.0 Appendix A.3.1). Such a request carries
-	// no client_id (Appendix A.2), and the platform-reported origin identifies
-	// the caller instead.
+	// Unsigned DC API requests use the platform's origin to identify the caller and
+	// omit client_id (OpenID4VP 1.0 Appendix A.2 and A.3.1).
 	UnsignedDCAPI bool
-	// BrowserRedirect is set when the request came from a browser navigation
-	// (GET with an HTML Accept header): after submission the browser is
-	// redirected to the verifier's redirect_uri instead of receiving JSON.
+	// Browser navigations redirect to the verifier after submission. API calls receive
+	// JSON.
 	BrowserRedirect bool
 }
 
@@ -194,7 +173,6 @@ type preparedPresentation struct {
 	IDToken     string
 }
 
-// handleAuthFlow is the core OID4VP flow handler.
 func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationRequestParams) {
 	source := authReq.Source
 	if source == "" {
@@ -221,12 +199,9 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 			Detail:  err.Error(),
 		})
 		s.triggerUIRequest("")
-		// Nothing is sent to the response endpoint. §8.5 follows RFC 6749, and
-		// §4.1.2.1 says that where the client identifier or redirection URI is
-		// missing or invalid the server "SHOULD inform the resource owner of
-		// the error and MUST NOT automatically redirect the user-agent to the
-		// invalid redirection URI". A request that failed validation names a
-		// destination the wallet has no reason to trust.
+		// Do not send a response to a destination from an invalid request. OpenID4VP
+		// 1.0 §8.5 follows RFC 6749 §4.1.2.1, which forbids automatic redirection when
+		// the client identifier or redirect URI is invalid.
 		errorCode := refusalCodeForRequest(authReq, err)
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error":             errorCode,
@@ -281,10 +256,8 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 		return
 	}
 
-	// Auto-accept mode skips consent. API submissions auto-accept even in
-	// interactive mode: the programmatic call is the caller's consent.
-	// Interactive channels (web invocation URLs, scheme dispatches) keep
-	// the consent dialog.
+	// An API submission provides the caller's consent. Interactive URLs and scheme
+	// handlers still show the consent dialog unless auto-accept is enabled.
 	if s.wallet.AutoAccept || authReq.Source == "api" {
 		s.log("  Mode:          auto-accept")
 		s.autoAcceptPresentation(w, authReq, matches)
@@ -319,10 +292,8 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 	}
 
 	if authReq.BrowserRedirect {
-		// A browser navigation must not hang while the consent is pending:
-		// send the browser to the wallet UI (which shows the request) and
-		// finish the flow in the background once consent arrives. The UI
-		// navigates onward via the approve response's redirect_uri.
+		// Redirect browser navigations to the wallet UI while waiting for consent.
+		// After approval, the UI follows the verifier's redirect_uri.
 		go s.awaitPresentationConsent(noopResponseWriter{}, authReq, matches, consentReq)
 		redirectBrowser(w, "/?request="+consentReq.ID)
 		return
@@ -330,10 +301,7 @@ func (s *Server) handleAuthFlow(w http.ResponseWriter, authReq *AuthorizationReq
 	s.awaitPresentationConsent(w, authReq, matches, consentReq)
 }
 
-// awaitPresentationConsent waits for the user's decision on a presentation
-// consent request and submits the presentation (or an error response) to the
-// verifier. The submission result is also delivered on the consent request's
-// submission channel for the approve API.
+// The submission channel also delivers the result to the approve API.
 func (s *Server) awaitPresentationConsent(w http.ResponseWriter, authReq *AuthorizationRequestParams, matches []CredentialMatch, consentReq *ConsentRequest) {
 	handle := func(result ConsentResult) {
 		if !result.Approved {
@@ -346,8 +314,8 @@ func (s *Server) awaitPresentationConsent(w http.ResponseWriter, authReq *Author
 
 		s.log("  Consent:       approved")
 
-		// The user may have chosen a different set option or credential in
-		// the dialog. Without overrides this keeps the auto-selection.
+		// Keep the automatic selection unless the user chose a different option or
+		// credential.
 		matches = ApplyConsentSelection(consentReq.CredentialOptions, matches, result)
 
 		if result.SelectedClaims != nil {
@@ -369,8 +337,8 @@ func (s *Server) awaitPresentationConsent(w http.ResponseWriter, authReq *Author
 	case result := <-consentReq.ResultCh:
 		handle(result)
 	case <-time.After(config.ConsentTimeout):
-		// The timer races an arriving decision. A decision that already
-		// resolved the request wins, only a request still pending times out.
+		// The timer can race with consent. Only time out requests that are still
+		// pending.
 		if _, ok := s.wallet.ResolveRequest(consentReq.ID, statusExpired); !ok {
 			handle(<-consentReq.ResultCh)
 			return
@@ -381,16 +349,14 @@ func (s *Server) awaitPresentationConsent(w http.ResponseWriter, authReq *Author
 	}
 }
 
-// noopResponseWriter discards the response of a consent flow that has been
-// detached from its originating HTTP request (browser navigations are
-// redirected to the wallet UI instead of blocking until consent).
+// Browser navigations redirect to the UI immediately. Their consent flows finish in
+// the background without writing to the original HTTP response.
 type noopResponseWriter struct{}
 
 func (noopResponseWriter) Header() http.Header         { return http.Header{} }
 func (noopResponseWriter) Write(b []byte) (int, error) { return len(b), nil }
 func (noopResponseWriter) WriteHeader(int)             {}
 
-// autoAcceptPresentation handles auto-accept mode.
 func (s *Server) autoAcceptPresentation(w http.ResponseWriter, authReq *AuthorizationRequestParams, matches []CredentialMatch) {
 	dim := color.New(color.Faint)
 	green := color.New(color.FgGreen)
@@ -408,7 +374,6 @@ func (s *Server) autoAcceptPresentation(w http.ResponseWriter, authReq *Authoriz
 	dim.Println("───────────────────────────────────────")
 }
 
-// submitPresentationWithNotify creates VP tokens, submits them, and notifies via the submission channel.
 func (s *Server) submitPresentationWithNotify(w http.ResponseWriter, authReq *AuthorizationRequestParams, matches []CredentialMatch, submissionCh chan SubmissionResult) {
 	result := s.submitPresentation(w, authReq, matches)
 	if submissionCh != nil {
@@ -444,18 +409,15 @@ func (s *Server) preparePresentation(authReq *AuthorizationRequestParams, matche
 			return nil, fmt.Errorf("creating VP token map: %w", err)
 		}
 		prepared.VPResult = vpResult
-		// Presenting a batch copy advanced its use count, so save the rotation.
+		// Persist the batch credential's updated use count.
 		if s.wallet.takeBatchStateDirty() {
 			s.persistWallet()
 		}
 	}
 
 	if ResponseTypeContains(authReq.ResponseType, "id_token") {
-		// The audience is what identifies the recipient, and over the Digital
-		// Credentials API that is the origin the platform reported rather
-		// than a client_id the request need not carry (OID4VP 1.0 §5.9.3:
-		// "the audience of the Credential Presentation is always the origin
-		// value prefixed by origin:").
+		// DC API presentations use the platform origin as the audience, prefixed with
+		// origin: (OID4VP 1.0 §5.9.3).
 		idToken, err := s.wallet.CreateSelfIssuedIDToken(authReq.Nonce, presentationAudience(authReq))
 		if err != nil {
 			return nil, fmt.Errorf("creating id_token: %w", err)
@@ -500,10 +462,8 @@ func (s *Server) buildBrowserAuthorizationErrorResult(authReq *AuthorizationRequ
 	return BuildBrowserAPIResult(protocol, response)
 }
 
-// canDeliverAuthorizationError reports whether an Authorization Error Response
-// has anywhere to go. A Digital Credentials API response goes back through the
-// API call (Appendix A.4), and a request with neither response_uri nor
-// redirect_uri named no destination at all.
+// DC API responses return through the API call (Appendix A.4). Other responses need
+// response_uri or redirect_uri.
 func canDeliverAuthorizationError(authReq *AuthorizationRequestParams) bool {
 	if authReq == nil || isDCAPIResponseMode(authReq.ResponseMode) {
 		return false
@@ -563,9 +523,8 @@ func (s *Server) deliverAuthorizationError(authReq *AuthorizationRequestParams, 
 	return result, nil
 }
 
-// reportRefusalToVerifier sends the verifier the error response §5.6 owes it,
-// so a refusal the wallet decided on its own ends the verifier's wait. A
-// delivery failure is logged and ignored, since the refusal stands either way.
+// Send the refusal using the request's response mode (OID4VP 1.0 §5.6). Log delivery
+// failures without changing the refusal.
 func (s *Server) reportRefusalToVerifier(authReq *AuthorizationRequestParams, errorCode, errorDescription string) {
 	if !canDeliverAuthorizationError(authReq) {
 		return
@@ -573,8 +532,6 @@ func (s *Server) reportRefusalToVerifier(authReq *AuthorizationRequestParams, er
 	_, _ = s.deliverAuthorizationError(authReq, errorCode, errorDescription)
 }
 
-// submitAuthorizationError submits an authorization error response to the
-// verifier and answers the local caller with the outcome.
 func (s *Server) submitAuthorizationError(w http.ResponseWriter, authReq *AuthorizationRequestParams, status, errorCode, errorDescription string) SubmissionResult {
 	result, err := s.deliverAuthorizationError(authReq, errorCode, errorDescription)
 	if err != nil {
@@ -605,7 +562,6 @@ func (s *Server) submitAuthorizationError(w http.ResponseWriter, authReq *Author
 	}
 }
 
-// submitPresentation creates VP tokens and submits them to the verifier.
 func (s *Server) submitPresentation(w http.ResponseWriter, authReq *AuthorizationRequestParams, matches []CredentialMatch) SubmissionResult {
 	responseURI := authReq.ResponseURI
 	if responseURI == "" {
@@ -678,7 +634,6 @@ func (s *Server) submitPresentation(w http.ResponseWriter, authReq *Authorizatio
 	}
 }
 
-// parseAuthParams extracts authorization request params from URL values.
 func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions, mode ValidationMode) (*AuthorizationRequestParams, error) {
 	get := func(key string) string {
 		if vs, ok := values[key]; ok && len(vs) > 0 {
@@ -714,10 +669,8 @@ func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions, mode 
 
 	if td := get("transaction_data"); td != "" {
 		if mode == ValidationModeStrict {
-			// §8.5 invalid_transaction_data applies when an object in the
-			// transaction_data structure "contains an unknown or unsupported
-			// transaction data type value". This wallet supports no type, so
-			// every object in it is of an unsupported type.
+			// OpenID4VP 1.0 §8.5 uses invalid_transaction_data for unsupported
+			// transaction types. This wallet supports none.
 			return nil, &authorizationError{
 				Code: errorCodeInvalidTransactionData,
 				Err:  fmt.Errorf("transaction_data is not supported by this wallet"),
@@ -746,8 +699,8 @@ func parseAuthParams(values map[string][]string, opts oid4vc.ParseOptions, mode 
 		params.DCQLQuery = query
 	}
 
-	// If request_uri is present, build a synthetic openid4vp:// URI with all
-	// params so the parser can handle request_uri_method and fetch the JWT.
+	// Pass all parameters to the parser so it can fetch request_uri using the
+	// requested method.
 	if requestURI := get("request_uri"); requestURI != "" {
 		syntheticParams := url.Values{}
 		for k, vs := range values {

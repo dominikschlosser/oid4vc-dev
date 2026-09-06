@@ -26,8 +26,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// signTestRegistrationCertificate issues an rc-wrp+jwt with the wallet's own
-// signing material, the way the demo verifier does.
 func signTestRegistrationCertificate(t *testing.T, w *Wallet, purpose any) string {
 	t.Helper()
 	chain, err := w.DefaultSigningCertChain()
@@ -58,8 +56,6 @@ func verifierInfoPayload(entries ...map[string]any) map[string]any {
 	return map[string]any{"verifier_info": list}
 }
 
-// The purpose of the request comes out of the registration certificate in
-// verifier_info (OpenID4VP 1.0 §5.1), which is what the consent dialog shows.
 func TestVerifierInfoPurposes(t *testing.T) {
 	w := generateTestWallet(t)
 
@@ -103,9 +99,8 @@ func TestVerifierInfoPurposes(t *testing.T) {
 	})
 
 	t.Run("the sub is the registered entity, not the client_id", func(t *testing.T) {
-		// ETSI TS 119 475 puts the legal entity identifier in sub (the EUDI
-		// reference certificate carries an LEI there), so it is not held
-		// against the request's client_id.
+		// ETSI TS 119 475 uses sub for the legal entity identifier, which need not
+		// match client_id.
 		cert := signTestRegistrationCertificate(t, w, "Checking your ticket")
 		purposes, findings := verifierInfoPurposes(verifierInfoPayload(
 			map[string]any{"format": "registration_cert", "data": cert},
@@ -134,8 +129,7 @@ func TestVerifierInfoPurposes(t *testing.T) {
 	})
 
 	t.Run("a JWT of another type is passed over", func(t *testing.T) {
-		// The request object itself is a JWT in the payload's neighborhood,
-		// so only rc-wrp+jwt is read.
+		// Ignore JWTs whose typ is not rc-wrp+jwt.
 		other, err := SignRequestObjectJWT(map[string]any{"purpose": "not a certificate"}, w.IssuerKey, nil)
 		if err != nil {
 			t.Fatalf("signing JWT: %v", err)
@@ -149,7 +143,6 @@ func TestVerifierInfoPurposes(t *testing.T) {
 	})
 
 	t.Run("verifier_info arriving as a JSON string is read", func(t *testing.T) {
-		// Over plain request parameters the array is a URL query value.
 		cert := signTestRegistrationCertificate(t, w, "Checking your ticket")
 		encoded, err := json.Marshal([]map[string]any{{"format": "registration_cert", "data": cert}})
 		if err != nil {
@@ -180,8 +173,8 @@ func TestVerifierInfoPurposes(t *testing.T) {
 	})
 }
 
-// The demo reset replaces key and chain together, so DefaultSigningMaterial
-// must return a pair whose leaf wraps the key.
+// A concurrent demo reset must not cause DefaultSigningMaterial to return a mismatched
+// key and chain.
 func TestDefaultSigningMaterialPairsKeyAndChain(t *testing.T) {
 	w := generateTestWallet(t)
 	key, chain, err := w.DefaultSigningMaterial()
@@ -200,9 +193,6 @@ func TestDefaultSigningMaterialPairsKeyAndChain(t *testing.T) {
 	}
 }
 
-// A request sent as plain parameters has no payload document, and its
-// verifier_info shows the certificate's purpose the same as a signed request
-// object does.
 func TestPlainParameterRequestShowsThePurpose(t *testing.T) {
 	srv := newTestServer(t, false)
 	cert := signTestRegistrationCertificate(t, srv.wallet, "Checking who you are")
@@ -258,8 +248,8 @@ func TestPlainParameterRequestShowsThePurpose(t *testing.T) {
 	<-done
 }
 
-// A certificate without a readable x5c cannot be signature-checked, so its
-// purpose is not shown.
+// Without a readable x5c, the purpose cannot be signature-checked and must remain
+// hidden.
 func TestVerifierInfoPurposesHidesAnUncheckableCertificate(t *testing.T) {
 	w := generateTestWallet(t)
 	cert, err := SignRegistrationCertificateJWT(map[string]any{
@@ -280,9 +270,7 @@ func TestVerifierInfoPurposesHidesAnUncheckableCertificate(t *testing.T) {
 	}
 }
 
-// conformantRegistrationCert is a WRPRC payload (JSON-decoded shapes) that
-// carries every field the ARF content checks require, registering given_name
-// of urn:eudi:pid:1.
+// Includes the required ARF fields and registers given_name for urn:eudi:pid:1.
 func conformantRegistrationCert() map[string]any {
 	return map[string]any{
 		"name":                  "Test Verifier",
@@ -308,7 +296,6 @@ func TestRegistrationCertificateContentFindings(t *testing.T) {
 		t.Errorf("a conformant certificate should have no findings, got %v", findings)
 	}
 
-	// A certificate carrying only sub, name and iat is missing the rest.
 	sparse := map[string]any{"name": "X", "sub": "Y", "iat": float64(time.Now().Unix())}
 	findings := registrationCertificateContentFindings(sparse)
 	for _, want := range []string{"privacy_policy", "srv_description", "entitlements", "support_uri", "supervisory_authority", "credentials"} {
@@ -334,7 +321,7 @@ func TestRegistrationValidityFindings(t *testing.T) {
 }
 
 func TestOverAskingFindings(t *testing.T) {
-	cert := conformantRegistrationCert() // registers given_name of urn:eudi:pid:1
+	cert := conformantRegistrationCert()
 
 	asksGivenName := map[string]any{"credentials": []any{map[string]any{
 		"format": "dc+sd-jwt",
@@ -354,7 +341,6 @@ func TestOverAskingFindings(t *testing.T) {
 		t.Error("asking an unregistered claim should be over-asking")
 	}
 
-	// A registered parent path covers a requested child path.
 	parent := map[string]any{"credentials": []any{map[string]any{
 		"format": "dc+sd-jwt",
 		"meta":   map[string]any{"vct_values": []any{"urn:eudi:pid:1"}},
@@ -369,8 +355,8 @@ func TestOverAskingFindings(t *testing.T) {
 		t.Errorf("a registered parent path should cover a child, got %v", findings)
 	}
 
-	// A request for a credential type the certificate never registers is one
-	// finding for the whole query, not one per requested claim.
+	// Report an unregistered credential type once, regardless of how many claims were
+	// requested.
 	asksUnregisteredType := map[string]any{"credentials": []any{map[string]any{
 		"format": "dc+sd-jwt",
 		"meta":   map[string]any{"vct_values": []any{"urn:eudi:other:1"}},
@@ -383,16 +369,15 @@ func TestOverAskingFindings(t *testing.T) {
 		t.Errorf("an unregistered type should be one finding for the query, got %v", findings)
 	}
 
-	// A certificate with no credentials list is already a content finding, so
-	// the over-asking check adds nothing rather than one finding per claim.
+	// A missing credentials list already has a content finding.
 	noCredentials := map[string]any{"name": "X"}
 	if findings := overAskingFindings(noCredentials, asksGivenName); len(findings) != 0 {
 		t.Errorf("a certificate with no credentials should produce no over-asking findings, got %v", findings)
 	}
 }
 
-// A request with no registration certificate is warned about (ARF RPRC_19),
-// even though the OpenID4VP parameter itself is optional.
+// ARF RPRC_19 requires a registration certificate even though OpenID4VP makes
+// verifier_info optional.
 func TestConsentPurposesWarnsOnMissingRegistrationCertificate(t *testing.T) {
 	w := generateTestWallet(t)
 	authReq := &AuthorizationRequestParams{RequestPayload: map[string]any{"dcql_query": map[string]any{}}}
@@ -408,12 +393,9 @@ func TestConsentPurposesWarnsOnMissingRegistrationCertificate(t *testing.T) {
 	}
 }
 
-// A certificate with several problems is one summarized activity log entry with
-// the findings in its details, not one entry per finding.
+// Group certificate findings into one activity log entry.
 func TestConsentPurposesSummarizesCertificateFindings(t *testing.T) {
 	w := generateTestWallet(t)
-	// A minimal certificate is missing most mandatory fields, so it has several
-	// content findings.
 	cert := signTestRegistrationCertificate(t, w, "Checking your ticket")
 	authReq := &AuthorizationRequestParams{
 		RequestPayload: verifierInfoPayload(map[string]any{"format": "registration_cert", "data": cert}),

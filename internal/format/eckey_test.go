@@ -28,8 +28,6 @@ import (
 // The big.Int coordinate fields are read here only as the independent
 // reference.
 
-// referenceCoords is the fixed-width big-endian X and Y a JWK carries: the
-// coordinate big.Int left-padded to the curve width.
 func referenceCoords(pub *ecdsa.PublicKey) (x, y []byte) {
 	size := (pub.Curve.Params().BitSize + 7) / 8
 	return pub.X.FillBytes(make([]byte, size)), //nolint:staticcheck // the independent reference for the helper
@@ -48,8 +46,8 @@ func TestECPublicCoords_MatchesFieldAccess(t *testing.T) {
 	for _, c := range curves {
 		t.Run(c.name, func(t *testing.T) {
 			size := (c.curve.Params().BitSize + 7) / 8
-			// Many keys, so a coordinate that happens to have a high zero byte
-			// (where naive big.Int.Bytes() would come up short) is exercised.
+			// Generate enough keys to exercise coordinates with a leading zero byte,
+			// which big.Int.Bytes() omits.
 			for i := 0; i < 500; i++ {
 				key, err := ecdsa.GenerateKey(c.curve, rand.Reader)
 				if err != nil {
@@ -117,8 +115,7 @@ func TestECPublicKeyFromCoords_AcceptsShortCoordinates(t *testing.T) {
 }
 
 func TestECPublicKeyFromCoords_RejectsOffCurve(t *testing.T) {
-	// A point not on the curve is not a key this wallet could hold, so the
-	// stricter parse rejects it rather than building an unusable value.
+	// Reject points outside the curve before constructing an unusable key.
 	x := make([]byte, 32)
 	y := make([]byte, 32)
 	x[31] = 1
@@ -150,7 +147,6 @@ func TestPrivateKeyScalar_MatchesFieldAccess(t *testing.T) {
 			if !bytes.Equal(got, want) {
 				t.Fatalf("private scalar differs from field access:\n got %x\nwant %x", got, want)
 			}
-			// The scalar must round-trip back to the same private key.
 			back, err := ecdsa.ParseRawPrivateKey(curve, got)
 			if err != nil || !back.Equal(key) {
 				t.Fatalf("private scalar did not round-trip: %v", err)

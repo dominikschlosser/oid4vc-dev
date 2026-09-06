@@ -7,8 +7,7 @@
 # 4. Create stats.env with the /stats credentials (./deploy.sh stats-password).
 # 5. docker compose up -d
 #
-# Every service caps its container log (Docker's json-file driver keeps them
-# forever otherwise, which is the one thing here that can fill the disk).
+# Limit container logs so they cannot grow indefinitely.
 x-logging: &logging
   driver: json-file
   options:
@@ -17,8 +16,7 @@ x-logging: &logging
 
 services:
   caddy:
-    # Built from the Dockerfile next to this file: the standard caddy image
-    # has no rate limiting, which the Caddyfile configures.
+    # The local Dockerfile adds the rate limiting plugin required by Caddyfile.
     build: .
     image: eudi-demo-caddy
     restart: unless-stopped
@@ -26,9 +24,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    # stats.env holds STATS_USER and STATS_PASSWORD_HASH (./deploy.sh
-    # stats-password writes it). env_file, not environment: a bcrypt hash is
-    # full of "$" and compose would try to interpolate those.
+    # deploy.sh writes escaped bcrypt hashes to stats.env for Compose to load.
     env_file:
       - path: stats.env
         required: false
@@ -40,9 +36,8 @@ services:
       - stats-report:/srv/stats:ro
 
   wallet:
-    # WALLET_TAG pins the release to run and lives in .env next to this file
-    # on the host. It is absent in normal operation, which runs the newest
-    # release, and ./deploy.sh rollback sets it to put an earlier one back.
+    # WALLET_TAG in the host .env pins a release for rollback. Without a pin, use the
+    # latest release.
     image: ghcr.io/dominikschlosser/eudi-dev:${WALLET_TAG:-latest}
     restart: unless-stopped
     logging: *logging
@@ -62,9 +57,8 @@ services:
       - "8085"
       - --base-url
       - https://eudi-test.dev
-      # Client identity for OID4VCI authorization-code offers. Both default
-      # to the wallet origin and its /callback. They are set explicitly so
-      # issuers that registered the demo see the same values every deployment.
+      # Keep client identity and callback URLs stable for issuers that register this
+      # wallet.
       - --vci-client-id
       - https://eudi-test.dev
       - --vci-redirect-uri
@@ -78,11 +72,8 @@ services:
       - wallet-data:/home/app/.eudi-dev
       - ./imprint.html:/config/imprint.html:ro
 
-  # Preview instance served at preview.eudi-test.dev by the same Caddy. It runs
-  # its own release (PREVIEW_TAG, set by ./deploy.sh preview), so a big change
-  # can go live on the preview host and be tried there before ./deploy.sh
-  # promote moves the main site to the same image. Its own base URL and data
-  # volume keep it separate from the production wallet above.
+  # Preview uses its own release, URL and data volume. deploy.sh promote selects its
+  # tested image for the main site.
   wallet-preview:
     image: ghcr.io/dominikschlosser/eudi-dev:${PREVIEW_TAG:-latest}
     restart: unless-stopped
@@ -115,25 +106,21 @@ services:
       - wallet-data-preview:/home/app/.eudi-dev
       - ./imprint.html:/config/imprint.html:ro
 
-  # Conformance host served at strict.eudi-test.dev by the same Caddy: a
-  # strict-mode wallet the hosted OIDF suite tests for certification. Not a
-  # demo profile: it runs headless with auto-accept so the conformance
-  # harness can drive it over the API (see docs/conformance-run.md). Its
-  # release is pinned independently with STRICT_TAG (./deploy.sh strict).
+  # The conformance wallet runs strict mode with auto-accept for the hosted OIDF suite.
+  # STRICT_TAG selects its release independently. See docs/conformance-run.md.
   wallet-strict:
     image: ghcr.io/dominikschlosser/eudi-dev:${STRICT_TAG:-latest}
     restart: unless-stopped
     logging: *logging
-    # The demo persists: files on the mounted volume and its own random keys.
+    # Persist files and randomly generated keys on the mounted volume.
     environment:
       EUDI_DEV_STORAGE: file
       EUDI_DEV_SEED: ""
     # Opt-in: a plain production up/push leaves it alone, and ./deploy.sh
     # strict names it explicitly to bring it up.
     profiles: ["strict"]
-    # The management API is not public (the Caddy block only lets reads
-    # through), so the conformance harness reaches this loopback port over an
-    # SSH tunnel. Bound to the host's loopback only, never the internet.
+    # The harness accesses management endpoints through an SSH tunnel to this loopback
+    # port. Caddy restricts the public routes.
     ports:
       - "127.0.0.1:18086:8085"
     command:
@@ -150,9 +137,7 @@ services:
       - "8085"
       - --base-url
       - https://strict.eudi-test.dev
-      # The redirect URI the OIDF suite's authorization server sends the
-      # wallet back to. The alias is fixed so the harness and this wallet
-      # agree on it across runs (OIDF_VCI_ALIAS=oid4vc-dev-vci-strict).
+      # Keep the callback alias in sync with OIDF_VCI_ALIAS=oid4vc-dev-vci-strict.
       - --vci-client-id
       - "52480754053"
       - --vci-redirect-uri
@@ -163,8 +148,8 @@ services:
       - wallet-data-strict:/home/app/.eudi-dev
       - ./imprint.html:/config/imprint.html:ro
 
-  # Usage statistics: turns Caddy's (IP-anonymized) access log into a static
-  # HTML report. No JavaScript, no cookies, nothing added to the pages.
+  # Build an HTML usage report from the anonymized access log without adding tracking code
+  # to pages.
   stats:
     image: allinurl/goaccess:latest
     restart: unless-stopped
@@ -172,8 +157,8 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        # Caddy creates the log on the first request, which can be after this
-        # container starts, so skip the run instead of failing on a missing file.
+        # Caddy creates the log on its first request. Skip reporting until the file
+        # exists.
         while true; do
           if [ -s /var/log/caddy/access.log ]; then
             goaccess /var/log/caddy/access.log \
@@ -194,8 +179,7 @@ volumes:
   caddy-logs:
   stats-report:
   wallet-data:
-  # deploy.sh creates these two before the first start, so it can hand them
-  # to uid 1000 (the user the image runs as). Compose only attaches to them.
+  # deploy.sh creates these volumes with uid 1000 ownership before Compose attaches them.
   wallet-data-preview:
     name: eudi-demo_wallet-data-preview
     external: true

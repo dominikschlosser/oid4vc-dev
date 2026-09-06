@@ -12,18 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// The deferred issuances the wallet is still collecting from their
-// issuers.
-
 package wallet
 
 import (
 	"net/http"
 )
 
-// handleListDeferred lists the credentials an issuer deferred and the wallet
-// is still collecting. The access token is left out: it is a bearer secret,
-// and nothing outside the wallet needs it.
+// Omit the access token because it is a bearer secret used only by the wallet.
 func (s *Server) handleListDeferred(w http.ResponseWriter, r *http.Request) {
 	pending := s.wallet.DeferredIssuanceList()
 	out := make([]map[string]any, 0, len(pending))
@@ -33,8 +28,6 @@ func (s *Server) handleListDeferred(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleCollectDeferred asks the issuer for a deferred credential right now,
-// instead of waiting for its next scheduled attempt.
 func (s *Server) handleCollectDeferred(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	attempt, ok := s.CollectDeferredNow(id)
@@ -61,7 +54,6 @@ func (s *Server) handleCollectDeferred(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleAbandonDeferred stops collecting a deferred credential.
 func (s *Server) handleAbandonDeferred(w http.ResponseWriter, r *http.Request) {
 	pending, ok := s.AbandonDeferredNow(r.PathValue("id"))
 	if !ok {

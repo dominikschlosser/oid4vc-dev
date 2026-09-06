@@ -24,14 +24,10 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/jsonutil"
 )
 
-// Parse detects and parses an OID4VCI credential offer or OID4VP authorization request.
-// It returns the request type, the parsed object (CredentialOffer or AuthorizationRequest), and any error.
 func Parse(raw string) (RequestType, any, error) {
 	return ParseWithOptions(raw, ParseOptions{})
 }
 
-// ParseWithOptions is like Parse but accepts options to customize behavior
-// (e.g. a custom request_uri fetcher for request_uri_method=post support).
 func ParseWithOptions(raw string, opts ParseOptions) (RequestType, any, error) {
 	raw = strings.TrimSpace(raw)
 
@@ -109,7 +105,6 @@ func EncodeURIQuery(values url.Values) string {
 	return strings.ReplaceAll(values.Encode(), "+", "%20")
 }
 
-// parseVCIURI parses an openid-credential-offer:// or haip-vci:// URI.
 func parseVCIURI(raw string) (RequestType, any, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -118,7 +113,6 @@ func parseVCIURI(raw string) (RequestType, any, error) {
 	return parseVCIParams(URIQueryValues(u))
 }
 
-// parseVPURI parses an openid4vp://, haip-vp://, or eudi-openid4vp:// URI.
 func parseVPURI(raw string, opts ParseOptions) (RequestType, any, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -127,7 +121,6 @@ func parseVPURI(raw string, opts ParseOptions) (RequestType, any, error) {
 	return parseVPParams(URIQueryValues(u), opts)
 }
 
-// parseHTTPURL parses an HTTPS/HTTP URL by checking query params.
 func parseHTTPURL(raw string, opts ParseOptions) (RequestType, any, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -140,7 +133,6 @@ func parseHTTPURL(raw string, opts ParseOptions) (RequestType, any, error) {
 	return parseVPParams(q, opts)
 }
 
-// parseVCIParams extracts a credential offer from URL query parameters.
 func parseVCIParams(q url.Values) (RequestType, any, error) {
 	var offerJSON []byte
 
@@ -159,7 +151,6 @@ func parseVCIParams(q url.Values) (RequestType, any, error) {
 	return parseVCIJSON(offerJSON)
 }
 
-// parseVCIJSON parses a credential offer JSON blob.
 func parseVCIJSON(data []byte) (RequestType, any, error) {
 	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
@@ -194,7 +185,6 @@ func parseVCIJSON(data []byte) (RequestType, any, error) {
 	return TypeVCI, offer, nil
 }
 
-// parseVPParams extracts an authorization request from URL query parameters.
 func parseVPParams(q url.Values, opts ParseOptions) (RequestType, any, error) {
 	req := &AuthorizationRequest{
 		FullParams: make(map[string]string),
@@ -310,7 +300,6 @@ func applyRequestObjectPayload(req *AuthorizationRequest, payload map[string]any
 	return nil
 }
 
-// parseJWTInput decodes a JWT and auto-detects VCI vs VP.
 func parseJWTInput(raw string) (RequestType, any, error) {
 	header, payload, _, err := format.ParseJWTParts(raw)
 	if err != nil {
@@ -347,7 +336,6 @@ func buildVPFromJWT(raw string, header, payload map[string]any) (RequestType, *A
 	return TypeVP, req
 }
 
-// parseJSONInput parses a raw JSON object and auto-detects VCI vs VP.
 func parseJSONInput(raw string) (RequestType, any, error) {
 	var m map[string]any
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
@@ -358,9 +346,8 @@ func parseJSONInput(raw string) (RequestType, any, error) {
 		return parseVCIJSON([]byte(raw))
 	}
 
-	// An unsigned request over the Digital Credentials API carries no
-	// client_id at all (OID4VP 1.0 Appendix A.2), so the request is
-	// recognised by what it asks for rather than by who is asking.
+	// Unsigned Digital Credentials API requests have no client_id (OID4VP 1.0 Appendix
+	// A.2). Detect them from their request fields.
 	for _, marker := range []string{"client_id", "dcql_query", "response_type"} {
 		if _, ok := m[marker]; ok {
 			rt, req := buildVPFromJSON(m)

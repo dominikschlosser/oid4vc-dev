@@ -21,7 +21,6 @@ import (
 	"testing"
 )
 
-// reached is a handler that records whether the request got past the guard.
 func reached(hit *bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*hit = true
@@ -36,7 +35,7 @@ func TestGuardAPI(t *testing.T) {
 		path       string
 		origin     string
 		ownOrigins []string
-		want       bool // reaches the handler
+		want       bool
 	}{
 		// The caller the guard exists for: a page on another site, sending
 		// the one request shape CORS does not preflight.
@@ -44,7 +43,6 @@ func TestGuardAPI(t *testing.T) {
 		{name: "foreign origin reading credentials", method: "GET", path: "/api/credentials", origin: "https://evil.example", want: false},
 		// A CLI, curl or a test harness sends no Origin at all.
 		{name: "no origin", method: "POST", path: "/api/presentations", want: true},
-		// The wallet's own UI.
 		{name: "same origin", method: "POST", path: "/api/presentations", origin: "http://wallet.test", want: true},
 		{name: "same origin, other scheme", method: "POST", path: "/api/presentations", origin: "https://wallet.test", want: true},
 		// A deployment whose public URL is not the Host it receives.

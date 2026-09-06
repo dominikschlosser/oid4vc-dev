@@ -21,9 +21,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/credtemplate"
 )
 
-// A template carries the appearance of the credentials issued from it. The
-// image references resolve to card art, colors are validated, and an empty or
-// nil display yields no display.
 func TestTemplateDisplay(t *testing.T) {
 	w := generateTestWallet(t)
 
@@ -55,8 +52,7 @@ func TestTemplateDisplay(t *testing.T) {
 	}
 }
 
-// An embedded reference can only reach a bundled asset by base name, so a
-// traversal attempt resolves to nothing rather than a file outside the assets.
+// Embedded asset references must not escape the bundled asset directory.
 func TestTemplateImage_EmbeddedIsSandboxed(t *testing.T) {
 	w := generateTestWallet(t)
 	if got := w.templateImage("embedded:../../go.mod", "logo"); got != "" {
@@ -67,8 +63,7 @@ func TestTemplateImage_EmbeddedIsSandboxed(t *testing.T) {
 	}
 }
 
-// The pre-defined PID templates carry the eudi-dev display, so a fresh wallet's
-// baseline shows styled cards without a hardcoded appearance in the wallet.
+// The bundled PID templates supply the default cards' appearance.
 func TestPredefinedTemplatesCarryDisplay(t *testing.T) {
 	for _, tpl := range credtemplate.PredefinedTemplates() {
 		if tpl.Display == nil {

@@ -15,7 +15,6 @@
 // Package output formats and prints decoded credentials and verification results to the terminal or as JSON.
 package output
 
-// Options controls output formatting.
 type Options struct {
 	JSON    bool
 	NoColor bool

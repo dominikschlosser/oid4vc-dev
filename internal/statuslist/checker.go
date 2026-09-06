@@ -33,10 +33,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/keys"
 )
 
-// clockSkew is how far the local clock may run ahead of the Status Issuer's
-// before a still-valid Status List Token is called expired. The specification
-// names no tolerance. A minute of allowance keeps ordinary clock drift from
-// reporting every credential in an ecosystem as unresolvable.
+// Allow one minute of clock drift when checking expiry. The specification defines no
+// tolerance.
 const clockSkew = time.Minute
 
 // ExtractStatusRef extracts the status list reference from SD-JWT claims or
@@ -72,9 +70,8 @@ func ExtractStatusRef(claims map[string]any) *StatusRef {
 	return &StatusRef{URI: uri, Idx: idx}
 }
 
-// asInt reads an integer out of a decoded JSON or CBOR value. JSON numbers
-// arrive as float64, CBOR ones as int64 or uint64, so the same claim has a
-// different Go type depending on which representation the credential used.
+// JSON uses float64 numbers, while CBOR can use int64 or uint64. Accept the same
+// integer from either encoding.
 func asInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case int:
@@ -102,7 +99,6 @@ func asInt(v any) (int, bool) {
 	}
 }
 
-// Check fetches the status list and checks the credential's status.
 func Check(ref *StatusRef) (*StatusResult, error) {
 	return CheckWithOptions(ref, CheckOptions{})
 }
@@ -193,9 +189,7 @@ func fetchStatusListToken(uri string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("creating request: %w", err)
 	}
-	// Both representations are acceptable. An mdoc ecosystem serves its
-	// status lists as CWT, and a client that asks only for the JWT form
-	// cannot resolve those lists at all.
+	// Accept JWT and CWT so lists from mdoc issuers can also be resolved.
 	req.Header.Set("Accept", MediaTypeJWT+", "+MediaTypeCWT)
 
 	resp, err := format.HTTPClientForURL(uri).Do(req)
@@ -245,8 +239,6 @@ func detectFormat(contentType string, body []byte) (string, string) {
 	return sniffed, fmt.Sprintf("the status list response declared Content-Type %q, section 8.2 requires %s or %s", contentType, MediaTypeJWT, MediaTypeCWT)
 }
 
-// looksLikeCompactJWS reports whether the body is the JWS Compact
-// Serialization rather than the binary COSE encoding of a CWT.
 func looksLikeCompactJWS(body []byte) bool {
 	trimmed := bytes.TrimSpace(body)
 	if bytes.Count(trimmed, []byte(".")) != 2 {
@@ -260,8 +252,6 @@ func looksLikeCompactJWS(body []byte) bool {
 	return true
 }
 
-// statusListToken is a Status List Token in either representation, parsed and
-// with its signature already verified.
 type statusListToken struct {
 	format        string
 	subject       string
@@ -274,8 +264,6 @@ type statusListToken struct {
 	warnings      []string
 }
 
-// validate applies the Section 8.3 claim checks that do not depend on the
-// bitstring itself.
 func (t *statusListToken) validate(ref *StatusRef, opts CheckOptions) error {
 	// Section 8.3: "The subject claim (sub or 2) of the Status List Token
 	// MUST be equal to the uri claim in the status_list object of the
@@ -326,8 +314,6 @@ func (t *statusListToken) validate(ref *StatusRef, opts CheckOptions) error {
 	return nil
 }
 
-// keyCandidates is the outcome of resolving the key that signed a Status List
-// Token, as described in Section 11.3.
 type keyCandidates struct {
 	keys     []crypto.PublicKey
 	info     string
@@ -390,8 +376,6 @@ func resolveKeys(certs []*x509.Certificate, embedded []crypto.PublicKey, named s
 	return nil, fmt.Errorf("no key to verify the status list token with: it carries no certificate chain and no public key, and no trust list or key was supplied")
 }
 
-// verifyChain validates a certificate chain against the trust list and
-// returns the leaf.
 func verifyChain(certs []*x509.Certificate, trustCerts []TrustCert) (*x509.Certificate, error) {
 	roots := x509.NewCertPool()
 	for _, tc := range trustCerts {
@@ -539,7 +523,6 @@ func isStatusListTyp(typ, want string) bool {
 	return typ == want || typ == "application/"+want
 }
 
-// certsFromX5C parses the certificate chain out of an x5c header.
 func certsFromX5C(raw any) ([]*x509.Certificate, error) {
 	entries, ok := raw.([]any)
 	if !ok || len(entries) == 0 {
@@ -564,7 +547,6 @@ func certsFromX5C(raw any) ([]*x509.Certificate, error) {
 	return certs, nil
 }
 
-// publicKeyFromJWK reads a public key out of a decoded jwk header.
 func publicKeyFromJWK(raw any) (crypto.PublicKey, error) {
 	data, err := json.Marshal(raw)
 	if err != nil {
@@ -573,7 +555,6 @@ func publicKeyFromJWK(raw any) (crypto.PublicKey, error) {
 	return keys.ParseJWK(data)
 }
 
-// unixClaim reads a NumericDate claim.
 func unixClaim(v any) *time.Time {
 	n, ok := asInt(v)
 	if !ok {
@@ -583,16 +564,11 @@ func unixClaim(v any) *time.Time {
 	return &t
 }
 
-// maxBitstringBytes caps the decompressed status list. At one bit per entry
-// this is over a billion credentials, so no honest list comes near it.
+// Limit decompressed status lists to bound memory use for untrusted input.
 const maxBitstringBytes = 16 << 20
 
-// zlibDecompress inflates the status list bitstring under a cap. The second
-// return value reports whether the ZLIB header Section 4.1 requires was
-// missing and a raw DEFLATE stream was read instead.
-//
-// The compressed bytes come from a URL in the credential's own status claim,
-// so without a cap a credential decides how much memory the checker allocates.
+// Limit decompression and report when a raw DEFLATE stream omits the ZLIB header
+// required by Section 4.1.
 func zlibDecompress(data []byte) ([]byte, bool, error) {
 	r, err := zlib.NewReader(bytes.NewReader(data))
 	if err == nil {
@@ -621,12 +597,8 @@ func readBounded(r io.Reader) ([]byte, error) {
 	return out, nil
 }
 
-// extractStatus reads one entry out of the decompressed bitstring.
-//
-// idx and bits both come from documents somebody else wrote, so both are
-// checked: a negative idx would panic on the shift below, and a bits value
-// outside the four allowed would read the whole byte as a status. The range
-// check runs against idx itself because idx*bits overflows for a large idx.
+// Validate idx and bits from untrusted documents before shifting. Check idx directly
+// because idx*bits can overflow.
 func extractStatus(bitstring []byte, idx, bits int) (int, error) {
 	if idx < 0 {
 		return 0, fmt.Errorf("status list index %d is negative", idx)

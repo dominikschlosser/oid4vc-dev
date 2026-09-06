@@ -150,10 +150,8 @@ func TestPresentationResponseLogDetailsExcludeRequestMaterial(t *testing.T) {
 	}
 }
 
-// The log is persisted with the wallet and re-read at every request
-// boundary, so an unbounded one is disk and a growing parse per reload, not
-// just memory. It matters most on a demo instance, where anyone can drive
-// activity and clearing the log is refused.
+// The log cap bounds storage and reload costs. Public demos need it because visitors
+// can generate activity but cannot clear the log.
 func TestActivityLog_IsBounded(t *testing.T) {
 	w := generateTestWallet(t)
 	before := len(w.GetLog())
@@ -171,7 +169,6 @@ func TestActivityLog_IsBounded(t *testing.T) {
 	}
 	_ = before
 
-	// The newest entries are the ones kept.
 	w.AddLog("presentation", "the-last-one", true)
 	entries := w.GetLog()
 	if entries[len(entries)-1].Detail != "the-last-one" {

@@ -44,13 +44,10 @@ func Parse(raw string) (*Token, error) {
 	return token, nil
 }
 
-// ParseLenient decodes an SD-JWT and resolves its claims, tolerating the rule
-// breaks RFC 9901 marks MUST-reject that still leave the payload usable (an
-// _sd_alg in a nested object, a digest that repeats because the credential
-// mirrors its claims into another object). Each is recorded on token.Deviations
-// rather than returned as an error. A break that makes the claims unresolvable
-// is still an error. Use ParseLenient to inspect a credential or to handle one
-// in a non-strict mode. Use Parse where the credential must be spec-valid.
+// ParseLenient records recoverable RFC 9901 violations in token.Deviations while
+// resolving claims. Examples include nested _sd_alg and repeated digests. Errors that
+// prevent claim resolution still fail. Use this for inspection or debug mode, and
+// Parse for strict validation.
 func ParseLenient(raw string) (*Token, error) {
 	token, err := parseStructure(raw)
 	if err != nil {
@@ -65,8 +62,6 @@ func ParseLenient(raw string) (*Token, error) {
 	token.ResolvedClaims = resolved
 	token.Deviations = append(token.Deviations, deviations...)
 
-	// Add warnings for disclosed claims whose children are all undisclosed, on
-	// top of any structural warning parseStructure already recorded.
 	token.Warnings = append(token.Warnings, checkFullyUndisclosedChildren(token.Disclosures)...)
 
 	return token, nil
@@ -130,9 +125,7 @@ func parseKeyBindingJWT(component string) *JWT {
 	return jwt
 }
 
-// checkFullyUndisclosedChildren warns when a disclosure's value has children
-// that are ALL undisclosed (e.g., an array with only {"...": hash} entries
-// or an object with only _sd hashes and no resolved sub-claims).
+// Warn when a disclosed object or array contains only undisclosed children.
 func checkFullyUndisclosedChildren(disclosures []Disclosure) []string {
 	digestMap := make(map[string]bool)
 	for _, d := range disclosures {
@@ -357,21 +350,14 @@ func collectDigests(value any, out map[string]bool) {
 	}
 }
 
-// Inspect decodes an SD-JWT for display, tolerating every rule break the way
-// ParseLenient does (each is recorded on the token). A decoder is asked the
-// opposite question from a wallet: the credential is already suspected of being
-// wrong, and the point is to see what it contains. It fails only when the JWT
-// itself will not decode, where there is nothing to show.
-//
-// Nothing that decides trust may use this.
+// Inspect decodes malformed credentials for display and records violations. It fails
+// only if the JWT cannot decode. Never use its result to establish validity or trust.
 func Inspect(raw string) (*Token, error) {
 	return ParseLenient(raw)
 }
 
-// parseStructure decodes the parts of an SD-JWT without applying the
-// rejection rules that turn a decoded credential into a valid one. It is what
-// Parse and Inspect share: the split, the Issuer-signed JWT, the Disclosures
-// and the Key Binding JWT.
+// Decode the SD-JWT components shared by Parse and Inspect. Apply validation
+// separately.
 func parseStructure(raw string) (*Token, error) {
 	raw = strings.TrimSpace(raw)
 	parts := strings.Split(raw, "~")

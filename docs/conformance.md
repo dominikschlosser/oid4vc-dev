@@ -1,6 +1,6 @@
 # OIDF Conformance
 
-This repository runs the current OpenID Foundation plans for OID4VP 1.0 Final, OID4VCI 1.0 Final, and HAIP 1.0 Final variants against the local `eudi-dev` testing wallet, and the issuer and verifier plans against the demo issuer and verifier.
+The harness runs OpenID Foundation wallet plans for OID4VP 1.0, OID4VCI 1.0 and HAIP 1.0 against `eudi-dev`. Separate issuer and verifier plans test the bundled demo services.
 
 Related docs:
 
@@ -41,7 +41,7 @@ VP Final generates the cross product of credential format (SD-JWT, mDoc), respon
 - `direct_post` and `direct_post.jwt` with `redirect_uri` (`url_query` and unsigned `request_uri`), `x509_hash` (signed), and `x509_san_dns` (signed)
 - `dc_api` and `dc_api.jwt` with `web-origin` (unsigned), `x509_hash` and `x509_san_dns` (signed and multisigned)
 
-VCI Final generates the cross product of credential format, grant type (authorization code, pre-authorized code), offer delivery (`by_value`, `by_reference`), issuance mode (immediate, deferred), and credential response encryption (plain, encrypted), always issuer initiated with client attestation, DPoP, and a plain scope request (32 plans).
+VCI Final runs 32 plans covering both credential formats, both grants, both offer delivery methods, immediate and deferred issuance, and plain and encrypted responses. These scenarios use issuer initiation, client attestation, DPoP and scope requests.
 
 The HAIP plans expose fewer selectable variants (the module entries fix the rest):
 
@@ -92,7 +92,7 @@ The wallet runs a conformance test with its normal keys:
 
 ## What the Suite Does Not Cover
 
-The suite acts as the authorization server and issues the code on the first request without a sign-in, so no plan reaches the branch where the wallet passes the authorization URL to a browser. The Playwright suite covers that branch against the demo issuer, which serves a real login page and allows one use of the pushed `request_uri` (RFC 9126 section 4).
+The suite issues an authorization code without asking the user to sign in. These plans therefore do not test handing a sign-in URL to a browser. Playwright covers that step against the demo issuer, whose login page consumes each pushed `request_uri` once (RFC 9126 §4).
 
 ## References
 

@@ -152,9 +152,7 @@ def wallet_request(wallet_url: str, method: str, path: str, payload: dict | None
 
 
 def export_wallet_activity(wallet_url: str, output: Path, clear: bool) -> None:
-    """Saves the wallet's activity log, the client-side record of a plan (every
-    token and credential request with its body), and clears it so the next
-    plan's record fits under the wallet's entry cap."""
+    """Export the wallet activity for this plan and clear it before the next plan reaches the log limit."""
     try:
         entries = wallet_request(wallet_url, "GET", "/api/log")
         output.write_text(json.dumps(entries, indent=1))
@@ -192,13 +190,9 @@ def verify_suite_support(suite_dir: Path) -> None:
 VP_FINAL_RESPONSE_MODES = ("direct_post", "direct_post.jwt")
 VP_FINAL_DCAPI_RESPONSE_MODES = ("dc_api", "dc_api.jwt")
 
-# The (client_id_prefix, request_method) pairs the wallet supports, per
-# response-mode family. The pairing is constrained: redirect_uri and
-# web-origin identify unsigned requests, the x509 prefixes authenticate via a
-# signed request, url_query exists only outside the Browser API and
-# multisigned only inside it (OID4VP 1.0 Appendix A.3.2). The prefixes the
-# wallet deliberately does not implement are absent: pre_registered (no
-# pre-registered trust anchoring) and decentralized_identifier (no DIDs).
+# Supported prefix and request method combinations depend on the response mode. URL query
+# delivery applies outside DC API, while multisigned requests apply inside it (OID4VP 1.0
+# Appendix A.3.2). This matrix excludes preregistered clients and DIDs.
 VP_FINAL_REDIRECT_COMBOS = (
     ("redirect_uri", "url_query"),
     ("redirect_uri", "request_uri_unsigned"),
@@ -282,13 +276,9 @@ VCI_SLUG_TOKENS = {
 
 
 def vci_final_scenarios() -> list[PlanScenario]:
-    """Every OID4VCI Final wallet plan variant combination the wallet supports.
+    """Build supported OID4VCI Final variants.
 
-    The flow is always issuer_initiated: issuance starts from a credential
-    offer here, so the wallet_initiated and issuer_initiated_dc_api variants
-    do not apply. Authorization always uses client attestation, DPoP, and a
-    plain scope request (the wallet authorizes via scope, not rar).
-    """
+    These flows start from an issuer offer and use client attestation, DPoP and scope authorization."""
     scenarios = []
     for kind in ("sdjwt", "mdoc"):
         for grant in ("authorization_code", "pre_authorization_code"):
@@ -312,10 +302,8 @@ def vci_final_scenarios() -> list[PlanScenario]:
                                     "authorization_request_type": "simple",
                                     "fapi_profile": "vci",
                                     "vci_grant_type": grant,
-                                    # Pre-authorized offers are always
-                                    # issuer-initiated: there is no
-                                    # authorization endpoint for a wallet to
-                                    # start from.
+                                                                        # Pre-authorized offers are issuer initiated because
+                                    # they have no authorization endpoint to start from.
                                     "vci_authorization_code_flow_variant": "issuer_initiated",
                                     "vci_credential_offer_variant": offer,
                                     "credential_format": VCI_FORMAT_VARIANTS[kind],
@@ -382,12 +370,9 @@ def final_scenarios() -> list[PlanScenario]:
                 credential_kind="mdoc",
                 requires_haip=True,
             ),
-            # Every selectable HAIP VCI variant: format, and the flow as the
-            # certification program runs it (issuer-initiated with the offer
-            # by value and by reference, and wallet-initiated, which has no
-            # offer). The HAIP plan pins the rest internally (authorization
-            # code with client attestation and DPoP, immediate/deferred/
-            # encrypted as module entries).
+                        # Cover HAIP formats and issuer or wallet initiated flows. The plan fixes
+            # client attestation and DPoP and includes immediate, deferred and encrypted
+            # issuance as modules.
             *[
                 PlanScenario(
                     slug="vci-haip-{}-{}".format(kind, VCI_SLUG_TOKENS[offer]),
@@ -540,9 +525,8 @@ def load_config_template(source: Path) -> dict:
 
 
 def ssl_context_for_ca(ca_path: Path) -> ssl.SSLContext:
-    # The wallet CA joins the system roots instead of replacing them: the
-    # issuer URL is the wallet's own listener locally, but a public tunnel
-    # origin with a publicly-issued certificate in a hosted run.
+        # Add the wallet CA to system roots. Hosted runs also need the public tunnel's
+    # certificate to remain trusted.
     context = ssl.create_default_context()
     context.load_verify_locations(cafile=str(ca_path))
     context.check_hostname = False
@@ -633,15 +617,9 @@ def chains_to_wallet_ca(leaf_der: bytes, ca_pem: str) -> bool:
 
 
 def baseline_credential_ids(wallet_url: str, wallet_ca_cert: Path) -> set[str]:
-    """Credential ids of the wallet's own baseline (the --pid credentials).
+    """Find credentials signed under the wallet CA.
 
-    Not everything present at startup: a persistent wallet (the strict
-    conformance host) can still hold credentials an earlier run's issuance
-    modules deposited. Those chain to the suite's CA rather than the
-    wallet's, so a presentation module that picks one fails certificate
-    validation. Membership is decided by the signature: a credential whose
-    signer certificate verifies under the wallet CA is baseline, everything
-    else is purged at startup."""
+    A persistent wallet may contain credentials from earlier suite runs. Those use the suite CA and must be removed before presentation tests that trust the wallet CA."""
     ca_pem = wallet_ca_cert.read_text()
     baseline = set()
     for credential in wallet_request(wallet_url, "GET", "/api/credentials"):
@@ -657,16 +635,9 @@ def baseline_credential_ids(wallet_url: str, wallet_ca_cert: Path) -> set[str]:
 
 
 def purge_issued_credentials(wallet_url: str, baseline_ids: set[str]) -> int:
-    """Drop everything the suite has issued, keeping only the baseline.
+    """Keep only the wallet baseline before each module.
 
-    One wallet serves every plan, so the credentials an issuance plan
-    deposits are still there when a presentation plan runs. They match the
-    same DCQL query as the baseline PID (same vct), and they are signed by
-    the suite's own issuer, which nothing chains to the wallet CA the plan
-    configures as its trust anchor. A presentation plan that picks one of
-    them fails certificate validation for a reason that has nothing to do
-    with the wallet. Each module starts from the baseline instead.
-    """
+    Credentials from issuance tests can match the same PID query but use a different CA. Presenting them would fail the next module's trust check for an unrelated reason."""
     try:
         credentials = wallet_request(wallet_url, "GET", "/api/credentials")
     except Exception as exc:  # noqa: BLE001
@@ -697,27 +668,19 @@ def wallet_run_suffix(args: argparse.Namespace) -> str:
 
 def create_vp_config(args: argparse.Namespace, suite_dir: Path, scenario: PlanScenario, materials: WalletMaterials, output: Path) -> None:
     config = load_config_template(suite_dir / scenario.template_relpath)
-    # The alias carries the wallet's port, so no two runs ever ask the suite for
-    # the same one. An alias belongs to whichever test claimed it last, and a
-    # new test naming one an earlier test still holds takes it over, so a fixed
-    # alias would make every run contend with the leftovers of the one before.
+    # Include the wallet port in the alias so separate runs do not take over each
+    # other's suite configuration.
     config["alias"] = f"oid4vc-dev-{scenario.slug}-{wallet_run_suffix(args)}"
     config["description"] = f"eudi-dev wallet {materials.version}"
     config.setdefault("client", {})
     config["client"]["dcql"] = build_vp_dcql_query(scenario.credential_kind)
     if scenario.requires_haip or scenario.variant.get("client_id_prefix") == "x509_san_dns":
-        # The HAIP VP plan includes x509_san_dns Browser API variants where no response_uri
-        # exists, and the Final plan's x509_san_dns variant names the DNS
-        # subject alternative name of the suite certificate. Both take the
-        # static client_id from the config.
+                # Use the configured client_id for x509_san_dns, including DC API variants without
+        # a response_uri.
         config["client"]["client_id"] = conformance_server_host()
     if scenario.variant.get("request_method") == "url_query":
-        # A url_query request has no request_uri for the harness to observe:
-        # the suite's browser control delivers the whole authorization request
-        # to the wallet's authorization endpoint itself, so the config names
-        # the wallet's real endpoint instead of the template placeholder. The
-        # issuer origin is the one the suite can reach in both local and
-        # hosted runs.
+                # URL query requests have no request_uri to observe. Configure the wallet's
+        # reachable authorization endpoint so the suite can deliver the request directly.
         config.setdefault("server", {})
         config["server"]["authorization_endpoint"] = args.wallet_issuer_url.rstrip("/") + "/authorize"
     response_mode = scenario.variant.get("response_mode", "")
@@ -729,9 +692,8 @@ def create_vp_config(args: argparse.Namespace, suite_dir: Path, scenario: PlanSc
         keys = secondary_jwks.get("keys", [])
         if keys and isinstance(keys[0], dict) and isinstance(keys[0].get("kid"), str):
             keys[0]["kid"] = keys[0]["kid"] + "-second"
-        # For x509_hash the suite derives the second signer's client_id from
-        # its certificate, so the config carries only the static one when the
-        # prefix names one.
+                # For x509_hash, the suite derives the second signer's client_id from its
+        # certificate.
         config["client2"] = {"jwks": secondary_jwks}
         if "client_id" in config["client"]:
             config["client2"]["client_id"] = config["client"]["client_id"]
@@ -776,9 +738,8 @@ def create_vci_config(args: argparse.Namespace, suite_dir: Path, scenario: PlanS
     config.setdefault("client_attestation", {})
     config["vci"]["credential_offer_endpoint"] = credential_offer_endpoint
     if scenario.credential_kind == "mdoc":
-        # The key attestation configuration with the attestation proof type
-        # (Appendix F.3): the suite issues one credential per attested key
-        # there, so batch issuance and key attestations are covered together.
+                # The attestation proof configuration issues one credential per attested key,
+        # covering key attestation and batch issuance together (Appendix F.3).
         config["vci"]["credential_configuration_id"] = "eu.europa.ec.eudi.pid.mdoc.1.attestation.keyattest"
     else:
         config["vci"]["credential_configuration_id"] = "eu.europa.ec.eudi.pid.1"
@@ -851,16 +812,13 @@ def vp_modules_for_scenario(scenario: PlanScenario) -> tuple[str, ...] | None:
     if scenario.kind != "vp":
         return None
 
-    # OIDF_VP_MODULES names an explicit module list for every VP plan, for
-    # targeted reproductions (a plan holding one module of interest, such as
-    # a suite-defect demonstration for an upstream report).
+        # OIDF_VP_MODULES limits each VP plan to named modules for focused reproductions.
     forced = os.environ.get("OIDF_VP_MODULES", "")
     if forced:
         return tuple(name.strip() for name in forced.split(",") if name.strip())
 
-    # The certifiable HAIP plans run complete: the suite's plan definition
-    # already excludes what its variants cannot execute, and a certification
-    # run must not filter modules on top of that.
+        # Certification runs use complete HAIP plans. The suite defines applicable modules, so
+    # apply no additional filter.
     if scenario.requires_haip:
         return None
 
@@ -907,12 +865,9 @@ def vp_modules_for_scenario(scenario: PlanScenario) -> tuple[str, ...] | None:
         if VP_FINAL_MODULE_WRONG_EXPECTED_ORIGINS in modules:
             modules.remove(VP_FINAL_MODULE_WRONG_EXPECTED_ORIGINS)
     if request_method == "url_query":
-        # The negative modules create their error-screenshot placeholder when
-        # the wallet retrieves the request_uri
-        # (AbstractVP1FinalWalletTest.handleRequestUriRequest), and a
-        # url_query request has no request_uri, so they wait forever. The
-        # request_uri variants of the same response modes carry this negative
-        # coverage.
+                # These negative modules create screenshot placeholders when request_uri is
+        # fetched. URL query requests have no such fetch and would wait forever. The
+        # request_uri variants cover them instead.
         for module in (
             VP_FINAL_MODULE_RESPONSE_URI_NOT_CLIENT_ID,
             VP_FINAL_MODULE_MISSING_NONCE,
@@ -959,8 +914,7 @@ def reader_thread(stream, line_queue: queue.Queue[str]) -> None:
 
 
 def capture_wallet_screenshot(wallet_url: str) -> str | None:
-    """A PNG data URL of the wallet UI, which shows the error the module
-    provoked, or None when the capture fails (no browser, headless CI)."""
+    """Capture the wallet rejection UI as a PNG data URL. Return None when capture fails."""
     script = Path(__file__).with_name("oidf_capture_screenshot.js")
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
         out_path = Path(handle.name)
@@ -1034,11 +988,8 @@ def wallet_api_path_for_request(request_url: str) -> str:
     return "/api/presentations"
 
 
-# The suite prints the code it expects into the offer's own description, the
-# way an issuer would print it on a letter, e.g. "Input the one-time code:
-# <123456> for testing purposes". A real wallet asks the user for it; an
-# automated run reads it from there, because a pre-authorized code offer that
-# declares tx_code is only redeemable with it (OpenID4VCI 1.0 section 6.1).
+# Read the transaction code from the suite offer description. A real wallet asks the user,
+# but this automated flow must supply it to redeem the offer (OpenID4VCI 1.0 §6.1).
 TX_CODE_IN_DESCRIPTION = re.compile(r"<(\d{4,12})>")
 
 
@@ -1051,9 +1002,8 @@ def tx_code_from_offer(request_url: str) -> str | None:
         except (TypeError, ValueError):
             return None
     else:
-        # A by-reference offer hides the tx_code behind its URI. Reading it
-        # here does not consume it: offer URIs stay readable (the wallet
-        # itself re-reads them during issuance).
+                # Suite offer URLs remain readable after fetching, so resolving one here does not
+        # consume it.
         offer_uri = (query.get("credential_offer_uri") or [None])[0]
         if not offer_uri:
             return None
@@ -1073,33 +1023,14 @@ def tx_code_from_offer(request_url: str) -> str | None:
     match = TX_CODE_IN_DESCRIPTION.search(str(tx_code.get("description", "")))
     if match:
         return match.group(1)
-    # No code to read: send something of the declared length rather than
-    # nothing, so the failure is the issuer rejecting a wrong code rather than
-    # the wallet omitting the parameter.
+        # When no code is provided, send the declared length so the issuer tests a wrong code
+    # rather than a missing parameter.
     length = tx_code.get("length")
     return "0" * length if isinstance(length, int) and 0 < length <= 12 else None
 
 
-
-# The suite's Verifier lists one content encryption algorithm in
-# client_metadata.encrypted_response_enc_values_supported, where HAIP section 5
-# says "Verifiers MUST list both A128GCM and A256GCM". The suite reads the rule
-# the same way (its own ValidateVpClientMetadataEncryptionForHaip enforces it
-# against Verifiers under test) but does not follow it in the Verifier it uses
-# to drive wallet tests, so a wallet that checks the profile refuses every HAIP
-# module in strict mode.
-#
-# The wallet separates the two switches: the profile decides how many checks
-# run, the mode decides whether a finding stops the flow. Running the HAIP
-# modules in debug keeps every profile check running and reported while the
-# exchange completes, which is what those modules are there to exercise. The
-# negative modules keep the configured mode, because refusing a bad request is
-# exactly what they test and a debug run would accept it.
 def set_wallet_conformance(wallet_url: str, mode: str, requires_haip: bool) -> None:
-    # Set the wallet's own conformance setting before each submission, so the
-    # HAIP modules run enforced and the rest run without HAIP, whatever the
-    # wallet started with. This works only against a locally-hosted wallet,
-    # which is the whole point of a conformance run.
+        # Changing validation mode requires management access, which demo mode rejects.
     try:
         wallet_request(wallet_url, "PUT", "/api/config/conformance", {"mode": mode, "haip": bool(requires_haip)})
     except urllib.error.HTTPError as exc:
@@ -1148,9 +1079,8 @@ def submit_wallet_request(wallet_url: str, request_url: str, requires_haip: bool
     response = result.get("response", {})
     redirect_uri = response.get("redirect_uri")
     if redirect_uri:
-        # The module expects the redirect_uri opened within 30 seconds, and a
-        # loaded suite can stall a single fetch past that. Short attempts with
-        # retries fit inside the window where one long attempt cannot.
+                # The suite expects the redirect within 30 seconds. Short retries fit this
+        # deadline even when individual requests stall.
         for attempt in range(1, 4):
             try:
                 follow_redirect(redirect_uri)
@@ -1207,16 +1137,9 @@ def module_credential_offer_endpoint(info: dict, state: dict) -> str | None:
 
 
 def synthetic_vci_offer_url(info: dict, state: dict) -> str | None:
-    """The nudge that starts a wallet-initiated flow.
+    """Start wallet initiated issuance against the suite issuer.
 
-    The suite seeds no offer in the wallet_initiated variant: it waits for the
-    wallet to start the authorization code flow against its issuer on its own.
-    The wallet starts from an offer, so the harness hands it one naming the
-    suite's issuer and the configured credential, with no issuer_state, which
-    is the same flow a wallet begins from an issuer it picked itself. An
-    issuer-initiated flow is driven by the credential offer the suite generates
-    (its issuer_state is checked by VCIVerifyIssuerStateInAuthorizationRequest),
-    which handle_module submits from credential_offer_redirect_url."""
+    The suite provides no offer for this variant. Supply one with its issuer and credential configuration but no issuer_state. Issuer initiated variants instead use the suite offer and preserve its issuer_state."""
     variant = module_variant(info, state)
     if variant.get("fapi_profile") not in {"vci", "vci_haip"}:
         return None
@@ -1271,13 +1194,9 @@ def submit_synthetic_vci_offer(wallet_url: str, info: dict, state: dict) -> None
 def submit_browser_api_request(wallet_url: str, browser_request: dict, submit_url: str, requires_haip: bool = False, test_name: str | None = None) -> WalletSubmissionResult:
     set_wallet_conformance(wallet_url, WALLET_MODE, requires_haip)
     extra_headers = {}
-    # This POST stands in for the browser, and a browser derives Origin from
-    # where the page actually runs, never from what the page's request claims.
-    # The submit URL is that place (the suite serves the browser API page
-    # there), so it is the truthful source. Deriving the origin from the
-    # request content instead would let a planted client_id or
-    # expected_origins choose its own audience, which is exactly what
-    # release-v5.2.2's alternate-happy-flow plants a decoy to catch.
+    # Use the submit URL as Origin, matching the browser page served by the suite.
+    # Request-controlled client_id or expected_origins values must not choose the
+    # audience.
     origin = origin_from_submit_url(submit_url)
     if not origin:
         origin = browser_request_origin(browser_request)
@@ -1380,9 +1299,8 @@ def handle_module(base_url: str, token: str | None, wallet_url: str, module_id: 
             if result.completed or not result.retryable:
                 state["submitted_browser_api_requests"].add(submit_url)
 
-    # Placeholders first: a screenshot upload is what lets a negative module
-    # finish, and a wallet submission below can block for its full timeout
-    # (or raise), which must not starve the upload.
+        # Upload screenshot evidence first so a blocking wallet submission cannot prevent a
+    # negative module from finishing.
     for entry in logs:
         placeholder = entry.get("upload")
         if placeholder and placeholder not in state["uploaded_placeholders"]:
@@ -1423,9 +1341,8 @@ def main() -> int:
     wallet_request(args.wallet_url, "DELETE", "/api/log")
     scenarios = final_scenarios()
     if "www.certification.openid.net" in base_url:
-        # Only the certification program's plans run on the production
-        # service. The alpha Final plans are quality evidence and run against
-        # the local suite or the hosted demo service instead.
+                # Run only certification plans on the production service. Final alpha plans use
+        # the local suite or hosted demo service.
         scenarios = [scenario for scenario in scenarios if scenario.requires_haip]
         print("[runner] production certification service: running the certifiable HAIP plans only", flush=True)
     config_jobs = [(scenario, create_config(args, suite_dir, results_dir, scenario, materials)) for scenario in scenarios]
@@ -1530,10 +1447,8 @@ def main() -> int:
                 break
 
             if proc.poll() is None and idle_timeout > 0 and time.monotonic() - last_runner_output > idle_timeout:
-                # First try to unstick the run by cancelling the stuck modules
-                # on the suite (DELETE moves them to INTERRUPTED, which the
-                # official runner records as that module's failure and moves
-                # on). Only a run that stays silent after that is terminated.
+                                # Cancel stalled modules first. The suite marks them INTERRUPTED so the
+                # runner can continue. Terminate the run only if it remains unresponsive.
                 stalled = [
                     module_id
                     for module_id, state in module_state.items()

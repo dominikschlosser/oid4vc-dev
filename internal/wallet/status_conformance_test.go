@@ -28,8 +28,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/statuslist"
 )
 
-// readPublishedStatus decodes a status list JWT and returns the declared bits
-// together with the value packed at idx.
 func readPublishedStatus(t *testing.T, token string, idx int) (int, int) {
 	t.Helper()
 	parts := strings.SplitN(token, ".", 3)
@@ -76,10 +74,8 @@ func readPublishedStatus(t *testing.T, token string, idx int) (int, int) {
 	return bits, (int(bitstring[bitPos/8]) >> (bitPos % 8)) & mask
 }
 
-// A one-bit list can only say VALID or INVALID, so a credential the wallet
-// marks SUSPENDED needs a wider list for an external verifier to read the
-// status this wallet's own API reports. Section 7 requires the Status Issuer
-// to pick a width that can carry the statuses it uses.
+// A one-bit status list cannot represent SUSPENDED. Section 7 requires a width large
+// enough for every status the issuer uses.
 func TestBuildStatusList_WidensForTheStatusValuesInUse(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -114,8 +110,6 @@ func TestBuildStatusList_WidensForTheStatusValuesInUse(t *testing.T) {
 	}
 }
 
-// The status the wallet's own API reports and the status an external verifier
-// reads out of the published list have to be the same number.
 func TestHandleStatusList_PublishesTheStoredStatusValue(t *testing.T) {
 	w := generateTestWallet(t)
 	w.BaseURL = "http://localhost:8085"
@@ -166,10 +160,8 @@ func TestSetCredentialStatus_RefusesValuesOutsideTheStatusTypeRange(t *testing.T
 	}
 }
 
-// Section 8.4: "If the Server does not support the additional query parameter,
-// it SHOULD return a status code of 501 (Not Implemented)". Serving the
-// current list for a historical request hands the client a token for a moment
-// it did not ask about.
+// Section 8.4 recommends HTTP 501 when historical status queries are unsupported.
+// Returning the current list would answer for the wrong time.
 func TestHandleStatusList_TimeQueryParameterIsNotImplemented(t *testing.T) {
 	w := generateTestWallet(t)
 	w.BaseURL = "http://localhost:8085"
@@ -195,9 +187,7 @@ func TestHandleStatusList_AllowsCrossOriginReads(t *testing.T) {
 	}
 }
 
-// Section 8.1 content negotiation: a client that asks for the CWT form gets a
-// tagged COSE_Sign1 under the CWT media type, and everything else keeps
-// getting the JWT form.
+// Section 8.1 permits content negotiation for the CWT representation.
 func TestHandleStatusList_ServesCWTWhenAsked(t *testing.T) {
 	w := generateTestWallet(t)
 	w.BaseURL = "http://localhost:8085"
@@ -223,7 +213,6 @@ func TestHandleStatusList_ServesCWTWhenAsked(t *testing.T) {
 		t.Fatalf("the body must be a tagged COSE_Sign1 (tag 18), got % x", body[:min(len(body), 4)])
 	}
 
-	// The default is still the JWT form.
 	jwtResp := serverRequest(t, srv, "GET", "/api/statuslist", "")
 	if got := jwtResp.Header().Get("Content-Type"); got != statuslist.MediaTypeJWT {
 		t.Errorf("Content-Type = %q, want %q", got, statuslist.MediaTypeJWT)

@@ -25,7 +25,6 @@ type TrustList struct {
 	Entities   []TrustedEntity
 }
 
-// SchemeInfo contains list metadata.
 type SchemeInfo struct {
 	LoTEType           string
 	SchemeOperatorName string
@@ -33,19 +32,16 @@ type SchemeInfo struct {
 	NextUpdate         string
 }
 
-// TrustedEntity represents a single trusted entity with its services.
 type TrustedEntity struct {
 	Name     string
 	Services []TrustedService
 }
 
-// TrustedService represents a service provided by a trusted entity.
 type TrustedService struct {
 	ServiceType  string
 	Certificates []CertInfo
 }
 
-// CertInfo contains parsed certificate information.
 type CertInfo struct {
 	Subject   string
 	Issuer    string

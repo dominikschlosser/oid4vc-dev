@@ -59,9 +59,8 @@ copy_stack() {
   echo "Copying the stack to ${DEMO_HOST}:${DEMO_DIR}..."
   ssh "${DEMO_HOST}" "mkdir -p ${DEMO_DIR}"
   scp -q Caddyfile Dockerfile docker-compose.yml "${DEMO_HOST}:${DEMO_DIR}/"
-  # The imprint carries the operator's real address, so it is never taken from
-  # the repository (which only holds a placeholder). Keep yours in
-  # imprint.local.html (gitignored). Without it the host's copy is left alone.
+  # Copy operator details from gitignored imprint.local.html. The repository contains a
+  # placeholder, so preserve the host copy when no local file exists.
   if [[ -f imprint.local.html ]]; then
     scp -q imprint.local.html "${DEMO_HOST}:${DEMO_DIR}/imprint.html"
   else
@@ -78,9 +77,8 @@ deployed_version() {
     sed -n 's/.*"version":"\([^"]*\)".*/\1/p'
 }
 
-# The release the site reports is the same string the image is tagged with
-# (the release workflow tags the image with the git tag), so what is live can
-# be recorded and put back without a lookup.
+# Release versions match image tags, allowing the reported version to be restored
+# directly.
 record_running_version() {
   local version
   version="$(deployed_version)"
@@ -110,17 +108,15 @@ set_preview_tag() {
   remote "touch .env && sed -i.bak '/^PREVIEW_TAG=/d' .env && rm -f .env.bak && printf 'PREVIEW_TAG=%s\n' '${tag}' >> .env"
 }
 
-# The release the preview host reports, the concrete version even when it runs
-# the "latest" tag, so promote moves the main site to exactly what was tried.
+# Resolve latest to the preview's actual version so promotion deploys the tested image.
 preview_version() {
   [[ -n "${PREVIEW_URL:-}" ]] || return 0
   curl -fsS --max-time 15 "${PREVIEW_URL%/}/api/version" 2>/dev/null |
     sed -n 's/.*"version":"\([^"]*\)".*/\1/p'
 }
 
-# The image runs as uid 1000, but Docker creates a named volume owned by root,
-# which makes the wallet crash-loop on a fresh host (setup does the same for
-# the production volume).
+# The image uses uid 1000, but Docker creates volumes owned by root. Assign ownership
+# before startup.
 ensure_preview_volume() {
   remote "docker volume create eudi-demo_wallet-data-preview >/dev/null && docker run --rm -v eudi-demo_wallet-data-preview:/d alpine chown 1000:1000 /d >/dev/null"
 }
@@ -144,9 +140,7 @@ ensure_strict_volume() {
 
 apply_stack() {
   compose "pull -q wallet" >/dev/null
-  # --build keeps the Caddy image in step with the Dockerfile (the rate
-  # limiting plugin is compiled into it). Layer caching makes it a no-op when
-  # nothing changed.
+  # Rebuild Caddy when its Dockerfile or rate limiting plugin changes.
   compose "up -d --build --quiet-pull" >/dev/null
   sleep 3
   compose "ps --format '{{.Name}} {{.Status}}'"
@@ -155,8 +149,7 @@ apply_stack() {
   if [[ -n "${version}" ]]; then
     echo "Version now live: ${version}"
   fi
-  # An explicit success: without DEMO_URL there is no version to report, and
-  # the caller must not read that as a failed deployment.
+  # A missing DEMO_URL skips version reporting without failing deployment.
   return 0
 }
 
@@ -165,9 +158,8 @@ current_wallet_tag() {
   remote "sed -n 's/^WALLET_TAG=//p' .env 2>/dev/null" || true
 }
 
-# The pin only does something if the compose file on the host reads
-# WALLET_TAG. A host whose compose file carries a fixed tag gets the current
-# file, which differs only in the image line.
+# A version pin requires a compose file that reads WALLET_TAG. Update older files that use
+# a fixed image tag.
 ensure_pinnable_compose() {
   if remote "grep -q WALLET_TAG docker-compose.yml 2>/dev/null"; then
     return 0
@@ -182,8 +174,7 @@ case "${COMMAND}" in
     echo "Installing Docker (skipped when already present)..."
     ssh "${DEMO_HOST}" "command -v docker >/dev/null || curl -fsSL https://get.docker.com | sh"
     copy_stack
-    # The image runs as uid 1000, but Docker creates a named volume owned by
-    # root, which makes the wallet crash-loop on a fresh host.
+    # Docker creates volumes owned by root, while the wallet runs as uid 1000.
     echo "Preparing the wallet data volume..."
     remote "docker volume create eudi-demo_wallet-data >/dev/null && docker run --rm -v eudi-demo_wallet-data:/d alpine chown 1000:1000 /d >/dev/null"
     compose "up -d --build"
@@ -195,16 +186,14 @@ case "${COMMAND}" in
     require_host
     record_running_version
     copy_stack
-    # Pull first: the compose file can use flags a released image does not
-    # know yet, and recreating containers against a stale image is the one
-    # way push can take the demo down.
+    # Pull before restarting because the updated compose file may use flags missing from
+    # the old image.
     apply_stack
     ;;
   update)
     require_host
     record_running_version
-    # An update after a rollback has to leave the pin behind, or it would keep
-    # serving the release that was rolled back to.
+    # Clear the rollback pin so update can select the latest release.
     set_wallet_tag ""
     apply_stack
     ;;
@@ -220,9 +209,8 @@ case "${COMMAND}" in
     compose "--profile preview pull -q wallet-preview" >/dev/null
     # Start the preview wallet, leaving production untouched.
     compose "--profile preview up -d --quiet-pull wallet-preview" >/dev/null
-    # Caddy reads its Caddyfile from a bind mount, so a recreate would not pick
-    # up the new preview block (and would blip the main site). A graceful reload
-    # applies it with no downtime and provisions the preview certificate.
+    # Reload Caddy to apply the mounted configuration and provision the preview
+    # certificate without interrupting the main site.
     compose "exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile" >/dev/null
     sleep 3
     compose "--profile preview ps --format '{{.Name}} {{.Status}}'"
@@ -289,9 +277,8 @@ case "${COMMAND}" in
     ensure_pinnable_compose
     previous_tag="$(current_wallet_tag)"
     set_wallet_tag "${target}"
-    # Pulling after the pin is set is what tests the release being asked for.
-    # A tag that was never published (an aborted release, a typo) must leave
-    # the running demo alone rather than take it down.
+    # Pull the requested tag before changing running containers. An unavailable release
+    # must leave the demo running.
     if ! compose "pull -q wallet" >/dev/null 2>&1; then
       set_wallet_tag "${previous_tag}"
       die "ghcr.io/dominikschlosser/eudi-dev:${target} could not be pulled, so nothing was changed. Check that the release exists."
@@ -326,9 +313,7 @@ case "${COMMAND}" in
     ;;
   stats)
     require_host
-    # Let goaccess produce the summary: the log stores epoch timestamps, so
-    # picking days apart with grep here would not work. Its CSV output uses
-    # CRLF, hence the tr.
+    # GoAccess reads the epoch timestamps. Remove CRLF from its CSV output before parsing.
     summary="$(mktemp)"
     remote "docker compose exec -T stats sh -c 'goaccess /var/log/caddy/access.log --log-format=CADDY --ignore-crawlers -o /tmp/summary.csv >/dev/null 2>&1; cat /tmp/summary.csv'" |
       tr -d '\r' > "${summary}"
@@ -336,22 +321,18 @@ case "${COMMAND}" in
       grep -E 'requests|visitors|log_size' |
       while read -r name value; do printf '%-18s %s\n' "${name}" "${value}"; done
     echo
-    # Pages only. The API paths are listed separately below, because they
-    # outnumber page requests and would bury them.
+    # List API traffic separately because polling would dominate the page counts.
     echo "Top pages (bots excluded, API calls omitted):"
     sed -n 's/^"[0-9]*",,"requests","\([0-9]*\)".*,"\([^"]*\)"$/\1 \2/p' "${summary}" |
       grep -v '/api/' |
       head -10 | while read -r hits path; do printf '  %6s  %s\n' "${hits}" "${path}"; done
 
-    # Every credential issued, presented, imported or deleted goes through the
-    # API, whether from the UI, an external wallet, or a test suite.
     api="$(sed -n 's/^"[0-9]*",,"requests","\([0-9]*\)".*,"\([^"]*\)"$/\1 \2/p' "${summary}" | grep '/api/' || true)"
     if [[ -n "${api}" ]]; then
       echo
       echo "Top API calls (bots excluded):"
       echo "${api}" | head -10 | while read -r hits path; do printf '  %6s  %s\n' "${hits}" "${path}"; done
-      # Reads are mostly the UI polling itself. What is left is what somebody
-      # did, which is the number worth reading.
+      # Separate writes from reads, which mostly come from UI polling.
       writes="$(echo "${api}" | grep -E '^[0-9]+ +(POST|PUT|PATCH|DELETE)\b' || true)"
       if [[ -n "${writes}" ]]; then
         echo
@@ -371,8 +352,8 @@ case "${COMMAND}" in
     remote "docker compose exec -T caddy sh -c 'rm -f /var/log/caddy/access-*.log*; : > /var/log/caddy/access.log'"
     compose "restart caddy" >/dev/null
     if [[ -n "${DEMO_URL:-}" ]]; then
-      # One request so the log is not empty, otherwise the report generator
-      # skips its run and /stats keeps showing the old numbers.
+      # Generate one request because GoAccess skips empty logs and would leave the old
+      # report visible.
       curl -fsS -o /dev/null --max-time 15 --retry 5 --retry-delay 2 --retry-connrefused "${DEMO_URL%/}/api/version" || true
     fi
     remote "docker compose exec -T stats sh -c 'goaccess /var/log/caddy/access.log --log-format=CADDY --ignore-crawlers --anonymize-ip --html-report-title=\"Demo usage\" -o /srv/stats/report.html'" >/dev/null 2>&1 || true

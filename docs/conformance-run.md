@@ -26,7 +26,7 @@ git checkout release-v5.2.4
 mvn clean package
 ```
 
-Run the suite server **on the host**. The wallet advertises its status list at `https://localhost:<port+1>` and the suite fetches that URL itself. From inside a container every module that checks credential status fails with `Connection refused`. The `-nodocker` compose file keeps mongo and nginx in Docker and expects the server on the host.
+Run the suite server **on the host** so it can fetch the wallet's `https://localhost:<port+1>` status list. Inside a container, `localhost` would refer to the container and status checks would fail. The `-nodocker` compose file keeps MongoDB and nginx in Docker while the suite server runs on the host.
 
 The `eudi-dev` wrapper defaults to plain `localhost` URLs, so the server must advertise `localhost` too (the upstream default is `localhost.emobix.co.uk`):
 
@@ -167,7 +167,7 @@ On the production service the wrapper runs only the certifiable HAIP plans, comp
 
 ### Against the strict conformance host
 
-The preferred certification target is the hosted strict wallet at `https://strict.eudi-test.dev` (deployed with `./deploy.sh strict <tag>` from [`examples/public-demo/`](../examples/public-demo/), see [Hosting a public demo](./public-demo.md)). Its public origin is read-only (the suite only reads metadata and delivers GET `/authorize` requests), so the wrapper drives the wallet's management API through an SSH tunnel to the loopback port the compose file publishes on the host:
+The hosted strict wallet at `https://strict.eudi-test.dev` is the certification target. Deploy it with `./deploy.sh strict <tag>` from [`examples/public-demo/`](../examples/public-demo/). Its public proxy allows GET and HEAD, including authorization requests. The harness uses an SSH tunnel for management API operations:
 
 ```bash
 ssh -N -L 18085:127.0.0.1:18086 root@<host> &

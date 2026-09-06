@@ -5,37 +5,31 @@ const http = require("http");
 
 const DOCKER_IMAGE = "oid4vc-dev-e2e";
 const CONTAINER_NAME = "oid4vc-dev-e2e-test";
-// Must not collide with ports bound by the other (parallel) spec files:
-// 18923 (webServer), 18924 (wallet.spec), 18925 (wallet.spec HTTPS port+1),
-// 18926 (wallet.spec issuer base URL).
+// Keep this port clear of the parallel wallet and decoder tests (18923 through 18926).
 const HOST_PORT = 18935;
 const WALLET_URL = `http://localhost:${HOST_PORT}`;
 
 test.describe.configure({ mode: "serial" });
-// Docker build + container startup can exceed the default 30s timeout
+// Docker builds and startup can exceed the default 30 second timeout on CI.
 test.setTimeout(120_000);
 
 test.beforeAll(async ({ }, testInfo) => {
   testInfo.setTimeout(120_000);
-  // Build Docker image (can take a while in CI with cold cache)
   execSync(`docker build -t ${DOCKER_IMAGE} ..`, {
     cwd: __dirname,
     stdio: "pipe",
     timeout: 120_000,
   });
 
-  // Remove any leftover container
   try {
     execSync(`docker rm -f ${CONTAINER_NAME}`, { stdio: "pipe" });
   } catch {}
 
-  // Start container with default CMD (wallet serve --auto-accept --pid --port 8085)
   execSync(
     `docker run -d --name ${CONTAINER_NAME} -p ${HOST_PORT}:8085 ${DOCKER_IMAGE}`,
     { stdio: "pipe" }
   );
 
-  // Wait for server to be ready
   await waitForServer(WALLET_URL, 30_000);
 });
 
@@ -84,8 +78,6 @@ test.describe("Docker Image", () => {
     const response = await page.goto(WALLET_URL);
     expect(response.status()).toBe(200);
     await expect(page.locator("h1")).toHaveText("EUDI Dev Wallet");
-    // The default CMD runs --auto-accept, and the header says so: consent
-    // dialogs never appear here, which would otherwise look broken.
     await expect(page.locator("#auto-accept-toggle")).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -111,7 +103,6 @@ test.describe("Docker Image", () => {
   test("trust list endpoint is available", async () => {
     const res = await httpGet(`${WALLET_URL}/api/trustlist`);
     expect(res.status).toBe(200);
-    // Trust list is a JWT (three dot-separated parts)
     expect(res.body.split(".").length).toBe(3);
   });
 
@@ -123,7 +114,6 @@ test.describe("Docker Image", () => {
   });
 
   test("decode works via stdin", () => {
-    // Create a minimal JWT to decode
     const header = Buffer.from('{"alg":"none","typ":"JWT"}').toString("base64url");
     const payload = Buffer.from('{"sub":"test","iss":"example"}').toString("base64url");
     const jwt = `${header}.${payload}.`;

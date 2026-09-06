@@ -108,8 +108,6 @@ func runProxy(cmd *cobra.Command, args []string) error {
 
 	srv := proxy.NewServer(cfg, writer)
 
-	// If trailing args are provided, launch the target service as a subprocess
-	// and scan its stdout for encryption keys and credentials.
 	var scanner *proxy.OutputScanner
 	var sub *proxy.Subprocess
 	if len(args) > 0 {
@@ -173,7 +171,7 @@ func runProxy(cmd *cobra.Command, args []string) error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// When subprocess exits on its own, just log it (proxy keeps running).
+	// A subprocess exit leaves the proxy running for inspection.
 	if sub != nil {
 		go func() {
 			if err := sub.Wait(); err != nil {
@@ -196,7 +194,6 @@ func runProxy(cmd *cobra.Command, args []string) error {
 		}
 		proxyServer.Close()
 
-		// A second signal force-exits immediately.
 		<-sigCh
 		fmt.Println("\nForce exit")
 		os.Exit(1)
@@ -204,7 +201,6 @@ func runProxy(cmd *cobra.Command, args []string) error {
 
 	err = proxyServer.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
-		// Wait for subprocess to finish after SIGTERM.
 		if sub != nil {
 			_ = sub.Wait()
 		}

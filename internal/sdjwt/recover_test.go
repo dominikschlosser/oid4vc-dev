@@ -19,9 +19,8 @@ import (
 	"testing"
 )
 
-// Every recoverable rule break is a deviation: lenient parsing keeps the
-// credential and records it, strict parsing refuses it. This table asserts
-// both halves for each break.
+// Check each recoverable violation in both modes. Lenient parsing records it and
+// strict parsing rejects it.
 func TestParse_RecoverableBreaks(t *testing.T) {
 	claim, claimDigest := disclosureOf(t, "salt", "given_name", "Erika")
 	arrayEntry, arrayEntryDigest := disclosureOf(t, "salt", "DE")

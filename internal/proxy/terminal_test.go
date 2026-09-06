@@ -62,7 +62,6 @@ func TestTerminalWriterAllTrafficTrueIncludesUnknown(t *testing.T) {
 	}
 }
 
-// captureOutput redirects both os.Stdout and color.Output to capture all print output.
 func captureOutput(t *testing.T, fn func()) string {
 	t.Helper()
 	oldStdout := os.Stdout

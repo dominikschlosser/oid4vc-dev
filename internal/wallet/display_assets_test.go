@@ -23,10 +23,8 @@ import (
 
 const tinyPNGDataURI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
 
-// A display image is stored as a content-addressed file beside wallet.json, with
-// only a reference left in the file, so the store the wallet reparses on every
-// request stays small. The image is still served, and an older wallet that
-// embedded the image as a data URI keeps working.
+// Store images separately and keep references in wallet.json to reduce reload work.
+// Existing embedded data URIs must remain readable.
 func TestDisplayImagesStoredAsAssetsBesideWallet(t *testing.T) {
 	srv := newTestServer(t, true)
 	store := NewWalletStore(t.TempDir())
@@ -42,13 +40,11 @@ func TestDisplayImagesStoredAsAssetsBesideWallet(t *testing.T) {
 	}
 	id, _ := decodeJSON(t, resp)["id"].(string)
 
-	// A freshly issued credential still holds the image in memory as a data URI,
-	// and the endpoint serves it before any save (an old wallet works the same).
+	// Serve newly issued images before they have been saved as assets.
 	if before := serverRequest(t, srv, http.MethodGet, "/api/credentials/"+id+"/display/logo", ""); before.Code != http.StatusOK || before.Body.Len() == 0 {
 		t.Fatalf("embedded image not served before save: %d len=%d", before.Code, before.Body.Len())
 	}
 
-	// Persisting moves the image into the assets directory.
 	if err := store.Save(srv.wallet); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -63,7 +59,6 @@ func TestDisplayImagesStoredAsAssetsBesideWallet(t *testing.T) {
 		t.Error("no asset file was written beside wallet.json")
 	}
 
-	// A reload yields the reference in memory, and the endpoint serves the asset.
 	reloaded, err := store.LoadOrCreate()
 	if err != nil {
 		t.Fatalf("reload: %v", err)
@@ -89,8 +84,7 @@ func TestDisplayImagesStoredAsAssetsBesideWallet(t *testing.T) {
 	}
 }
 
-// storeDisplayAsset is content-addressed: the same image writes one file and
-// yields the same reference however many credentials carry it.
+// Identical image content must produce one stored asset and one reference.
 func TestStoreDisplayAssetDedupes(t *testing.T) {
 	store := NewWalletStore(t.TempDir())
 	refA, okA := store.storeDisplayAsset(tinyPNGDataURI)
@@ -102,15 +96,13 @@ func TestStoreDisplayAssetDedupes(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("expected a single asset file, got %d", len(entries))
 	}
-	// A non data URI is passed through unchanged and writes nothing.
 	if ref, converted := store.storeDisplayAsset("https://issuer.example/logo.svg"); converted || ref != "https://issuer.example/logo.svg" {
 		t.Fatalf("an external URL should pass through unchanged, got %q converted=%v", ref, converted)
 	}
 }
 
-// --adhoc-display-images keeps an http(s) image URL as-is instead of fetching
-// and storing it, so the card fetches it on demand. The URL passes through to
-// the client (not the wallet endpoint), and a data URI is still embedded.
+// With --adhoc-display-images, pass HTTPS image URLs to the browser for loading on
+// demand. Data URIs remain embedded.
 func TestAdhocDisplayImagesKeepsTheURL(t *testing.T) {
 	w := generateTestWallet(t)
 	w.AdhocDisplayImages = true
@@ -122,8 +114,6 @@ func TestAdhocDisplayImagesKeepsTheURL(t *testing.T) {
 	if entry := findLogEntry(w.GetLog(), "credential_display_image_rejected"); entry != nil {
 		t.Error("keeping a URL for ad-hoc fetch should not log a rejection")
 	}
-	// The listing hands the external URL to the client, which fetches it on
-	// demand (an http(s) URL is not routed through the wallet's own endpoint).
 	if ref := displayImageRef("some-id", "logo", url); ref != url {
 		t.Fatalf("the kept URL should pass through to the client, got %q", ref)
 	}
@@ -137,8 +127,6 @@ func TestAdhocDisplayImagesKeepsTheURL(t *testing.T) {
 	}
 }
 
-// PruneUnreferencedAssets removes asset files no credential references (as a
-// demo reset leaves behind), and keeps the ones still in use.
 func TestPruneUnreferencedAssets(t *testing.T) {
 	store := NewWalletStore(t.TempDir())
 	usedRef, ok1 := store.storeDisplayAsset(tinyPNGDataURI)
@@ -150,7 +138,6 @@ func TestPruneUnreferencedAssets(t *testing.T) {
 		t.Fatalf("expected 2 asset files, got %d", len(entries))
 	}
 
-	// A wallet that references only the used asset.
 	w := generateTestWallet(t)
 	w.Credentials = []StoredCredential{{ID: "a", Format: "dc+sd-jwt", Raw: "x~", Display: &CredentialDisplay{LogoURI: usedRef}}}
 	if err := store.Save(w); err != nil {

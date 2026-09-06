@@ -98,7 +98,6 @@ func TestDiscoverIncludesActiveRemote(t *testing.T) {
 		t.Errorf("unexpected active instance: %+v", got)
 	}
 
-	// A registry entry for the same URL wins: no duplicate "active" row.
 	if err := RegisterInstance(Instance{PID: 1, Port: livePort, URL: live.URL, StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +108,6 @@ func TestDiscoverIncludesActiveRemote(t *testing.T) {
 		}
 	}
 
-	// An unreachable active remote is not listed.
 	live.Close()
 	if err := os.RemoveAll(instancesDir()); err != nil {
 		t.Fatal(err)
@@ -192,7 +190,6 @@ func TestDiscoverRegistryAndPrune(t *testing.T) {
 		t.Errorf("unexpected instance: %+v", registryHits[0])
 	}
 
-	// The dead instance's registry file is pruned.
 	if _, err := os.Stat(instanceFile(9999)); !os.IsNotExist(err) {
 		t.Error("stale instance file not pruned")
 	}
@@ -255,9 +252,8 @@ func TestDiscoverDedupesStaleRegistryFilesOnSamePort(t *testing.T) {
 	liveURL, _ := url.Parse(live.URL)
 	port, _ := strconv.Atoi(liveURL.Port())
 
-	// A stale file from a dead server that used the same port, plus the
-	// current server's file. Both pass the health check because the current
-	// server answers on the port.
+	// Both registry files reach the current server because it reused the old port.
+	// Discovery must remove the stale process entry.
 	if err := RegisterInstance(Instance{PID: 1111, Port: port, URL: live.URL, StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}

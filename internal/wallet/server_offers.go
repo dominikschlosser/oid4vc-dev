@@ -29,14 +29,12 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/config"
 )
 
-// pendingOfferTTL is how long a paused offer stays readable at
-// /api/offers/{id}. It outlives the wallet's own five minute wait for the
-// authorization callback, so the caller can always read the outcome.
+// Keep outcomes longer than the five minute authorization callback timeout so callers
+// can retrieve them after the flow ends.
 const pendingOfferTTL = 10 * time.Minute
 
-// pendingOffer is an offer whose flow stopped for an interactive sign-in at
-// the issuer. The flow keeps running in the background, so this is how the
-// caller that started it learns how it ended.
+// The issuance flow continues in the background while the user signs in. Callers poll
+// this record for its outcome.
 type pendingOffer struct {
 	ID        string
 	AuthURL   string
@@ -54,8 +52,6 @@ func (p *pendingOffer) complete(result *IssuanceResult, err error) {
 	p.done, p.result, p.err = true, result, err
 }
 
-// authorizationRequiredBody is what a caller gets while the user still has to
-// sign in, both when the offer is submitted and when its status is polled.
 func (p *pendingOffer) authorizationRequiredBody() map[string]any {
 	return map[string]any{
 		"status":            "authorization_required",
@@ -70,8 +66,6 @@ func (p *pendingOffer) outcome() (*IssuanceResult, error, bool) {
 	return p.result, p.err, p.done
 }
 
-// trackPendingOffer makes a paused offer readable at /api/offers/{id} and
-// drops entries nobody came back for.
 func (s *Server) trackPendingOffer(p *pendingOffer) {
 	s.offerMu.Lock()
 	defer s.offerMu.Unlock()
@@ -93,16 +87,12 @@ func (s *Server) lookupPendingOffer(id string) *pendingOffer {
 	return s.pendingOffers[id]
 }
 
-// runOffer processes a credential offer and applies the outcome to the wallet
-// (activity log, stored credential, saved store). When the issuer wants a
-// sign-in first it returns a pending offer carrying the authorization URL.
-//
-// The flow keeps running in the background: the user signs in wherever they
-// are, the issuer redirects to /callback, and it resumes there. Nothing here
-// opens a browser, which on a hosted wallet would reach nobody.
+// When sign-in is required, return a pending offer with the authorization URL and
+// continue the flow in the background. The issuer's redirect to /callback resumes
+// issuance. The caller opens the URL in their browser.
 func (s *Server) runOffer(uri string, logDetails map[string]any, opts OfferOptions) (*IssuanceResult, *pendingOffer, error) {
-	// A subscriber is what makes the wallet hand over the sign-in URL rather
-	// than fail the flow.
+	// A subscriber lets the flow return the sign-in URL instead of failing when
+	// interaction is required.
 	authCh, unsubscribe := s.wallet.SubscribeAuthorization()
 	p := &pendingOffer{ID: newConsentID(), CreatedAt: time.Now()}
 	done := make(chan struct{})
@@ -132,9 +122,7 @@ func (s *Server) runOffer(uri string, logDetails map[string]any, opts OfferOptio
 	}
 }
 
-// applyOfferOutcome records how an offer ended. It runs on the flow's own
-// goroutine, so it is the only place that has to run whether the caller is
-// still waiting or gave up after an interactive sign-in.
+// Record the outcome in the flow's goroutine even if the caller has stopped waiting.
 func (s *Server) applyOfferOutcome(uri, owner string, result *IssuanceResult, err error, logDetails map[string]any) {
 	if err != nil {
 		s.log("  ERROR: %v", err)
@@ -149,8 +137,7 @@ func (s *Server) applyOfferOutcome(uri, owner string, result *IssuanceResult, er
 
 	if result.Pending {
 		s.log("  Deferred:      %s will be collected every %s", result.Issuer, result.RetryInterval)
-		// The poller reads the wallet the deferral was recorded on, so it is
-		// persisted here.
+		// Persist the deferral on the wallet used by the poller.
 		s.persistWallet()
 		return
 	}
@@ -174,9 +161,8 @@ func (s *Server) applyOfferOutcome(uri, owner string, result *IssuanceResult, er
 	s.saveIssuedCredential(result)
 }
 
-// writeAuthorizationRequired answers a caller whose offer needs a sign-in. A
-// browser that navigated here is sent straight to the issuer. Anything else
-// gets the URL and the id to follow the flow at.
+// Redirect browser navigations to the issuer. API callers receive the sign-in URL and
+// pending offer ID.
 func (s *Server) writeAuthorizationRequired(w http.ResponseWriter, p *pendingOffer, browserRedirect bool) {
 	if browserRedirect {
 		redirectBrowser(w, p.AuthURL)
@@ -185,7 +171,6 @@ func (s *Server) writeAuthorizationRequired(w http.ResponseWriter, p *pendingOff
 	writeJSON(w, http.StatusAccepted, p.authorizationRequiredBody())
 }
 
-// handleOfferStatus reports how an offer that paused for a sign-in ended.
 func (s *Server) handleOfferStatus(w http.ResponseWriter, r *http.Request) {
 	p := s.lookupPendingOffer(r.PathValue("id"))
 	if p == nil {
@@ -231,13 +216,11 @@ func (s *Server) handleAuthorizationCodeCallback(w http.ResponseWriter, r *http.
 		})
 		return
 	}
-	// The browser came back from the issuer's login. The flow finishes
-	// server-side on its own, so send the visitor back to the wallet rather
-	// than to a dead end.
+	// The callback resumes issuance on the server. Send the browser back to the wallet
+	// UI.
 	http.Redirect(w, r, "/?focus=overview", http.StatusSeeOther)
 }
 
-// handleOfferAPI processes a credential offer URI.
 func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		URI         string `json:"uri"`
@@ -249,9 +232,8 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A new request makes any earlier failure stale. The stored error outlives
-	// its flow (the endpoint that reads it only peeks), so the wallet page
-	// would show the previous failure until the consent dialog replaces it.
+	// Clear the previous failure when a new request starts. Otherwise the UI would
+	// keep showing it until the new consent dialog appears.
 	s.wallet.ClearLastError(callerOwners(r))
 
 	if body.Interactive {
@@ -260,11 +242,8 @@ func (s *Server) handleOfferAPI(w http.ResponseWriter, r *http.Request) {
 	s.processOfferURI(w, body.URI, body.TxCode, requestOwner(r), false, !body.Interactive)
 }
 
-// processOfferURI runs the credential offer flow for an offer delivered as a
-// URI. With browserRedirect set, a successful import redirects the browser to
-// the wallet UI instead of returning JSON. apiInitiated marks programmatic
-// submissions, which auto-accept even in interactive mode (the call is the
-// caller's consent).
+// Browser submissions return to the wallet UI after import. API submissions provide
+// consent and run without a dialog.
 func (s *Server) processOfferURI(w http.ResponseWriter, uri, txCode, session string, browserRedirect, apiInitiated bool) {
 	s.log("Received credential offer")
 	uriDisplay := format.Truncate(uri, 120)
@@ -296,10 +275,8 @@ func (s *Server) processOfferURI(w http.ResponseWriter, uri, txCode, session str
 		}
 
 		if browserRedirect {
-			// A browser navigation must not hang while the consent is
-			// pending: send the browser to the wallet UI (which shows the
-			// request) and import the credential in the background once
-			// consent arrives.
+			// Redirect browser navigations to the wallet UI immediately. Import in the
+			// background after consent.
 			go s.awaitOfferConsent(noopResponseWriter{}, consentReq, issuerDisplay, false, txCode)
 			redirectBrowser(w, "/?request="+consentReq.ID)
 			return
@@ -311,9 +288,7 @@ func (s *Server) processOfferURI(w http.ResponseWriter, uri, txCode, session str
 	s.processOfferDirectly(w, uri, txCode, session, browserRedirect, apiInitiated)
 }
 
-// awaitOfferConsent waits for the user's decision on an issuance consent
-// request and processes the credential offer on approval. The outcome is also
-// delivered on the consent request's submission channel for the approve API.
+// The submission channel also delivers the outcome to the approve API.
 func (s *Server) awaitOfferConsent(w http.ResponseWriter, consentReq *ConsentRequest, issuerDisplay string, browserRedirect bool, txCode string) {
 	handle := func(consent ConsentResult) {
 		if !consent.Approved {
@@ -329,14 +304,13 @@ func (s *Server) awaitOfferConsent(w http.ResponseWriter, consentReq *ConsentReq
 		}
 
 		s.log("  Consent:       approved")
-		// The offer is what declares a transaction code, so the user only
-		// learns one is needed from the dialog. A code typed there arrives
-		// with the approval and replaces whatever the request carried.
+		// The offer declares whether a transaction code is required. A code entered in
+		// the consent dialog replaces the code from the request.
 		if consent.TxCode != "" {
 			txCode = consent.TxCode
 		}
-		// The user is at the dialog, so a presentation the issuer asks for
-		// mid-flow is put to them as well.
+		// Show consent for any presentation requested by the issuer during this
+		// interactive flow.
 		result, pending, err := s.runOffer(consentReq.OfferURI, map[string]any{
 			"credential_requested": consentReq.OfferConfigs,
 		}, OfferOptions{TxCode: txCode, ResolvedOffer: consentReq.ResolvedOffer, Owner: approvingOwner(consentReq.Owner, consent.Owner)})
@@ -347,8 +321,8 @@ func (s *Server) awaitOfferConsent(w http.ResponseWriter, consentReq *ConsentReq
 		}
 
 		if pending != nil {
-			// The UI approved the offer and is already navigating to the
-			// issuer, having taken the same URL off the event stream.
+			// The UI already received the sign-in URL through the event stream and is
+			// navigating to it.
 			consentReq.SubmissionCh <- SubmissionResult{StatusCode: http.StatusAccepted}
 			s.writeAuthorizationRequired(w, pending, browserRedirect)
 			return
@@ -368,15 +342,14 @@ func (s *Server) awaitOfferConsent(w http.ResponseWriter, consentReq *ConsentReq
 		}
 	}
 
-	// Two waits, one after the other: this consent, and the presentation the
-	// issuer may ask for once the offer is approved.
+	// Wait first for offer consent, then for any presentation the issuer requests.
 	s.allowSlowResponse(w, config.ConsentTimeout+interactiveAuthorizationConsentTimeout)
 	select {
 	case consent := <-consentReq.ResultCh:
 		handle(consent)
 	case <-time.After(config.ConsentTimeout):
-		// The timer races an arriving decision. A decision that already
-		// resolved the request wins, only a request still pending times out.
+		// The timer can race with consent. Only time out requests that are still
+		// pending.
 		if _, ok := s.wallet.ResolveRequest(consentReq.ID, statusExpired); !ok {
 			handle(<-consentReq.ResultCh)
 			return
@@ -387,8 +360,6 @@ func (s *Server) awaitOfferConsent(w http.ResponseWriter, consentReq *ConsentReq
 	}
 }
 
-// processOfferDirectly runs the credential offer flow without a consent step
-// (auto-accept mode).
 func (s *Server) processOfferDirectly(w http.ResponseWriter, uri, txCode, session string, browserRedirect, apiInitiated bool) {
 	result, pending, err := s.runOffer(uri, nil, OfferOptions{PresentationConsented: apiInitiated, TxCode: txCode, Owner: session})
 	if err != nil {
@@ -432,13 +403,11 @@ func (w *Wallet) prepareIssuanceConsentRequest(raw, owner string) (*ConsentReque
 		CreatedAt:    time.Now(),
 	}
 
-	// The offer is resolved now, by reference as well as by value, so the
-	// dialog can say what is being offered. It is fetched again after
-	// approval, which the specification allows.
+	// Resolve referenced offers before consent so the dialog can describe the
+	// credentials. The specification permits fetching the offer again after approval.
 	reqType, parsed, err := oid4vc.Parse(trimmed)
 	if err != nil {
-		// An offer that cannot be resolved is still worth asking about: name
-		// the host rather than failing before the user sees anything.
+		// If the offer cannot be fetched, show its host in the consent dialog.
 		if offerURI := extractCredentialOfferURI(trimmed); offerURI != "" {
 			req.ClientID = credentialOfferIssuerDisplay(offerURI)
 			req.OfferDetails = &IssuanceOfferDetails{
@@ -460,8 +429,8 @@ func (w *Wallet) prepareIssuanceConsentRequest(raw, owner string) (*ConsentReque
 	req.ClientID = offer.CredentialIssuer
 	req.OfferConfigs = append([]string(nil), offer.CredentialConfigurationIDs...)
 	req.OfferDetails = w.describeCredentialOffer(offer)
-	// Kept for the approval: an issuer that serves the offer once has
-	// nothing left to give by then.
+	// Keep the resolved offer for approval because the issuer may allow it to be
+	// fetched only once.
 	req.ResolvedOffer = offer
 	return req, offer.CredentialIssuer, nil
 }

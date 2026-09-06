@@ -32,8 +32,7 @@ func browserGet(t *testing.T, srv *Server, path string) *httptest.ResponseRecord
 	return w
 }
 
-// browserAnswer answers a consent request the way the browser that started it
-// does, carrying the session the wallet set on the response that redirected it.
+// Use the browser session set by the wallet's redirect response.
 func browserAnswer(t *testing.T, srv *Server, redirect *httptest.ResponseRecorder, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest("POST", path, strings.NewReader(body))
@@ -109,7 +108,6 @@ func TestAuthorize_APICallStillGetsJSON(t *testing.T) {
 	}))
 	defer verifier.Close()
 
-	// No HTML Accept header: same request must keep returning JSON.
 	rec := serverRequest(t, srv, "GET", presentationAuthorizePath(t, verifier.URL), "")
 
 	if rec.Code != http.StatusOK {
@@ -130,8 +128,6 @@ func TestAuthorize_InteractiveBrowserRedirectsToWalletUIThenSubmits(t *testing.T
 	}))
 	defer verifier.Close()
 
-	// The navigation must not block on consent: it redirects to the wallet
-	// UI immediately, leaving the consent request pending.
 	rec := browserGet(t, srv, presentationAuthorizePath(t, verifier.URL))
 
 	if rec.Code != http.StatusSeeOther {
@@ -146,8 +142,6 @@ func TestAuthorize_InteractiveBrowserRedirectsToWalletUIThenSubmits(t *testing.T
 		t.Fatalf("expected one pending consent request, got %d", len(pending))
 	}
 
-	// Approving finishes the detached flow. The approve response carries the
-	// verifier redirect_uri the UI navigates to.
 	approveRec := browserAnswer(t, srv, rec, "/api/requests/"+pending[0].ID+"/approve", `{}`)
 	if approveRec.Code != http.StatusOK {
 		t.Fatalf("approve failed: %d %s", approveRec.Code, approveRec.Body.String())

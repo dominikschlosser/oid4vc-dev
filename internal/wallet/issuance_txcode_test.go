@@ -26,8 +26,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/oid4vc"
 )
 
-// txCodeIssuer serves a pre-authorized offer that requires a transaction
-// code and refuses any token request that does not carry the right one.
 func txCodeIssuer(t *testing.T, w *Wallet, wantCode string) (*httptest.Server, string) {
 	t.Helper()
 
@@ -93,9 +91,7 @@ func txCodeIssuer(t *testing.T, w *Wallet, wantCode string) (*httptest.Server, s
 	return srv, "openid-credential-offer://?" + oid4vc.EncodeURIQuery(url.Values{"credential_offer": {string(offerJSON)}})
 }
 
-// TestApproveRequest_CarriesTxCodeIntoIssuance covers the wallet UI's path: the
-// offer arrives with no code, the dialog asks for one, and it reaches the token
-// request with the approval.
+// Pass the transaction code from consent approval into the token request.
 func TestApproveRequest_CarriesTxCodeIntoIssuance(t *testing.T) {
 	w := generateTestWallet(t)
 	srv, offerURI := txCodeIssuer(t, w, "1234")
@@ -125,7 +121,6 @@ func TestApproveRequest_CarriesTxCodeIntoIssuance(t *testing.T) {
 			if err != nil {
 				t.Fatalf("prepareIssuanceConsentRequest: %v", err)
 			}
-			// The dialog needs enough to build its input.
 			details := consentReq.OfferDetails
 			if !details.TxCode {
 				t.Fatal("offer details do not report a required transaction code")
@@ -161,9 +156,8 @@ func TestApproveRequest_CarriesTxCodeIntoIssuance(t *testing.T) {
 	}
 }
 
-// The issuer's own logo (Credential Issuer Metadata display[].logo) is fetched
-// through the policed client and embedded, so the consent dialog shows it under
-// the wallet's image policy instead of pointing the page at the issuer's host.
+// Fetch and embed the issuer logo with address checks so consent does not load it
+// directly from the issuer.
 func TestDescribeCredentialOfferEmbedsTheIssuerLogo(t *testing.T) {
 	var serverURL string
 	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
@@ -211,9 +205,8 @@ func TestDescribeCredentialOfferEmbedsTheIssuerLogo(t *testing.T) {
 	}
 }
 
-// TestDescribeCredentialOffer_TxCodeShape covers the members the dialog needs
-// to size and label its input, and the fallback hint when the issuer gives no
-// description of its own.
+// Show the transaction code's input mode, length and description, with a fallback
+// label when needed.
 func TestDescribeCredentialOffer_TxCodeShape(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -296,7 +289,6 @@ func TestOfferNeedingATxCodeIsRefusedBeforeTheCodeIsSpent(t *testing.T) {
 		}
 	}
 
-	// The same offer with the code runs through.
 	if _, err := w.ProcessCredentialOfferWithOptions(offerURI, OfferOptions{TxCode: "1234"}); err != nil {
 		t.Fatalf("issuance with the code: %v", err)
 	}

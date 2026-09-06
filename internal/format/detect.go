@@ -34,22 +34,13 @@ const (
 	FormatUnknown   CredentialFormat = "unknown"
 )
 
-// Detect auto-detects the format from raw input.
-//
-// Detection order:
-//  1. OpenID URI schemes (openid-credential-offer://, haip-vci://, openid4vp://, haip-vp://, eudi-openid4vp://)
-//  2. HTTP(S) URL with OID4 query params
-//  3. SD-JWT (contains '~')
-//  4. mDOC (hex/base64url CBOR)
-//  5. JSON: keys inspected for OID4 markers (before JWT, since JSON with dots can look like JWT)
-//  6. JWT (3 dot-separated parts). Payload inspected for OID4 markers
+// Detect checks JSON first because dots in its strings can resemble JWT separators.
 func Detect(input string) CredentialFormat {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return FormatUnknown
 	}
 
-	// 1. OpenID URI schemes
 	lower := strings.ToLower(input)
 	if strings.HasPrefix(lower, "openid-credential-offer://") || strings.HasPrefix(lower, "haip-vci://") {
 		return FormatOID4VCI
@@ -58,7 +49,6 @@ func Detect(input string) CredentialFormat {
 		return FormatOID4VP
 	}
 
-	// 2. HTTP(S) URL with OID4 query params
 	if strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") {
 		if f := detectHTTPOID4(input); f != FormatUnknown {
 			return f
@@ -67,12 +57,10 @@ func Detect(input string) CredentialFormat {
 		return FormatUnknown
 	}
 
-	// 3. SD-JWT always contains ~ separators
 	if strings.Contains(input, "~") {
 		return FormatSDJWT
 	}
 
-	// 4. mDOC: hex or base64url encoded CBOR
 	if isHex(input) {
 		b, err := hex.DecodeString(input)
 		if err == nil && len(b) > 0 && isCBORStart(b[0]) {
@@ -84,7 +72,6 @@ func Detect(input string) CredentialFormat {
 		return FormatMDOC
 	}
 
-	// 5. JSON: inspect keys for OID4 markers (before JWT, since JSON with dots can look like JWT)
 	if strings.HasPrefix(input, "{") {
 		if f := detectJSONOID4(input); f != FormatUnknown {
 			return f
@@ -92,7 +79,6 @@ func Detect(input string) CredentialFormat {
 		return FormatUnknown
 	}
 
-	// 6. JWT (3 dot-separated parts). Inspect payload for OID4 markers
 	parts := strings.Split(input, ".")
 	if len(parts) == 3 && len(parts[0]) > 0 && len(parts[1]) > 0 {
 		if f := detectJWTPayloadOID4(parts[1]); f != FormatUnknown {
@@ -104,7 +90,6 @@ func Detect(input string) CredentialFormat {
 	return FormatUnknown
 }
 
-// detectHTTPOID4 checks HTTP URL query params for OID4 markers.
 func detectHTTPOID4(raw string) CredentialFormat {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -120,7 +105,6 @@ func detectHTTPOID4(raw string) CredentialFormat {
 	return FormatUnknown
 }
 
-// detectJWTPayloadOID4 decodes a JWT payload segment and checks for OID4 markers.
 func detectJWTPayloadOID4(payloadB64 string) CredentialFormat {
 	data, err := DecodeBase64URL(payloadB64)
 	if err != nil {
@@ -145,7 +129,6 @@ func detectJWTPayloadOID4(payloadB64 string) CredentialFormat {
 	return FormatUnknown
 }
 
-// detectJSONOID4 parses JSON and checks keys for OID4 markers.
 func detectJSONOID4(raw string) CredentialFormat {
 	var m map[string]any
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {

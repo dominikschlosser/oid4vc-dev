@@ -206,7 +206,6 @@ func TestTemplatesDirFlagOverridesWalletDir(t *testing.T) {
 		t.Fatalf("issue sdjwt --templates-dir: %v", err)
 	}
 
-	// Without the flag the custom dir is not consulted
 	templatesDir = ""
 	rootCmd.SetArgs([]string{"issue", "sdjwt", "--template", "custom-cred"})
 	if err := rootCmd.Execute(); err == nil {

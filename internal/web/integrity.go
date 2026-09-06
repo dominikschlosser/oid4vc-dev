@@ -25,20 +25,17 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
-// CheckResult represents the outcome of a single validation check.
 type CheckResult struct {
 	Name   string `json:"name"`
 	Status string `json:"status"` // "pass", "fail", "skipped"
 	Detail string `json:"detail"`
-	// NeedsNetwork marks a check that was skipped because it can only be
-	// answered by a lookup at a counterparty. A caller that decodes offline
-	// first and then asks again knows from this which checks are still open.
+	// Marks skipped checks that require a network lookup so the UI can request them
+	// after offline decoding.
 	NeedsNetwork bool `json:"needsNetwork,omitempty"`
 }
 
-// CheckSDJWTIntegrity verifies that each disclosure's digest appears in the
-// payload's _sd arrays (or array element "..." references), including those
-// nested inside other disclosure values.
+// CheckSDJWTIntegrity checks digests in payload _sd arrays, array placeholders and nested
+// disclosures.
 func CheckSDJWTIntegrity(token *sdjwt.Token) CheckResult {
 	if len(token.Disclosures) == 0 {
 		return CheckResult{
@@ -48,8 +45,8 @@ func CheckSDJWTIntegrity(token *sdjwt.Token) CheckResult {
 		}
 	}
 
-	// Digests also sit inside disclosure values: an address disclosure
-	// carries its own _sd array for locality and street_address.
+	// A disclosure can contain further digests, such as address fields within an
+	// address disclosure.
 	allDigests := collectDigests(token.Payload)
 	for _, d := range token.Disclosures {
 		collectDigestsRecursive(d.Value, allDigests)
@@ -105,8 +102,6 @@ func CheckSDJWTType(token *sdjwt.Token) CheckResult {
 	}
 }
 
-// collectDigests walks the payload recursively and collects all _sd array
-// values and "..." object references.
 func collectDigests(obj map[string]any) map[string]bool {
 	result := make(map[string]bool)
 	collectDigestsRecursive(obj, result)
@@ -139,8 +134,8 @@ func collectDigestsRecursive(val any, result map[string]bool) {
 	}
 }
 
-// CheckMDOCIntegrity verifies that each IssuerSignedItem's CBOR encoding
-// hashes to the corresponding entry in MSO.ValueDigests.
+// CheckMDOCIntegrity hashes complete IssuerSignedItem encodings and compares them with
+// MSO.ValueDigests.
 func CheckMDOCIntegrity(doc *mdoc.Document) CheckResult {
 	if doc.IssuerAuth == nil || doc.IssuerAuth.MSO == nil {
 		return CheckResult{

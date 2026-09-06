@@ -43,7 +43,6 @@ type Instance struct {
 	StartedAt time.Time `json:"started_at"`
 }
 
-// DiscoveredInstance is a running wallet instance found on the local system.
 type DiscoveredInstance struct {
 	Instance
 	BuildID string `json:"build_id,omitempty"`
@@ -64,7 +63,6 @@ func instanceFile(pid int) string {
 	return filepath.Join(instancesDir(), fmt.Sprintf("%d.json", pid))
 }
 
-// RegisterInstance records a running wallet server in the instance registry.
 func RegisterInstance(inst Instance) error {
 	if err := os.MkdirAll(instancesDir(), 0o755); err != nil {
 		return fmt.Errorf("creating instances directory: %w", err)
@@ -76,13 +74,10 @@ func RegisterInstance(inst Instance) error {
 	return os.WriteFile(instanceFile(inst.PID), append(data, '\n'), 0o644)
 }
 
-// UnregisterInstance removes a wallet server from the instance registry.
 func UnregisterInstance(pid int) {
 	_ = os.Remove(instanceFile(pid))
 }
 
-// applyHealth copies the identity an instance reports on /api/version into
-// the discovered row.
 func (d *DiscoveredInstance) applyHealth(version map[string]any) {
 	if build, ok := version["build_id"].(string); ok {
 		d.BuildID = build
@@ -92,7 +87,6 @@ func (d *DiscoveredInstance) applyHealth(version map[string]any) {
 	}
 }
 
-// healthCheck probes a wallet server and returns its /api/version document.
 func healthCheck(url string, timeout time.Duration) (map[string]any, bool) {
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Get(strings.TrimRight(url, "/") + "/api/version")
@@ -110,7 +104,6 @@ func healthCheck(url string, timeout time.Duration) (map[string]any, bool) {
 	return version, true
 }
 
-// fetchInstanceConfig reads the instance's introspection document.
 func fetchInstanceConfig(url string, timeout time.Duration) map[string]any {
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Get(strings.TrimRight(url, "/") + "/api/config")
@@ -156,7 +149,6 @@ func Discover(timeout time.Duration) []DiscoveredInstance {
 		}
 		version, alive := healthCheck(inst.URL, timeout)
 		if !alive {
-			// The server is gone: prune the stale registry entry.
 			_ = os.Remove(filepath.Join(instancesDir(), entry.Name()))
 			continue
 		}
@@ -165,9 +157,8 @@ func Discover(timeout time.Duration) []DiscoveredInstance {
 			livePID = int(pid)
 		}
 		if livePID != inst.PID {
-			// A different process answers on this port: the file belongs to
-			// a dead instance that only looked alive because a new server
-			// took over the port.
+			// A new process can reuse a dead server's port. Require the process ID to
+			// match before accepting the registry entry.
 			_ = os.Remove(filepath.Join(instancesDir(), entry.Name()))
 		}
 		if seenPorts[inst.Port] {
@@ -194,7 +185,6 @@ func Discover(timeout time.Duration) []DiscoveredInstance {
 			Source:   "process",
 		}
 		di.applyHealth(version)
-		// The instance's introspection endpoint knows its wallet directory.
 		if cfg := fetchInstanceConfig(url, timeout); cfg != nil {
 			if dir, ok := cfg["wallet_dir"].(string); ok {
 				di.WalletDir = dir
@@ -204,9 +194,8 @@ func Discover(timeout time.Duration) []DiscoveredInstance {
 		seenPorts[proc.Port] = true
 	}
 
-	// The active remote target may live outside this system (for example in
-	// a container), where neither the registry nor the process scan can see
-	// it. List it anyway when it responds.
+	// An active remote may run in a container or another host, outside local process
+	// discovery. Include it when its API responds.
 	if active := Active(); active != "" {
 		known := false
 		for _, inst := range found {
@@ -260,13 +249,10 @@ func InstanceForWalletDir(dir string, timeout time.Duration) *DiscoveredInstance
 	return nil
 }
 
-// SamePath reports whether two paths refer to the same directory after
-// resolving relative segments and symlinks.
 func SamePath(a, b string) bool {
 	return normalizePath(a) == normalizePath(b)
 }
 
-// normalizePath resolves a path to a stable comparable form.
 func normalizePath(p string) string {
 	if abs, err := filepath.Abs(p); err == nil {
 		p = abs

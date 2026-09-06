@@ -109,7 +109,6 @@ func harHeaders(h http.Header) []map[string]string {
 		return []map[string]string{}
 	}
 
-	// Sort header names for deterministic output
 	names := make([]string, 0, len(h))
 	for name := range h {
 		names = append(names, name)

@@ -130,7 +130,6 @@ func VerifyDeviceAuth(doc *Document, sessionTranscript []byte) error {
 	return nil
 }
 
-// DeviceKey returns the holder key the issuer bound the credential to.
 func DeviceKey(doc *Document) (*ecdsa.PublicKey, error) {
 	if doc == nil || doc.IssuerAuth == nil || doc.IssuerAuth.MSO == nil {
 		return nil, fmt.Errorf("document carries no MSO")
@@ -223,8 +222,6 @@ func DeviceKeyThumbprint(key *ecdsa.PublicKey) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// ItemDigest returns the digest of a disclosed item and the digest the issuer
-// signed for it.
 func ItemDigest(doc *Document, namespace string, item IssuerSignedItem) (got, want []byte, err error) {
 	if doc == nil || doc.IssuerAuth == nil || doc.IssuerAuth.MSO == nil {
 		return nil, nil, fmt.Errorf("document carries no MSO")
@@ -241,21 +238,17 @@ func ItemDigest(doc *Document, namespace string, item IssuerSignedItem) (got, wa
 	return got, want, nil
 }
 
-// coseHeaderLabels names the COSE header parameters this toolkit meets.
 var coseHeaderLabels = map[int64]string{
 	1: "alg", 2: "crit", 3: "content type", 4: "kid",
 	32: "x5bag", 33: "x5chain", 34: "x5t", 35: "x5u",
 }
 
-// coseAlgLabels names the COSE algorithms by their registered identifier.
 var coseAlgLabels = map[int64]string{
 	-7: "ES256", -35: "ES384", -36: "ES512", -8: "EdDSA",
 	-257: "RS256", -258: "RS384", -259: "RS512",
 }
 
-// NameCOSEHeader turns a COSE header map into one keyed by parameter name,
-// with known algorithm identifiers spelled out. The raw form is integers on
-// both sides, which is unreadable without the registry to hand.
+// NameCOSEHeader replaces numeric COSE labels with registered names for display.
 func NameCOSEHeader(header map[string]any) map[string]any {
 	if len(header) == 0 {
 		return nil
@@ -281,7 +274,7 @@ func NameCOSEHeader(header map[string]any) map[string]any {
 	return out
 }
 
-// describeCertificates replaces raw DER with something a reader can place.
+// Show readable certificate details instead of raw DER.
 func describeCertificates(value any) any {
 	var ders [][]byte
 	switch v := value.(type) {
@@ -314,8 +307,7 @@ func describeCertificates(value any) any {
 	return out
 }
 
-// NameCOSEKey turns a COSE_Key into named members. EC2 keys arrive as
-// {1: 2, -1: 1, -2: x, -3: y}, which says nothing without the registry.
+// NameCOSEKey replaces numeric COSE_Key labels with registered names for display.
 func NameCOSEKey(key map[string]any) map[string]any {
 	if len(key) == 0 {
 		return nil

@@ -31,8 +31,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/proxy"
 )
 
-// proxyLogsReconnectDelay is how long the follow waits before reattaching to
-// a stream that ended. A variable so tests do not have to wait for it.
+// Tests can shorten the delay between stream reconnects.
 var proxyLogsReconnectDelay = 2 * time.Second
 
 func proxyLogsCmd() *cobra.Command {
@@ -73,8 +72,8 @@ Examples:
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			// Subscribed before the recorded traffic is read, so an entry
-			// arriving between the two is printed once rather than missed.
+			// Subscribe first to avoid missing traffic between the history
+			// read and the stream.
 			var stream *proxy.EntryStream
 			if follow {
 				if stream, err = client.Stream(ctx); err != nil {
@@ -119,8 +118,6 @@ func printProxyEntriesJSON(out io.Writer, entries []*proxy.TrafficEntry) error {
 	return enc.Encode(entries)
 }
 
-// followProxyEntries prints entries as the proxy records them, reattaching
-// whenever the stream ends, until the follow is interrupted.
 func followProxyEntries(ctx context.Context, client *proxy.DashboardClient, stream *proxy.EntryStream, out io.Writer, lastID int64) error {
 	for {
 		for {
@@ -128,8 +125,8 @@ func followProxyEntries(ctx context.Context, client *proxy.DashboardClient, stre
 			if err != nil {
 				break
 			}
-			// The recorded traffic printed above may already contain what
-			// the stream delivers first, since the subscription predates it.
+			// History and the stream can overlap because the subscription
+			// starts first.
 			if entry.ID <= lastID {
 				continue
 			}
@@ -145,14 +142,12 @@ func followProxyEntries(ctx context.Context, client *proxy.DashboardClient, stre
 		}
 		stream = next
 
-		// The gap is filled from the entry list rather than the stream,
-		// which only carries what arrives from now on.
+		// Read missed entries from history. The new stream only carries future
+		// traffic.
 		lastID = printMissedEntries(ctx, client, out, lastID)
 	}
 }
 
-// reattachToProxy keeps opening the stream until it succeeds or the follow is
-// interrupted, so a proxy that is down for a while is waited out.
 func reattachToProxy(ctx context.Context, client *proxy.DashboardClient, out io.Writer) (*proxy.EntryStream, error) {
 	reported := false
 	for {
@@ -168,25 +163,22 @@ func reattachToProxy(ctx context.Context, client *proxy.DashboardClient, out io.
 			return nil, ctx.Err()
 		}
 		if !reported {
-			// Reported once, so a proxy that stays down does not fill the
-			// terminal with the same line.
+			// Report once to avoid filling the terminal while the proxy is
+			// down.
 			fmt.Fprintf(out, "Still waiting for %s: %v\n", client.BaseURL, err)
 			reported = true
 		}
 	}
 }
 
-// printMissedEntries prints what the proxy recorded while the stream was
-// down, and returns the id to continue from.
 func printMissedEntries(ctx context.Context, client *proxy.DashboardClient, out io.Writer, lastID int64) int64 {
 	entries, err := client.Entries(ctx)
 	if err != nil {
 		fmt.Fprintf(out, "Could not read what %s recorded while the stream was down: %v\n", client.BaseURL, err)
 		return lastID
 	}
-	// What the proxy holds now decides what counts as already seen. A proxy
-	// that restarted numbers its entries from the beginning again, so an
-	// empty or lower-numbered record is new traffic rather than old.
+	// A restarted proxy numbers entries from the beginning. An empty or
+	// lower-numbered history resets the last-seen ID.
 	if len(entries) == 0 {
 		return 0
 	}
@@ -205,8 +197,6 @@ func printMissedEntries(ctx context.Context, client *proxy.DashboardClient, out 
 	return lastID
 }
 
-// sleepContext waits for d, or returns the context's error when it ends
-// first.
 func sleepContext(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()

@@ -27,16 +27,13 @@ import (
 	"testing"
 )
 
-// backends returns every backend the contract suite runs against. Keys are
-// prefixed per test so backends shared across tests (the Postgres table)
-// do not see each other's blobs.
+// Prefix test keys to isolate tests that share the Postgres table.
 func backends(t *testing.T) map[string]Store {
 	t.Helper()
 	stores := map[string]Store{
 		KindFile:   NewFile(t.TempDir()),
 		KindMemory: NewMemory(),
 	}
-	// The Postgres backend runs when the suite as a whole runs on it.
 	if dsn := os.Getenv(EnvVar); isPostgresSpec(dsn) {
 		pg, err := openPostgres(dsn)
 		if err != nil {
@@ -202,9 +199,8 @@ func TestStore_WriteIfRefusesAStaleVersion(t *testing.T) {
 	}
 }
 
-// A counter moved with Stat, Read and WriteIf hands out every value once,
-// however many writers move it at the same time. The file backend takes no
-// lock and is left out.
+// Concurrent counter allocation must return each value once. The file backend has no
+// locking and is excluded.
 func TestStore_WriteIfSerialisesConcurrentIncrements(t *testing.T) {
 	for kind, store := range backends(t) {
 		if kind == KindFile {
@@ -398,7 +394,7 @@ func TestFile_LayoutMatchesTheWalletDirectory(t *testing.T) {
 	}
 }
 
-// A write in flight is not a blob yet, so a listing leaves it out.
+// Hide temporary files until the write completes.
 func TestFile_ListHidesInFlightWrites(t *testing.T) {
 	root := t.TempDir()
 	store := NewFile(root)
@@ -414,7 +410,6 @@ func TestFile_ListHidesInFlightWrites(t *testing.T) {
 	}
 }
 
-// The Postgres backend keeps the index its prefix listings run on.
 func TestPostgres_PrefixIndexExists(t *testing.T) {
 	pg, ok := backends(t)[KindPostgres].(*postgresStore)
 	if !ok {
@@ -503,7 +498,6 @@ func TestOpen_AutoPicksFilesForANamedOrExistingRoot(t *testing.T) {
 		t.Fatalf("root holding a wallet: %s", kind)
 	}
 
-	// The decision holds for the process even after something created the root.
 	if kind := auto(Options{Root: missing}); kind != KindMemory {
 		t.Fatal("expected memory")
 	}

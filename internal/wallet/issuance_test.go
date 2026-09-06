@@ -113,8 +113,6 @@ func TestCredentialStringsFromResponse_RejectsDraftShapes(t *testing.T) {
 	}
 }
 
-// requestEncryptionMetadata is the credential_request_encryption object of an
-// issuer that publishes a usable ECDH-ES key.
 func requestEncryptionMetadata(t *testing.T, required bool) (map[string]any, *ecdsa.PrivateKey) {
 	t.Helper()
 	issuerKey, err := mock.GenerateKey()
@@ -436,8 +434,6 @@ func TestWellKnownURL_PreservesTrailingSlashInIssuerPath(t *testing.T) {
 	}
 }
 
-// trustSignedIssuerMetadataFrom points the signed-metadata trust check at one
-// wallet's certificate authority for the duration of a test.
 func trustSignedIssuerMetadataFrom(t *testing.T, w *Wallet) {
 	t.Helper()
 	pool := x509.NewCertPool()
@@ -557,9 +553,8 @@ func TestParseIssuerMetadataResponse_SignedMetadataTrust(t *testing.T) {
 		}
 	})
 
-	// A chain that anchors nowhere is read rather than refused: the wallet holds
-	// no issuer trust anchors and has no way to be given any, so refusing would
-	// put every ecosystem issuer out of reach. The signature still has to hold.
+	// Unknown signer CAs remain usable for testing, but the signature must still
+	// verify and the missing trust must be reported.
 	t.Run("an x5c chain that anchors nowhere", func(t *testing.T) {
 		raw, err := signCredentialIssuerMetadataJWT(w, w.IssuerURL, time.Now().Add(time.Hour))
 		if err != nil {
@@ -598,9 +593,7 @@ func TestParseIssuerMetadataResponse_RejectsSignedMetadataForAnotherIssuer(t *te
 	}
 	trustSignedIssuerMetadataFrom(t, w)
 
-	// Everything else lines up: the payload names the issuer the metadata was
-	// fetched for, and the signature is from a trusted signer. Only sub is a
-	// different party, which is what §12.2.3 forbids.
+	// Change sub only so the test isolates the issuer identity check.
 	chain, err := w.DefaultSigningCertChain()
 	if err != nil {
 		t.Fatalf("building the signing chain: %v", err)
@@ -638,8 +631,6 @@ func TestParseIssuerMetadataResponse_RejectsMismatchedCredentialIssuer(t *testin
 		t.Fatal("metadata carrying no credential_issuer was used")
 	}
 
-	// A trailing slash is a different string, and the comparison is made with
-	// no normalization.
 	slashed := []byte(`{"credential_issuer":"https://issuer.example/"}`)
 	if _, err := parseIssuerMetadataResponse(slashed, "application/json", "https://issuer.example"); err == nil {
 		t.Fatal("metadata whose credential_issuer differs only by a trailing slash was used")
@@ -743,9 +734,8 @@ func TestResolveTokenEndpoint_PrefersTheAuthorizationServerMetadata(t *testing.T
 	}
 }
 
-// TestCreateProofJWT_OmitsEmptyNonce covers an issuer that provides no
-// c_nonce. The proof must leave the claim out: an issuer that expects no nonce
-// rejects an empty string as a nonce that does not match.
+// Omit nonce when no challenge was supplied. An empty string is still a nonce value
+// and can fail issuer checks.
 func TestCreateProofJWT_OmitsEmptyNonce(t *testing.T) {
 	key := testKey(t)
 

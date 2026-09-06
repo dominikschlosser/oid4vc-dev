@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
-"""URI-based verification demo.
+"""Run an OIDC login against Keycloak and submit its wallet request to /authorize.
 
-Runs a same-device OpenID4VP login against Keycloak (keycloak-extension-oid4vp)
-and invokes the wallet by URL: the openid4vp:// link from the login page is
-converted to the wallet's /authorize endpoint — same query string, no custom
-URL scheme involved. Adapted from keycloak-verifier-oid4vp/scripts/login.py,
-which drives the wallet through the eudi-dev CLI instead.
-"""
+This adapts keycloak-verifier-oid4vp/scripts/login.py to use HTTP instead of the CLI."""
 import sys
 import tempfile
 
@@ -30,8 +25,7 @@ def main():
         print("3. Invoking the wallet by URL instead of the custom scheme:")
         wallet_url = demo.to_wallet_web_url(wallet_link)
         print(f"   {wallet_link.split('?', 1)[0]}?... becomes {demo.WALLET_BASE_URL}/authorize?...")
-        # The wallet runs interactively (no --auto-accept); the helper
-        # approves the consent request, as the user would in the wallet UI.
+                # The helper approves consent through the same API as the UI.
         redirect_uri = demo.invoke_wallet_interactively(lambda: demo.invoke_wallet_by_url(wallet_url))
         print("   Consent approved — wallet submitted the presentation.")
 

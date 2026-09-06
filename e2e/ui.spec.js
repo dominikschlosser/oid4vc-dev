@@ -1,20 +1,17 @@
 // @ts-check
 const { test, expect } = require("@playwright/test");
 
-// Helper: build a minimal JWT token (header.payload.signature)
 function makeJWT(header, payload) {
   const h = Buffer.from(JSON.stringify(header)).toString("base64url");
   const p = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return h + "." + p + ".fakesig";
 }
 
-// Helper: build a minimal SD-JWT with disclosures and correct _sd digests
 const crypto = require("crypto");
 
 function makeSDJWT(payload, disclosures) {
   const header = { alg: "ES256", typ: "dc+sd-jwt" };
 
-  // Compute digests for disclosures and set _sd
   if (disclosures && disclosures.length > 0) {
     const digests = disclosures.map((d) => {
       const raw = Buffer.from(JSON.stringify(d)).toString("base64url");
@@ -93,7 +90,6 @@ test.describe("JWT decoding", () => {
   }) => {
     await page.goto("/");
     await page.locator("#input").fill(TEST_JWT);
-    // Wait for debounced decode
     await expect(page.locator("#format-badge")).toHaveText("JWT", {
       timeout: 3000,
     });
@@ -280,7 +276,6 @@ test.describe("Verification panel", () => {
       timeout: 3000,
     });
 
-    // Checks are always visible, grouped into valid / cannot-be-checked / violations.
     const checks = page.locator(".vg-item");
     await expect(checks).toHaveCount(4);
 
@@ -298,7 +293,6 @@ test.describe("Verification panel", () => {
       timeout: 3000,
     });
 
-    // Collapsed until the summary is clicked.
     await expect(page.locator(".verify-inline-key")).toBeHidden();
     await page.locator(".verify-details summary").click();
 
@@ -406,7 +400,6 @@ test.describe("Theme toggle", () => {
     const html = page.locator("html");
     const btn = page.locator("#theme-btn");
 
-    // Default is dark: no data-theme attribute set
     await expect(html).not.toHaveAttribute("data-theme", "light");
 
     await btn.click();
@@ -468,7 +461,6 @@ test.describe("Mobile / responsive layout", () => {
       timeout: 3000,
     });
 
-    // The payload section may be below the fold, so scroll to it.
     const payload = page.locator('#output .section[data-section="payload"]');
     await payload.scrollIntoViewIfNeeded();
     await expect(payload).toBeVisible();
@@ -488,12 +480,11 @@ test.describe("Timestamp hover", () => {
     const tsHover = page.locator('#output .timestamp-hover').first();
     await expect(tsHover).toBeAttached({ timeout: 3000 });
     const title = await tsHover.getAttribute("title");
-    expect(title).toContain("2099"); // exp: 4102444799 ≈ 2099-12-31
+    expect(title).toContain("2099");
   });
 
   test("timestamps in claim lists carry the tooltip too", async ({ page }) => {
-    // Own fixture: TEST_SDJWT's exp sits exactly on the upper sanity bound
-    // (4102444800), which the tooltip deliberately skips.
+    // TEST_SDJWT expires at the tooltip sanity limit, so use an earlier timestamp here.
     const sdjwt = makeSDJWT(
       { iss: "https://issuer.example", _sd_alg: "sha-256", exp: 4102444799 },
       [["salt1", "given_name", "Erika"]]
@@ -504,15 +495,12 @@ test.describe("Timestamp hover", () => {
       timeout: 3000,
     });
 
-    // Claim and disclosure lists carry the timestamp tooltip, as the raw
-    // payload block does.
     const claimTs = page.locator("#output .claim-value.timestamp-hover").first();
     await expect(claimTs).toBeAttached({ timeout: 3000 });
     expect(await claimTs.getAttribute("title")).toContain("2099");
   });
 });
 
-// A 48x64 JPEG, the size range a portrait claim actually carries.
 const PORTRAIT_DATA_URL =
   "data:image/jpeg;base64," +
   "/9j/2wCEAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYn" +
@@ -546,18 +534,14 @@ test.describe("Long claim values", () => {
     const value = page.locator("#output .disclosure-value .long-value-token").first();
     await expect(value).toBeAttached({ timeout: 3000 });
 
-    // The line carries the head of the value, not all of it.
     const shown = await value.textContent();
     expect(shown.length).toBeLessThan(PORTRAIT_DATA_URL.length);
     expect(shown.endsWith("…")).toBe(true);
 
-    // An image claim is readable, so it is shown as one.
     const thumbnail = page.locator("#output .value-image").first();
     await expect(thumbnail).toBeVisible();
     expect(await thumbnail.evaluate((img) => img.naturalWidth)).toBe(48);
 
-    // Without wrapping, one value this long lays out a line wider than the
-    // screen and the whole output pane scrolls sideways.
     const overflow = await page.evaluate(() => {
       const out = document.getElementById("output");
       return out.scrollWidth - out.clientWidth;
@@ -576,8 +560,8 @@ test.describe("Decoding does not wait on the issuer", () => {
   test("output renders while the checks that need the network are still running", async ({
     page,
   }) => {
-    // A status reference is what gives the online pass something to fetch.
-    // Port 1 answers by refusing, so the check resolves without a wait.
+    // Port 1 refuses the status request promptly, keeping the test independent of a remote
+    // server.
     const sdjwt = makeSDJWT(
       {
         iss: "https://issuer.example",
@@ -588,7 +572,6 @@ test.describe("Decoding does not wait on the issuer", () => {
       [["salt1", "given_name", "Erika"]]
     );
 
-    // Stand in for an issuer that takes its time answering.
     let releaseOnlinePass;
     const onlinePassHeld = new Promise((resolve) => {
       releaseOnlinePass = resolve;
@@ -610,7 +593,6 @@ test.describe("Decoding does not wait on the issuer", () => {
     await page.goto("/");
     await page.locator("#input").fill(sdjwt);
 
-    // The credential is on screen with the online pass still in flight.
     await expect(page.locator('#output .section[data-section="payload"]')).toBeVisible({
       timeout: 3000,
     });
@@ -622,7 +604,6 @@ test.describe("Decoding does not wait on the issuer", () => {
     await expect(banner).not.toHaveClass(/checking/, { timeout: 10000 });
     await expect(banner).toContainText("status");
 
-    // One edit is one pass of each kind, and the issuer is asked once.
     expect(offlinePasses).toBe(1);
     expect(onlinePasses).toBe(1);
   });
@@ -646,8 +627,7 @@ test.describe("Decoding does not wait on the issuer", () => {
     await page.keyboard.press("ControlOrMeta+V");
 
     await expect(page.locator("#format-badge")).toHaveText("SD-JWT", { timeout: 3000 });
-    // A paste raises a paste event and an input event. One paste is one
-    // decode, so the issuer is asked once.
+    // A paste emits both paste and input events, but should trigger one decode.
     await page.waitForTimeout(1500);
     expect(onlinePasses).toBe(1);
   });

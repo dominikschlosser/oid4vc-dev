@@ -30,7 +30,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/jws"
 )
 
-// SDJWTConfig holds options for generating a mock SD-JWT credential.
 type SDJWTConfig struct {
 	Issuer    string
 	VCT       string
@@ -274,8 +273,6 @@ func makeDisclosure(name string, value any, path string, always map[string]bool)
 	}
 }
 
-// createDisclosure creates a named disclosure [salt, name, value] and returns
-// the encoded disclosure string and its digest.
 func createDisclosure(name string, value any) (encoded string, digest string, err error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
@@ -293,8 +290,6 @@ func createDisclosure(name string, value any) (encoded string, digest string, er
 	return enc, format.EncodeBase64URL(h[:]), nil
 }
 
-// createArrayElementDisclosure creates an array element disclosure [salt, value]
-// and returns the encoded disclosure string and its digest.
 func createArrayElementDisclosure(value any) (encoded string, digest string, err error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {

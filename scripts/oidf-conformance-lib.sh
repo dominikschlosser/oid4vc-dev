@@ -1,7 +1,5 @@
 #!/bin/sh
-# Shared helpers for the OIDF conformance wrappers. Sourced, not executed:
-# every function reads and sets the caller's globals (ROOT_DIR, RUN_DIR,
-# SUITE_DIR, SUITE_TAG, CONFORMANCE_SERVER, CONFORMANCE_MODE).
+# Source this file so helpers can read and update the wrapper's global settings.
 
 build_local_oid4vc_dev() {
   if ! command -v go >/dev/null 2>&1; then
@@ -127,11 +125,8 @@ EOF
   exit 1
 }
 
-# Drop the local suite's database once the run is over. The suite keeps every
-# test and log line it ever ran, and a database carrying days of them pauses
-# the server long enough for a request to time out, which fails the module it
-# was serving. The results are exported per run, so nothing here reads the
-# suite's own history. Local mode only: a hosted server belongs to somebody else.
+# Clear the local suite database after exporting results. Large histories slow requests
+# enough to cause test timeouts. Hosted databases are managed separately.
 wipe_local_suite_database() {
   [ "$CONFORMANCE_MODE" = "local" ] || return 0
   [ "${OIDF_KEEP_SUITE_DB:-0}" = "1" ] && return 0

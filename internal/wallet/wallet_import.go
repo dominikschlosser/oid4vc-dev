@@ -29,10 +29,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
-// newCredentialID creates a short hex id for a stored credential, the way git
-// names an object. It is long enough to stay unique in a wallet and short
-// enough to show and type, and a command resolves it from an unambiguous
-// prefix. It panics only if the system has no entropy.
+// Commands accept unambiguous prefixes of these IDs. Generation panics only if system
+// entropy is unavailable.
 func newCredentialID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
@@ -41,25 +39,19 @@ func newCredentialID() string {
 	return hex.EncodeToString(b)
 }
 
-// ImportCredential auto-detects and imports a credential string.
-// It returns a pointer to a copy of the newly imported credential, safe to
-// use even after further mutations to w.Credentials.
+// ImportCredential returns a copy that survives changes to the wallet's credential slice.
 func (w *Wallet) ImportCredential(raw string) (*StoredCredential, error) {
 	return w.importCredential(raw, "", "")
 }
 
-// importPrimaryCredential imports the credential selectPrimaryCredential picked,
-// bound to the proof key it names (its own, whichever key that is). Recording
-// the key as the credential is imported keeps its key binding signable and, on a
-// per-request clone, forwards the key to the real wallet with the credential.
+// Record the binding key during import so the credential can be presented. Clones
+// forward both the credential and key to the original wallet.
 func (w *Wallet) importPrimaryCredential(raw string, keys []*ecdsa.PrivateKey) (*StoredCredential, error) {
 	return w.importCredential(raw, "", primaryBindingKeyPEM(raw, keys))
 }
 
-// importBatchCopy imports one copy of a batch, tied to the batch group and
-// bound to its own key. The batch fields are set before the holder-binding note
-// runs, so a copy bound to its own key is not flagged as one the wallet cannot
-// present.
+// Set batch fields before checking holder binding so a copy with its own key is
+// recognized as presentable.
 func (w *Wallet) importBatchCopy(raw, group, bindingKeyPEM string) (*StoredCredential, error) {
 	return w.importCredential(raw, group, bindingKeyPEM)
 }
@@ -75,9 +67,8 @@ func (w *Wallet) importCredential(raw, group, bindingKeyPEM string) (*StoredCred
 	return cred, nil
 }
 
-// credentialIssuerDID returns the DID a credential names as the key that
-// signed it. An mdoc names its issuer by the certificate chain in the COSE
-// header and never by a DID, so only the JWT-shaped formats are read.
+// mdoc identifies the signer through its COSE certificate chain. Only JWT formats can
+// name a DID issuer here.
 func credentialIssuerDID(raw string) string {
 	jwtPart := strings.TrimSpace(raw)
 	if idx := strings.Index(jwtPart, "~"); idx >= 0 {
@@ -92,11 +83,9 @@ func credentialIssuerDID(raw string) string {
 	return keys.DIDReference(kid, iss)
 }
 
-// noteDIDIssuerKey reports a credential whose issuer key is named by a DID.
-// This toolkit resolves an issuer key through the x5c chain HAIP 1.0 §6.1.1
-// requires or through the issuer metadata SD-JWT VC defines, so such a
-// credential is stored with its signature unchecked and its status list
-// unverifiable.
+// DID issuer keys cannot be resolved here. The toolkit uses x5c as required by HAIP
+// 1.0 §6.1.1 or SD-JWT VC issuer metadata. Keep the credential and report its
+// unchecked signature and unverifiable status list.
 func (w *Wallet) noteDIDIssuerKey(cred *StoredCredential) {
 	if w == nil || cred == nil {
 		return
@@ -118,12 +107,9 @@ func (w *Wallet) noteDIDIssuerKey(cred *StoredCredential) {
 	log.Printf("[Wallet] WARNING: %s", detail)
 }
 
-// importDetectedFormat stores a credential in whichever of the formats the
-// wallet keeps it turns out to be. The batch group and per-copy binding key are
-// carried in so they sit on the credential before it is appended, since that is
-// when a per-request clone forwards it to the wallet it was made from.
+// Set the batch group and binding key before appending because clones forward
+// credentials at that point.
 func (w *Wallet) importDetectedFormat(raw, group, bindingKeyPEM string) (*StoredCredential, error) {
-	// Try SD-JWT first (contains ~)
 	if strings.Contains(raw, "~") {
 		cred, err := w.importSDJWT(raw, group, bindingKeyPEM)
 		if err != nil {
@@ -133,7 +119,6 @@ func (w *Wallet) importDetectedFormat(raw, group, bindingKeyPEM string) (*Stored
 		return cred, nil
 	}
 
-	// Try mDoc (base64url or hex encoded CBOR)
 	detected := format.Detect(raw)
 	if detected == format.FormatMDOC {
 		cred, err := w.importMDoc(raw, group, bindingKeyPEM)
@@ -144,7 +129,6 @@ func (w *Wallet) importDetectedFormat(raw, group, bindingKeyPEM string) (*Stored
 		return cred, nil
 	}
 
-	// Try as plain JWT VC (3-part JWT without ~)
 	if strings.Count(raw, ".") == 2 {
 		cred, err := w.importPlainJWT(raw, group, bindingKeyPEM)
 		if err != nil {
@@ -157,11 +141,8 @@ func (w *Wallet) importDetectedFormat(raw, group, bindingKeyPEM string) (*Stored
 	return nil, fmt.Errorf("unable to detect credential format (expected SD-JWT or mDoc)")
 }
 
-// adoptOwnStatusEntry records a status list entry for an imported credential
-// that points at this wallet's own status list. The wallet is the holder of
-// such a credential, not its issuer, but the list is still the one it serves:
-// without the entry the credential would show up as externally governed and
-// nothing could ever flip its bit. The demo issuer produces exactly this case.
+// Adopt imported status entries that reference this wallet's own list. The demo issuer
+// uses this list, and the wallet needs local entries to revoke those credentials.
 func (w *Wallet) adoptOwnStatusEntry(cred *StoredCredential) {
 	if w == nil || cred == nil {
 		return
@@ -180,25 +161,20 @@ func (w *Wallet) adoptOwnStatusEntry(cred *StoredCredential) {
 	w.registerStatusEntry(cred.ID, ref.Idx)
 }
 
-// appendCredential adds a credential to the wallet and returns a copy.
 func (w *Wallet) appendCredential(cred StoredCredential) *StoredCredential {
 	w.mu.Lock()
 	w.Credentials = append(w.Credentials, cred)
 	sink := w.credentialSink
 	w.mu.Unlock()
-	// A per-request clone (a profile override on an offer) holds its own
-	// credential slice, so without forwarding, anything it collects would be
-	// thrown away with the clone and the wallet would report an issuance it
-	// did not keep.
+	// Forward imports from clones to the original wallet so issued credentials survive
+	// the end of the request.
 	if sink != nil {
 		sink(cred)
 	}
 	return &cred
 }
 
-// parseCredentialSDJWT decodes an issued or imported SD-JWT to suit the wallet
-// mode. Strict refuses a credential that breaks RFC 9901, debug keeps it and
-// records each break as a warning.
+// Strict mode rejects RFC 9901 violations. Debug mode keeps the credential and warns.
 func (w *Wallet) parseCredentialSDJWT(raw string) (*sdjwt.Token, error) {
 	token, err := sdjwt.ParseLenient(raw)
 	if err != nil {
@@ -221,8 +197,7 @@ func (w *Wallet) parseCredentialSDJWT(raw string) (*sdjwt.Token, error) {
 	return token, nil
 }
 
-// recordCredentialDeviations logs a credential's spec deviations as one activity
-// log entry, naming the count with the full list in the entry details.
+// Group deviations into one log entry with the full list in its details.
 func (w *Wallet) recordCredentialDeviations(spec string, deviations []string) {
 	if len(deviations) == 0 {
 		return
@@ -289,11 +264,8 @@ func (w *Wallet) importPlainJWT(raw, group, bindingKeyPEM string) (*StoredCreden
 	return stored, nil
 }
 
-// jwtVCType reads the credential type from a W3C JWT VC (jwt_vc_json), so the
-// listing shows the type rather than the format. VC Data Model 1.1 carries the
-// type array in the vc claim under the JWT encoding, and some issuers flatten it
-// to the payload root. The specific type is the last entry that is not the base
-// VerifiableCredential type.
+// VC Data Model 1.1 puts the type array inside vc. Some issuers put it at the payload
+// root. Use the last type other than VerifiableCredential as the display type.
 func jwtVCType(payload map[string]any) string {
 	types := payload["type"]
 	if vc, ok := payload["vc"].(map[string]any); ok && vc["type"] != nil {
@@ -321,7 +293,8 @@ func (w *Wallet) importMDoc(raw, group, bindingKeyPEM string) (*StoredCredential
 	if err != nil {
 		return nil, fmt.Errorf("parsing mDoc: %w", err)
 	}
-	// Strict refuses a credential the parser had to drop parts of, debug keeps it.
+	// Strict mode rejects credentials that required dropping invalid content. Debug
+	// mode keeps them.
 	if len(doc.Deviations) > 0 {
 		if w.Mode() == ValidationModeStrict {
 			return nil, fmt.Errorf("%s", strings.Join(doc.Deviations, ". "))
@@ -353,7 +326,6 @@ func (w *Wallet) importMDoc(raw, group, bindingKeyPEM string) (*StoredCredential
 	return stored, nil
 }
 
-// ImportCredentialFromFile reads a file and imports the credential.
 func (w *Wallet) ImportCredentialFromFile(path string) error {
 	raw, err := format.ReadInput(path)
 	if err != nil {
@@ -363,7 +335,7 @@ func (w *Wallet) ImportCredentialFromFile(path string) error {
 	return err
 }
 
-// Rehydrate re-populates non-serializable fields (Disclosures, NameSpaces) from Raw.
+// Rehydrate rebuilds parsed fields from Raw because they are not serialized.
 func (c *StoredCredential) Rehydrate() error {
 	if c.Raw == "" {
 		return nil
@@ -412,9 +384,7 @@ func (c *StoredCredential) Rehydrate() error {
 	return nil
 }
 
-// rememberRenewal records what re-requesting a credential from its issuer
-// needs. Only an issuer that handed over a refresh token can be asked again,
-// so without one nothing is stored and the credential expires.
+// Store renewal context only when the issuer supplies a refresh token.
 func (w *Wallet) rememberRenewal(credentialID, refreshToken string, renewal CredentialRenewal) {
 	if w == nil || refreshToken == "" || renewal.CredentialEndpoint == "" || renewal.TokenEndpoint == "" {
 		return
@@ -431,16 +401,13 @@ func (w *Wallet) rememberRenewal(credentialID, refreshToken string, renewal Cred
 	}
 }
 
-// logCredentialImport records an issued credential the same way from every
-// issuance path, so the activity log does not depend on which flow produced
-// the credential.
+// Use the same import log entry for every issuance flow.
 func (w *Wallet) logCredentialImport(imported *StoredCredential, raw, issuer string) {
 	details := credentialImportLogDetails(imported, raw)
 	details["issuer"] = issuer
 	w.addProtocolLog("issuance", "credential_imported", fmt.Sprintf("Imported credential %s", imported.ID), true, details)
 }
 
-// jwtIssuedAt reads a JWT payload's iat.
 func jwtIssuedAt(payload map[string]any) time.Time {
 	if iat, ok := payload["iat"].(float64); ok && iat > 0 {
 		return time.Unix(int64(iat), 0)
@@ -448,7 +415,6 @@ func jwtIssuedAt(payload map[string]any) time.Time {
 	return time.Time{}
 }
 
-// mdocSignedAt reads the signing time of an mdoc's MSO.
 func mdocSignedAt(doc *mdoc.Document) time.Time {
 	if doc == nil || doc.IssuerAuth == nil || doc.IssuerAuth.MSO == nil || doc.IssuerAuth.MSO.ValidityInfo == nil || doc.IssuerAuth.MSO.ValidityInfo.Signed == nil {
 		return time.Time{}

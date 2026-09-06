@@ -96,8 +96,7 @@ func TestVerifyJWTSignature_UsesIssuerMetadata(t *testing.T) {
 	}
 }
 
-// newX5CToken builds a signed SD-JWT that carries its certificate chain and
-// points at an unreachable issuer, so any network lookup would fail.
+// Use an unreachable issuer to prove verification uses the embedded chain offline.
 func newX5CToken(t *testing.T) (*sdjwt.Token, []trustlist.CertInfo) {
 	t.Helper()
 	caCert, caKey, caDER := generateCACert(t)
@@ -125,8 +124,6 @@ func newX5CToken(t *testing.T) (*sdjwt.Token, []trustlist.CertInfo) {
 func TestVerifyJWTSignature_X5CLeafOfflineWithoutTrustList(t *testing.T) {
 	token, _ := newX5CToken(t)
 
-	// No keys and no trust list: the embedded leaf certificate verifies the
-	// signature without any network access (the issuer URL is unreachable).
 	result, source, err := VerifyJWTSignature(token, nil, nil)
 	if err != nil {
 		t.Fatalf("VerifyJWTSignature: %v", err)

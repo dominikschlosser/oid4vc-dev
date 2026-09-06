@@ -13,7 +13,9 @@ The wrapper starts one wallet server and drives these plans through the official
 - `oid4vp-1final-verifier-test-plan` against the demo verifier, three times (SD-JWT VC signed request, SD-JWT VC unsigned request under the `redirect_uri` prefix, mdoc signed request)
 - `oid4vp-1final-verifier-haip-test-plan` against the demo verifier (SD-JWT VC and mdoc, both `direct_post.jwt`)
 
-Modules the demo pair cannot satisfy are left out, since `run-test-plan.py` counts a skip as a failure. The demo issuer serves unsigned metadata (`metadata-test-signed`), requires no key attestation (`fail-invalid-key-attestation-signature`), advertises no credential encryption (`fail-unsupported-encryption-algorithm`), and issues one credential per request unless the offer asked for a batch (the batch module runs only in the offer driven scenarios). The demo verifier serves its request objects over GET (`request-uri-method-post` is left out under signed requests).
+The wrapper excludes modules for features the demo services do not offer. The official runner counts skips as failures.
+
+Excluded issuer checks cover signed metadata, required key attestations and credential encryption. Batch checks run only in scenarios that supply a batch offer. Signed verifier scenarios exclude `request-uri-method-post` because the demo verifier serves requests through GET.
 
 The pre-authorized code scenario also leaves out the six client attestation negative modules. Suite release-v5.2.4 breaks them under that grant: after the expected token refusal the module continues into the credential request and the suite interrupts the module with "Condition called when test status is 'WAITING'. This is a bug in the test module". The same modules complete under both authorization code scenarios, where the refusal happens at the PAR endpoint.
 
@@ -24,7 +26,7 @@ The harness replaces the human tester the plans expect:
 - it creates a demo verifier request per verifier module and delivers its query string to the suite's authorization endpoint, in place of the wallet an `openid4vp://` link would invoke
 - it uploads the screenshot placeholders the verifier plans require at the end
 
-The suite cannot observe whether the verifier under test verified the presentation (its verifier modules end in `REVIEW` either way), so the harness also reads the demo verifier's own verdict for every request. A module that presented a tampered credential must end `failed` at the demo verifier, everything else `verified`. A mismatch fails the run with exit code 3.
+Verifier modules end in `REVIEW` because the suite cannot observe the verifier's decision. The harness also checks the demo verifier's recorded result. Tampered presentations must be `failed` and valid presentations must be `verified`. A mismatch exits with code 3.
 
 ## Prerequisites
 

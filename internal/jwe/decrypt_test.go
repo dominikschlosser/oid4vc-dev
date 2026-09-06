@@ -25,9 +25,8 @@ import (
 	"testing"
 )
 
-// sealed builds a compact JWE the way a verifier encrypting to the wallet
-// does, so the decrypt path is exercised against something it has to agree
-// with rather than against its own output.
+// Build the JWE independently so the decrypt test does not rely on its own
+// implementation to encrypt.
 type sealed struct {
 	compact   string
 	recipient *ecdh.PrivateKey
@@ -124,9 +123,8 @@ func TestDecryptRoundTrip(t *testing.T) {
 	}
 }
 
-// ISO 18013-7 puts the session transcript handover into apu and apv, and they
-// feed the key derivation, so a reader that ignores them derives a different
-// key and opens nothing.
+// ISO 18013-7 includes apu and apv in key derivation. Ignoring them produces the wrong
+// decryption key.
 func TestDecryptRoundTripWithAPUAndAPV(t *testing.T) {
 	want := []byte("mdoc response")
 	s := seal(t, "A256GCM", want, []byte("mdoc-generated-nonce"), []byte("verifier-nonce"))
@@ -198,8 +196,7 @@ func TestDecryptRejectsATamperedCiphertext(t *testing.T) {
 	}
 }
 
-// A JWE addressed to somebody else agrees a different secret, so it must fail
-// rather than return whatever the wrong key produces.
+// A JWE encrypted for another key must fail decryption.
 func TestDecryptWithTheWrongRecipientKey(t *testing.T) {
 	s := seal(t, "A256GCM", []byte("payload"), nil, nil)
 	other, err := ecdh.P256().GenerateKey(rand.Reader)

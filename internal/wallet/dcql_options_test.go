@@ -20,8 +20,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// pidBaselineWallet holds the four-PID baseline: the EU and the German PID,
-// each as SD-JWT and mdoc, so a PID query has more than one answer.
 func pidBaselineWallet(t *testing.T) *Wallet {
 	t.Helper()
 	w := generateTestWallet(t)
@@ -46,8 +44,7 @@ func consentPIDQuery(id, format string) map[string]any {
 	}
 }
 
-// A query both PIDs answer yields both as candidates, the first one being
-// exactly the match the plain evaluation returns.
+// The first offered candidate must match the automatic selection.
 func TestEvaluateDCQLWithOptions_CandidatesLeadWithTheWalletsChoice(t *testing.T) {
 	w := pidBaselineWallet(t)
 	query := map[string]any{"credentials": []any{consentPIDQuery("pid", "dc+sd-jwt")}}
@@ -83,8 +80,7 @@ func setsQuery() map[string]any {
 	}
 }
 
-// credential_sets options surface per set, first the option the wallet
-// satisfies on its own, and only options every query of which has a match.
+// Offer only sets whose queries all have matches, with the automatic choice first.
 func TestEvaluateDCQLWithOptions_SetOptions(t *testing.T) {
 	w := pidBaselineWallet(t)
 	query := setsQuery()
@@ -118,8 +114,7 @@ func TestEvaluateDCQLWithOptions_SetOptions(t *testing.T) {
 	}
 }
 
-// An option needing several credentials at once is offered whole, and the
-// auto-selection is its full credential list.
+// A combined option must offer all its required credentials together.
 func TestEvaluateDCQLWithOptions_MultiCredentialOption(t *testing.T) {
 	w := pidBaselineWallet(t)
 	query := map[string]any{
@@ -138,8 +133,6 @@ func TestEvaluateDCQLWithOptions_MultiCredentialOption(t *testing.T) {
 	}
 }
 
-// An optional set the wallet can satisfy is answered by default and shows up
-// as skippable.
 func TestEvaluateDCQLWithOptions_OptionalSet(t *testing.T) {
 	w := pidBaselineWallet(t)
 	query := map[string]any{

@@ -86,10 +86,8 @@ func TestCredentialOfferEndpoint_CredentialOfferByReference(t *testing.T) {
 	}
 }
 
-// A request that overrides the profile runs on a clone of the wallet. A
-// deferred credential recorded there reaches the server's own wallet, which
-// the poller reads, so the wallet comes back for the credential as OpenID4VCI
-// 1.0 section 9.3 requires.
+// Profile overrides run on a wallet clone. Deferred issuances must reach the server's
+// wallet so its poller can collect them (OpenID4VCI 1.0 §9.3).
 func TestDeferredIssuanceSurvivesAProfileOverride(t *testing.T) {
 	w := generateTestWallet(t)
 	issuer, offerURI, _ := deferringIssuer(t, w, 1, 1)

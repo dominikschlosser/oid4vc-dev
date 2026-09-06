@@ -205,8 +205,6 @@ func TestTrustListGroupsForWallet_MixedProfiles(t *testing.T) {
 		t.Fatalf("registering local attestation: %v", err)
 	}
 
-	// The wallet-provider list is always present alongside the credential
-	// lists, between pid and local.
 	groups := TrustListGroupsForWallet(w)
 	if len(groups) != 3 {
 		t.Fatalf("expected 3 trust-list groups, got %d", len(groups))
@@ -231,8 +229,7 @@ func TestTrustListGroupsForWallet_MixedProfiles(t *testing.T) {
 }
 
 func TestWalletProviderTrustList_AlwaysServedWithSameAnchorButNeverDefault(t *testing.T) {
-	// A wallet that has issued nothing still sends wallet attestations, so
-	// the wallet-provider list must not depend on the attestation registry.
+	// Wallet attestations exist before the wallet issues credentials.
 	w := generateTestWallet(t)
 	w.IssuerURL = "https://wallet.example:8443"
 
@@ -255,8 +252,7 @@ func TestWalletProviderTrustList_AlwaysServedWithSameAnchorButNeverDefault(t *te
 		t.Fatal("wallet-provider list must never be the default trust list")
 	}
 
-	// Same anchor as the credential list, different list around it. That is
-	// the whole point: an issuer gets its own list without a second CA.
+	// The wallet provider list uses the same CA as credential lists.
 	walletJWT, err := GenerateTrustListJWTForWalletGroup(w, w.IssuerURL, group, "/api/trustlists/wallet-provider")
 	if err != nil {
 		t.Fatalf("GenerateTrustListJWTForWalletGroup(wallet-provider): %v", err)
@@ -270,8 +266,6 @@ func TestWalletProviderTrustList_AlwaysServedWithSameAnchorButNeverDefault(t *te
 	}
 }
 
-// trustListAnchorCert returns the base64 certificate of the first service in a
-// trust list JWT.
 func trustListAnchorCert(t *testing.T, jwt string) string {
 	t.Helper()
 	parts := strings.SplitN(jwt, ".", 3)
@@ -320,8 +314,6 @@ func TestBuildTrustListIndexEntries_UsesRelativePathAndOptionalAdvertisedURL(t *
 		t.Fatalf("registering PID attestation: %v", err)
 	}
 
-	// Two entries: the PID credential list and the always-present
-	// wallet-provider list.
 	entries := BuildTrustListIndexEntries(w, "")
 	if len(entries) != 2 {
 		t.Fatalf("expected two trust-list entries, got %d", len(entries))

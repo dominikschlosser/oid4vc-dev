@@ -52,19 +52,14 @@ func TestCheckCompatibility(t *testing.T) {
 		want     Compatibility
 	}{
 		{"1.19.0", "1.19.0", Compatible},
-		// Minor and patch releases keep the management API, in either
-		// direction and regardless of the tag's v prefix.
 		{"1.19.3", "1.19.0", Compatible},
 		{"1.19.0", "1.18.11", Compatible},
 		{"1.18.11", "1.19.0", Compatible},
 		{"v1.19.0", "1.20.0", Compatible},
-		// A major release is where breaking changes live.
 		{"1.19.0", "2.0.0", Incompatible},
 		{"2.0.0", "1.19.0", Incompatible},
-		// A development build on either side claims nothing.
 		{"dev", "1.19.0", CompatibilityUnknown},
 		{"1.19.0", "dev", CompatibilityUnknown},
-		// An instance too old to report a version at all.
 		{"1.19.0", "", CompatibilityUnknown},
 	}
 	for _, tc := range cases {

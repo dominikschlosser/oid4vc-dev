@@ -2,7 +2,7 @@
 
 Runnable integration scenarios live under [`examples/`](../examples/README.md).
 
-Each scenario is a complete, version-pinned local setup: compose files, bootstrap scripts, wallet preparation, flow diagrams, and the parameter values it uses. Its README covers prerequisites, quick start, and cleanup.
+Each scenario includes pinned versions, compose files, setup scripts and flow diagrams. Its README covers prerequisites, running the example and cleanup.
 
 ## Scenarios
 

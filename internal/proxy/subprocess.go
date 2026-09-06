@@ -30,10 +30,8 @@ import (
 type Subprocess struct {
 	cmd     *exec.Cmd
 	scanner *OutputScanner
-	// done is closed once the process has exited. err holds the exit status
-	// and is written before the close, so any reader that waits on done
-	// observes it. A closed channel unblocks every waiter, so Wait and Done can
-	// be consumed by more than one goroutine without one stealing the result.
+	// Write the exit error before closing done. Every waiter can then read it safely,
+	// without consuming a result another waiter needs.
 	done chan struct{}
 	err  error
 	// outputMu serializes the two stream-scanning goroutines: they share the
@@ -87,12 +85,10 @@ func StartSubprocess(args []string, scanner *OutputScanner) (*Subprocess, error)
 	return sub, nil
 }
 
-// scanStream reads lines from one of the child's output streams, scans each
-// line, and prints it to the terminal with a [service] prefix.
 func (s *Subprocess) scanStream(r io.Reader) {
 	dim := color.New(color.Faint)
 	scan := bufio.NewScanner(r)
-	scan.Buffer(make([]byte, 0, 256*1024), 1024*1024) // allow long lines
+	scan.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 	for scan.Scan() {
 		line := scan.Text()
 		s.outputMu.Lock()

@@ -20,7 +20,6 @@ import (
 	"os"
 )
 
-// PrintJSON outputs the value as formatted JSON.
 func PrintJSON(v any) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")

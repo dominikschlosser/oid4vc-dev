@@ -78,9 +78,8 @@ func redirectToWebRequestURI(err error) string {
 	return ""
 }
 
-// noteRedirectToWeb records the handover to the browser, and refuses it where
-// this wallet has nothing to hand over to: the redirect flow needs a redirect
-// URI it can be called back at, which interactive authorization did not.
+// Browser fallback needs a callback URI even though interactive authorization does
+// not.
 func (w *Wallet) noteRedirectToWeb(endpoint, redirectURI, authorizationEndpoint string) error {
 	if redirectURI == "" {
 		return fmt.Errorf("the authorization server asked for a browser sign-in (redirect_to_web), which needs a redirect URI: run the wallet with --vci-redirect-uri")
@@ -96,16 +95,12 @@ func (w *Wallet) noteRedirectToWeb(endpoint, redirectURI, authorizationEndpoint 
 	return nil
 }
 
-// maxInteractiveAuthorizationRounds bounds the conversation, so a server that
-// keeps asking for interactions is eventually walked away from.
+// Limit interaction rounds so an issuer cannot keep the wallet in an endless
+// conversation.
 const maxInteractiveAuthorizationRounds = 8
 
-// interactiveAuthorizationConsentTimeout matches the OpenID4VP endpoint's
-// consent timeout.
 const interactiveAuthorizationConsentTimeout = 5 * time.Minute
 
-// interactiveAuthorizationEndpoint reads the Authorization Challenge Endpoint
-// out of authorization server metadata.
 func interactiveAuthorizationEndpoint(oauthMeta map[string]any) string {
 	endpoint, _ := oauthMeta["authorization_challenge_endpoint"].(string)
 	return strings.TrimSpace(endpoint)
@@ -200,32 +195,25 @@ func (w *Wallet) obtainInteractiveAuthorizationCode(endpoint string, setup autho
 	return "", false, fmt.Errorf("interactive authorization did not finish after %d rounds", maxInteractiveAuthorizationRounds)
 }
 
-// interactionOutcome is what one performed interaction produced: the
-// parameters answering it in the next Intermediate Request (§6.1.2), or, for
-// the browser interaction, what the redirect back to the wallet carried
-// (§6.2.1.2): the authorization code, or an auth_session that replaces the
-// current one and continues the conversation.
+// An interaction returns parameters for the next challenge, or a browser callback with
+// a code or replacement auth_session.
 type interactionOutcome struct {
 	form        url.Values
 	code        string
 	authSession string
 }
 
-// initialAuthorizationChallengeForm builds the Initial Request of §6.1.1.
 func (w *Wallet) initialAuthorizationChallengeForm(setup authorizationCodeSetup, offer *oid4vc.CredentialOffer) url.Values {
 	form := url.Values{}
 	form.Set("response_type", "code")
 	form.Set("client_id", setup.clientID)
 	form.Set("scope", setup.scope)
-	// Carried so a server that answers redirect_to_web can put it in the
-	// authorization request it hands back. The redirect flow's callback is
-	// matched by it.
+	// Keep state so a redirect_to_web response can build a browser request whose
+	// callback matches this flow.
 	form.Set("state", setup.state)
 	form.Set("code_challenge", setup.codeChallenge)
 	form.Set("code_challenge_method", "S256")
 	form.Set("interaction_types_supported", strings.Join(w.interactionTypesSupported(setup), ","))
-	// A redirect URI is sent only where one was configured. It is what
-	// auth_via_web comes back to.
 	if setup.redirectURI != "" {
 		form.Set("redirect_uri", setup.redirectURI)
 	}
@@ -282,8 +270,8 @@ func (w *Wallet) authorizationChallengeCode(response map[string]any) (string, er
 	if code := jsonutil.GetString(response, "authorization_code"); code != "" {
 		return code, nil
 	}
-	// A server answering with the redirect flow's parameter name has finished
-	// the authorization and named it wrongly.
+	// Treat code as a compatibility alias for authorization_code and report the
+	// deviation.
 	if code := jsonutil.GetString(response, "code"); code != "" {
 		if err := w.reportServerDeviation("authorization challenge response carried the authorization code in \"code\". Section 5.2.1 of the OAuth 2.0 for First-Party Applications specification names it \"authorization_code\""); err != nil {
 			return "", err
@@ -293,8 +281,6 @@ func (w *Wallet) authorizationChallengeCode(response map[string]any) (string, er
 	return "", nil
 }
 
-// authorizationChallengeError renders an Authorization Challenge Error
-// Response (§6.2.2) as an error.
 func authorizationChallengeError(response map[string]any) error {
 	code := jsonutil.GetString(response, "error")
 	if code == "" {
@@ -306,7 +292,6 @@ func authorizationChallengeError(response map[string]any) error {
 	return fmt.Errorf("authorization challenge failed: %s", code)
 }
 
-// runAuthorizationInteraction performs the interaction the server asked for.
 func (w *Wallet) runAuthorizationInteraction(endpoint string, response map[string]any, setup authorizationCodeSetup) (*interactionOutcome, error) {
 	interaction := jsonutil.GetString(response, "interaction_type_required")
 	switch interaction {
@@ -318,7 +303,6 @@ func (w *Wallet) runAuthorizationInteraction(endpoint string, response map[strin
 		return &interactionOutcome{form: form}, nil
 	case interactionTypeAuthViaWeb:
 		if setup.redirectURI == "" || setup.authorizationEndpoint == "" {
-			// The wallet did not advertise this type (§6.2.1).
 			return nil, fmt.Errorf("authorization server asked for the %s interaction, which this wallet did not advertise (it needs a redirect URI and an authorization endpoint)", interactionTypeAuthViaWeb)
 		}
 		return w.runAuthViaWebInteraction(response, setup)
@@ -436,8 +420,6 @@ func (w *Wallet) runPresentationInteraction(endpoint string, response map[string
 	return form, nil
 }
 
-// interactionErrorResponse answers the interaction with an OpenID4VP error
-// instead of a presentation, leaving the server to decide what to do.
 func (w *Wallet) interactionErrorResponse(params PresentationParams, errorCode, description string) (url.Values, error) {
 	envelope, err := w.BuildAuthorizationErrorResponse(errorCode, description, "", params)
 	if err != nil {
@@ -592,8 +574,8 @@ func (w *Wallet) awaitInteractivePresentationConsent(endpoint string, authReq *A
 	}
 	consentReq := &ConsentRequest{
 		ID: newConsentID(),
-		// Its own type: this presentation belongs to an issuance one visitor
-		// started, so a shared wallet must not show it to everybody.
+		// Keep presentation consent with the browser that started issuance on a shared
+		// wallet.
 		Type:         ConsentTypeIssuancePresentation,
 		Owner:        owner,
 		MatchedCreds: matches,
@@ -624,7 +606,6 @@ func (w *Wallet) awaitInteractivePresentationConsent(endpoint string, authReq *A
 				}
 			}
 		}
-		// The approve endpoint waits for this before answering the UI.
 		consentReq.SubmissionCh <- SubmissionResult{StatusCode: 200}
 		return matches, result.Approved, nil
 	}
@@ -633,9 +614,8 @@ func (w *Wallet) awaitInteractivePresentationConsent(endpoint string, authReq *A
 	case result := <-consentReq.ResultCh:
 		return handle(result)
 	case <-time.After(interactiveAuthorizationConsentTimeout):
-		// The timer races an arriving decision, and the request's status is
-		// the referee: a decision that already resolved the request is
-		// honored, only a request still pending times out.
+		// If a decision and timeout arrive together, honor any decision that already
+		// resolved the request. Time out only a still-pending request.
 		if _, ok := w.ResolveRequest(consentReq.ID, statusExpired); !ok {
 			return handle(<-consentReq.ResultCh)
 		}
@@ -644,8 +624,6 @@ func (w *Wallet) awaitInteractivePresentationConsent(endpoint string, authReq *A
 	}
 }
 
-// addPresentationRequestLogEntry records the request under the issuance it
-// belongs to.
 func (w *Wallet) addPresentationRequestLogEntry(authReq *AuthorizationRequestParams) {
 	details := presentationRequestLogDetails(authReq)
 	details["direction"] = "inbound"

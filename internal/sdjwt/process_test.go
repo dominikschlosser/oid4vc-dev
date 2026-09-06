@@ -22,8 +22,6 @@ import (
 	"testing"
 )
 
-// disclosureOf encodes one Disclosure and returns the component string and
-// the digest the payload has to carry to reference it.
 func disclosureOf(t *testing.T, elements ...any) (raw string, digest string) {
 	t.Helper()
 	encoded, err := json.Marshal(elements)
@@ -35,8 +33,7 @@ func disclosureOf(t *testing.T, elements ...any) (raw string, digest string) {
 	return raw, base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// assembleSDJWT builds header.payload.signature~d1~...~dn~ verbatim, so a
-// test can put anything it likes in the payload.
+// Build the serialized credential directly so tests can supply malformed payloads.
 func assembleSDJWT(t *testing.T, payload map[string]any, disclosures ...string) string {
 	t.Helper()
 	header, err := json.Marshal(map[string]any{"alg": "ES256", "typ": TypeSDJWTVC})

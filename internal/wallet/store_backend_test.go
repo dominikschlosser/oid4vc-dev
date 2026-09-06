@@ -26,9 +26,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
-// The same wallet directory is one wallet on every backend, so a
-// second opener (another process on the file backend, another server on a
-// shared database) sees what the first one saved, keys and CA included.
+// Stores opened for the same wallet must share persisted state, keys and CA material.
 func TestWalletStore_SameNameSharesStateAcrossOpeners(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "wallet")
 	backend := storage.NewMemory()
@@ -74,9 +72,6 @@ func TestWalletStore_SameNameSharesStateAcrossOpeners(t *testing.T) {
 	}
 }
 
-// Every store opened without an explicit spec follows the environment, so
-// one variable moves a whole test run, a served wallet and the CLI commands
-// driving it onto the same backend.
 func TestNewWalletStore_FollowsTheStorageEnvironment(t *testing.T) {
 	t.Setenv(storage.EnvVar, storage.KindMemory)
 	if kind := NewWalletStore(t.TempDir()).Backend().Kind(); kind != storage.KindMemory {
@@ -92,9 +87,8 @@ func TestNewWalletStore_FollowsTheStorageEnvironment(t *testing.T) {
 	}
 }
 
-// The default wallet is keyed by its name alone on a backend without
-// directories, so wallet servers in containers and a CLI on the host, whose
-// home directories differ, address the same wallet in a shared database.
+// The default prefix is independent of the home directory so host commands and
+// containers can share a Postgres wallet.
 func TestWalletKeyPrefix(t *testing.T) {
 	t.Setenv("EUDI_DEV_HOME", filepath.Join(t.TempDir(), "state"))
 	if got := walletKeyPrefix(DefaultWalletDir()); got != "wallet" {
@@ -109,9 +103,6 @@ func TestWalletKeyPrefix(t *testing.T) {
 	}
 }
 
-// A server re-reads the store at the request boundary, so a change another
-// opener of the same wallet saved (another server on a shared database) is
-// visible on the next request.
 func TestServerReloadSeesAnotherOpenersWrite(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "wallet")
 	backend := storage.NewMemory()
@@ -158,9 +149,7 @@ func TestConfigReportsTheStorageBackend(t *testing.T) {
 	}
 }
 
-// A seeded store generates the same holder, issuer, CA and TLS keys on every
-// fresh start, so a wallet that keeps no state serves the same identity after
-// a restart. Different seeds, and no seed, differ.
+// A seed preserves generated identities across fresh starts without persistent state.
 func TestWalletStore_SeededKeysAreStableAcrossFreshStarts(t *testing.T) {
 	fresh := func(seed string) (*Wallet, *WalletStore) {
 		store := NewWalletStoreOn(filepath.Join(t.TempDir(), "wallet"), storage.NewMemory())
@@ -192,8 +181,7 @@ func TestWalletStore_SeededKeysAreStableAcrossFreshStarts(t *testing.T) {
 	}
 }
 
-// "auto" seeds a wallet whose state lives in memory and leaves every other
-// backend with random keys, so a public seed never becomes a stored CA.
+// auto uses the public seed only for memory storage.
 func TestWalletStore_AutoSeedAppliesToMemoryOnly(t *testing.T) {
 	memory := NewWalletStoreOn(filepath.Join(t.TempDir(), "wallet"), storage.NewMemory())
 	memory.SetSeed("auto")

@@ -19,9 +19,7 @@ import (
 	"testing"
 )
 
-// A DCQL claim path is written as a selector string, and getting the parse
-// wrong means either disclosing a claim nobody asked for or reporting a
-// credential as not matching when it does.
+// Incorrect path parsing can disclose an unrequested claim or hide a valid match.
 func TestParseSDJWTSelector(t *testing.T) {
 	tests := []struct {
 		selector string
@@ -33,7 +31,6 @@ func TestParseSDJWTSelector(t *testing.T) {
 		{selector: "a.b.c", want: []any{"a", "b", "c"}, wantOK: true},
 		{selector: "degrees[0]", want: []any{"degrees", 0}, wantOK: true},
 		{selector: "degrees[0].type", want: []any{"degrees", 0, "type"}, wantOK: true},
-		// A wildcard is a nil segment, which is how "every element" is carried.
 		{selector: "degrees[*]", want: []any{"degrees", nil}, wantOK: true},
 		{selector: "degrees[*].type", want: []any{"degrees", nil, "type"}, wantOK: true},
 		{selector: "a[0][1]", want: []any{"a", 0, 1}, wantOK: true},
@@ -157,8 +154,6 @@ func TestClaimValueBySelector(t *testing.T) {
 	}
 }
 
-// The path is written back into log lines and the consent dialog, so every
-// segment type has to render.
 func TestClaimPathString(t *testing.T) {
 	tests := []struct {
 		name string

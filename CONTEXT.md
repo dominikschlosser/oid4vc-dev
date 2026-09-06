@@ -92,7 +92,7 @@ Marking a credential invalid on a status list. The wallet still presents a revok
 ### Modes
 
 **Validation mode**:
-Whether normative findings are warnings that let a flow continue (`debug`) or refusals (`strict`). The findings are collected in both modes. Applies to what the wallet accepts from others, never to what it produces. Distinct from **HAIP enforcement** (`--haip`), which decides whether the counterparty is checked against that profile at all. HAIP violations are errors in either mode.
+Whether normative findings are warnings that let a flow continue (`debug`) or refusals (`strict`). The findings are collected in both modes. Applies to incoming messages. **HAIP enforcement** (`--haip`) adds profile checks. Most findings follow the validation mode, while advisory findings remain warnings.
 
 **Demo profile**:
 The hardened configuration for hosting a wallet publicly. A deployment setting, unrelated to validation mode and trust profile.

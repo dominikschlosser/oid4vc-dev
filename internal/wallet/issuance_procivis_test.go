@@ -24,16 +24,9 @@ import (
 	"testing"
 )
 
-// setupNoneAuthIssuer serves an issuer that advertises
-// token_endpoint_auth_methods_supported = ["none"]: it authenticates no client
-// at the token endpoint. It also advertises a DPoP algorithm, hands out Bearer
-// tokens, and resolves its token endpoint through separate Authorization
-// Server metadata rather than a token_endpoint in the issuer metadata.
-//
-// Its token endpoint answers invalid_request whenever a request carries client
-// authentication it did not ask for (an OAuth-Client-Attestation header), the
-// way an authorization server that only offers "none" rejects a request that
-// authenticates anyway. gotAttestation records whether the wallet sent one.
+// This issuer advertises none for client authentication and rejects attestation
+// headers. It advertises DPoP but returns Bearer tokens. Resolve the token endpoint
+// from its separate authorization server metadata.
 func setupNoneAuthIssuer(t *testing.T, w *Wallet, gotAttestation *bool) (*httptest.Server, string) {
 	t.Helper()
 
@@ -73,8 +66,6 @@ func setupNoneAuthIssuer(t *testing.T, w *Wallet, gotAttestation *bool) (*httpte
 				if gotAttestation != nil {
 					*gotAttestation = true
 				}
-				// The server offered only "none". A client that authenticates
-				// with an attestation it never asked for is a malformed request.
 				rw.WriteHeader(http.StatusBadRequest)
 				_ = json.NewEncoder(rw).Encode(map[string]string{"error": "invalid_request"})
 				return

@@ -36,8 +36,6 @@ type interactiveIssuer struct {
 	url        string
 	credential string
 
-	// interaction is what the server asks for in its Interaction Required
-	// Response, and openid4vpRequest is what it sends with it.
 	interaction      string
 	openid4vpRequest map[string]any
 
@@ -53,7 +51,6 @@ type interactiveIssuer struct {
 	// The initial request's state and this server's iss are appended.
 	authorizeRedirect string
 
-	// what the wallet sent, for assertions
 	initialForm      url.Values
 	intermediateForm url.Values
 	tokenForm        url.Values
@@ -177,8 +174,6 @@ func writeTestJSON(rw http.ResponseWriter, body map[string]any) {
 	_ = json.NewEncoder(rw).Encode(body)
 }
 
-// newInteractiveIssuer starts a server that requires a presentation, and points
-// the wallet's HTTP client at it.
 func newInteractiveIssuer(t *testing.T, w *Wallet) *interactiveIssuer {
 	t.Helper()
 
@@ -223,9 +218,8 @@ func newInteractiveWallet(t *testing.T) *Wallet {
 	return w
 }
 
-// The whole exchange of §6: the wallet asks the challenge endpoint, is told a
-// presentation is required, presents a credential it holds, and gets an
-// authorization code it exchanges for the credential being issued.
+// Exercise the full interactive exchange: presentation challenge, credential
+// presentation, authorization code and issuance.
 func TestInteractiveAuthorizationIssuesAfterAPresentation(t *testing.T) {
 	w := newInteractiveWallet(t)
 	issuer := newInteractiveIssuer(t, w)
@@ -255,8 +249,6 @@ func TestInteractiveAuthorizationIssuesAfterAPresentation(t *testing.T) {
 	if got := issuer.initialForm.Get("scope"); got != "test-scope" {
 		t.Errorf("scope = %q, want test-scope", got)
 	}
-	// A wallet with no redirect_uri configured is fine here: nothing is
-	// redirected anywhere.
 	if got := issuer.initialForm.Get("redirect_uri"); got != "" {
 		t.Errorf("redirect_uri = %q, want it absent", got)
 	}
@@ -348,7 +340,7 @@ func TestInteractiveAuthorizationFollowsSeveralRoundsAndARotatingSession(t *test
 	}
 }
 
-// A server that keeps asking is walked away from rather than followed forever.
+// Stop after the interaction limit instead of following an endless challenge sequence.
 func TestInteractiveAuthorizationStopsAfterTooManyRounds(t *testing.T) {
 	w := newInteractiveWallet(t)
 	issuer := newInteractiveIssuer(t, w)
@@ -389,10 +381,8 @@ func TestInteractiveAuthorizationReportsAChallengeError(t *testing.T) {
 	}
 }
 
-// The feature level decides, not the server: the same server offering the same
-// endpoint gets the redirect flow from a wallet at 1.0. It has no
-// authorization_endpoint, so the flow stops rather than silently doing
-// something else.
+// At feature level 1.0, use the redirect flow. Fail if its authorization endpoint is
+// unavailable rather than silently enabling 1.1.
 func TestInteractiveAuthorizationIsNotUsedAtFeatureLevel10(t *testing.T) {
 	w := newInteractiveWallet(t)
 	w.VCIVersion = VCIVersion10
@@ -604,7 +594,6 @@ func encryptionJWKForTest(t *testing.T) map[string]any {
 	}
 }
 
-// keyBindingClaims decodes the Key Binding JWT of an SD-JWT presentation.
 func keyBindingClaims(t *testing.T, presentation string) map[string]any {
 	t.Helper()
 
@@ -661,8 +650,6 @@ func TestInteractiveAuthorizationAuthViaWeb(t *testing.T) {
 		t.Errorf("authorization request client_id = %q, want wallet-client", got)
 	}
 
-	// The flow never returned to the challenge endpoint: the redirect carried
-	// the code, and the token exchange used it with the redirect URI.
 	if issuer.challengeRounds != 1 {
 		t.Errorf("challenge rounds = %d, want 1", issuer.challengeRounds)
 	}

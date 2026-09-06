@@ -16,8 +16,6 @@ package wallet
 
 import "fmt"
 
-// ResolveClientMetadata returns verifier metadata from the request object when
-// present, otherwise falls back to outer authorization request metadata.
 func ResolveClientMetadata(reqPayload map[string]any, outer map[string]any) map[string]any {
 	if reqPayload != nil {
 		if clientMeta, ok := reqPayload["client_metadata"].(map[string]any); ok {
@@ -27,7 +25,6 @@ func ResolveClientMetadata(reqPayload map[string]any, outer map[string]any) map[
 	return outer
 }
 
-// ValidateClientMetadata rejects malformed verifier client_metadata values.
 func ValidateClientMetadata(clientMeta map[string]any) error {
 	if len(clientMeta) == 0 {
 		return nil

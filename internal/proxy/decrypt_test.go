@@ -108,7 +108,6 @@ func TestDecryptJWEWithCEK_WrongKey(t *testing.T) {
 }
 
 func TestDecryptJWEWithJWK(t *testing.T) {
-	// Generate recipient key pair (the verifier's ephemeral key)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +121,6 @@ func TestDecryptJWEWithJWK(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Construct JWK JSON from the private key (as a verifier would log it)
 	jwkJSON := ecPrivateKeyToJWK(t, key)
 
 	plaintext, err := DecryptJWEWithJWK(jwe, jwkJSON)
@@ -191,7 +189,6 @@ func TestDecryptJWEWithJWK_WrongKey(t *testing.T) {
 	payload := []byte(`{"test":"value"}`)
 	jwe, _, _ := wallet.EncryptJWE(payload, &key1.PublicKey, "kid", "ECDH-ES", "A128GCM", nil, nil)
 
-	// Use wrong key to decrypt
 	jwkJSON := ecPrivateKeyToJWK(t, key2)
 	_, err := DecryptJWEWithJWK(jwe, jwkJSON)
 	if err == nil {
@@ -199,7 +196,6 @@ func TestDecryptJWEWithJWK_WrongKey(t *testing.T) {
 	}
 }
 
-// ecPrivateKeyToJWK creates a JWK JSON string from an ECDSA private key.
 func ecPrivateKeyToJWK(t *testing.T, key *ecdsa.PrivateKey) string {
 	t.Helper()
 	x, y, err := format.ECPublicCoords(&key.PublicKey)

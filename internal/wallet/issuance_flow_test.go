@@ -31,11 +31,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// mockIssuerOpts configures the mock issuer for tests.
 type mockIssuerOpts struct {
-	// tokenCNonce, if non-empty, is returned in the token response.
-	tokenCNonce string
-	// nonceEndpoint, if true, serves a nonce endpoint.
+	tokenCNonce   string
 	nonceEndpoint bool
 	// nonceOnlyGET makes the nonce endpoint answer the POST that §7.1 requires
 	// with 405 and serve the c_nonce over GET instead, like an issuer whose
@@ -47,32 +44,23 @@ type mockIssuerOpts struct {
 	// refusesNotification, if true, publishes a Notification Endpoint that
 	// answers every call with 404, as an issuer whose notification handler
 	// cannot find the session behind the token does.
-	refusesNotification bool
-	// tokenAuthorizationDetails, if non-empty, is returned in the token response.
+	refusesNotification       bool
 	tokenAuthorizationDetails []any
 	// credentialResponse is the raw JSON object returned by the credential endpoint.
 	// If nil, a default response with a single SD-JWT credential is returned.
-	credentialResponse map[string]any
-	// credentialConfigFormat overrides the format in credential_configurations_supported.
-	credentialConfigFormat string
-	// inspectCredentialRequest validates the credential request body sent by the wallet.
+	credentialResponse       map[string]any
+	credentialConfigFormat   string
 	inspectCredentialRequest func(*testing.T, map[string]any)
-	// offerViaURI, if true, exposes the offer through credential_offer_uri instead of inline JSON.
-	offerViaURI bool
+	offerViaURI              bool
 	// oneShotOfferURI, if true, the credential_offer_uri succeeds once and then returns HTTP 400.
 	oneShotOfferURI bool
 	// secondOffer, if set, is what the credential_offer_uri serves from the
 	// second read on: an issuer that answers a spent offer with something
 	// else, or one that hands out a different offer under the same URI.
-	secondOffer map[string]any
-	// onOfferFetch is called whenever the credential_offer_uri endpoint is dereferenced.
-	onOfferFetch func()
-	// inspectMetadataRequest sees the request the wallet makes for the issuer
-	// metadata, so a test can look at the headers it sends.
+	secondOffer            map[string]any
+	onOfferFetch           func()
 	inspectMetadataRequest func(*testing.T, *http.Request)
-	// inspectNonceRequest sees every request the wallet makes to the Nonce
-	// Endpoint.
-	inspectNonceRequest func(*testing.T, *http.Request)
+	inspectNonceRequest    func(*testing.T, *http.Request)
 	// rejectFirstNonce answers the first credential request with the
 	// invalid_nonce error of §8.3.1.2, whatever challenge it carried.
 	rejectFirstNonce bool
@@ -222,8 +210,6 @@ func setupMockIssuer(t *testing.T, w *Wallet, opts mockIssuerOpts) (*httptest.Se
 				raw, _ := io.ReadAll(r.Body)
 				opts.captureNotification(r, raw)
 			}
-			// What an issuer whose notification handler cannot resolve the
-			// session behind the access token answers.
 			rw.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(rw).Encode(map[string]any{"message": "Could not find any entity of type \"Session\""})
 
@@ -668,9 +654,8 @@ func TestProcessCredentialOffer_NonceEndpointOnlyGET(t *testing.T) {
 	}
 }
 
-// Strict mode does not work around the GET-only nonce endpoint. It refuses the
-// issuance, naming the nonce endpoint, rather than send a proof it knows the
-// issuer will reject.
+// Strict mode must report the POST failure instead of sending a proof without the
+// required nonce.
 func TestProcessCredentialOffer_NonceEndpointOnlyGETStrictRefuses(t *testing.T) {
 	w := generateTestWallet(t)
 	w.ValidationMode = ValidationModeStrict
@@ -881,8 +866,8 @@ func TestProcessCredentialOffer_AuthCodeBrowserFallback(t *testing.T) {
 	httpClient = issuer.Client()
 	defer func() { httpClient = oldClient }()
 
-	// Stand in for the user's browser: take the authorization URL off the
-	// event stream and visit it, the way an open UI tab or the CLI does.
+	// Simulate the browser by taking the authorization URL from the event stream and
+	// visiting it.
 	authCh, unsubscribe := w.SubscribeAuthorization()
 	defer unsubscribe()
 	go func() {
@@ -926,9 +911,7 @@ func TestProcessCredentialOffer_AuthCodeBrowserFallback(t *testing.T) {
 	}
 }
 
-// TestRunAuthorizationCodeRequest_NobodyTookTheURL covers an authorization URL
-// nothing took. The sign-in belongs to a browser that will never arrive, so
-// the issuance ends there with the request_uri unspent.
+// If no browser takes the URL, end issuance without consuming request_uri.
 func TestRunAuthorizationCodeRequest_NobodyTookTheURL(t *testing.T) {
 	w := generateTestWallet(t)
 	w.BaseURL = "https://wallet.example"
@@ -1044,8 +1027,6 @@ func TestProcessCredentialOffer_AuthCodeDirectRedirect(t *testing.T) {
 	httpClient = issuer.Client()
 	defer func() { httpClient = oldClient }()
 
-	// A redirect the wallet can follow itself needs no user, so nothing
-	// should ask for an interactive sign-in.
 	authCh, unsubscribe := w.SubscribeAuthorization()
 	defer unsubscribe()
 	defer func() {
@@ -1125,9 +1106,8 @@ func TestValidateAuthorizationCodeResponse_StrictRefusesDeviations(t *testing.T)
 	}
 }
 
-// In debug the same deviations are worked around (the flow proceeds) but warned.
 func TestValidateAuthorizationCodeResponse_DebugWarnsAndProceeds(t *testing.T) {
-	w := generateTestWallet(t) // debug by default
+	w := generateTestWallet(t)
 	values := url.Values{"code": {"c"}, "iss": {"https://other.example"}}
 	if err := w.validateAuthorizationCodeResponse(values, "expected-state", "https://issuer.example", true); err != nil {
 		t.Fatalf("debug should not refuse, got %v", err)
@@ -1301,7 +1281,7 @@ func TestProcessCredentialOffer_TxCodeSentInTokenRequest(t *testing.T) {
 		switch {
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/.well-known/openid-credential-issuer"):
 			meta := map[string]any{
-				"credential_issuer":   "", // will be replaced
+				"credential_issuer":   "",
 				"credential_endpoint": "",
 				"token_endpoint":      "",
 			}
@@ -1541,9 +1521,8 @@ func TestProcessCredentialOffer_UsesCredentialIdentifierFromAuthorizationDetails
 	}
 }
 
-// The consent dialog has to say what is being issued, not just name a host.
-// Everything beyond the offer comes from the issuer's metadata, which is
-// optional, so this also pins the degraded cases.
+// Show offered credential details when metadata is available. Missing metadata must
+// still allow a usable consent dialog.
 func TestIssuanceConsentDescribesTheOffer(t *testing.T) {
 	srv := newTestServer(t, false)
 	issuer, offerURI := setupMockIssuer(t, srv.wallet, mockIssuerOpts{})
@@ -1578,8 +1557,7 @@ func TestIssuanceConsentDescribesTheOffer(t *testing.T) {
 	if cred.Format != "dc+sd-jwt" || cred.VCT != "urn:test:credential" {
 		t.Errorf("format/vct not resolved: %+v", cred)
 	}
-	// Nested claim paths are what a user most needs to see, so they must be
-	// rendered as a path rather than dropped.
+	// Show nested claims as paths in the consent dialog.
 	want := []string{"given_name", "address.locality"}
 	if len(cred.Claims) != len(want) {
 		t.Fatalf("claims = %v, want %v", cred.Claims, want)
@@ -1590,15 +1568,12 @@ func TestIssuanceConsentDescribesTheOffer(t *testing.T) {
 		}
 	}
 
-	// The marshalled form is what the UI actually consumes.
 	if _, ok := MarshalConsentRequest(req)["offer_details"]; !ok {
 		t.Error("offer_details missing from the marshalled consent request")
 	}
 }
 
-// An offer delivered by reference is resolved for the dialog too, so the user
-// sees what they are approving rather than a bare hostname. It is fetched
-// again after approval, which the specification permits.
+// Resolve referenced offers for consent, then fetch again after approval.
 func TestIssuanceConsentResolvesOfferByReference(t *testing.T) {
 	srv := newTestServer(t, false)
 	fetched := make(chan struct{}, 4)
@@ -1627,8 +1602,8 @@ func TestIssuanceConsentResolvesOfferByReference(t *testing.T) {
 	}
 }
 
-// An offer whose URI cannot be fetched must still produce a dialog: naming
-// the host and the failure beats refusing to ask.
+// If the offer fetch fails, still show the issuer host and failure in the consent
+// dialog.
 func TestIssuanceConsentSurvivesUnresolvableOfferURI(t *testing.T) {
 	req, _, err := generateTestWallet(t).prepareIssuanceConsentRequest("openid-credential-offer://?credential_offer_uri=https://issuer.invalid/offer/1", "")
 	if err != nil {
@@ -1642,7 +1617,6 @@ func TestIssuanceConsentSurvivesUnresolvableOfferURI(t *testing.T) {
 	}
 }
 
-// An issuer that publishes no metadata must still produce a usable dialog.
 func TestIssuanceConsentSurvivesMissingIssuerMetadata(t *testing.T) {
 	offer := `{"credential_issuer":"https://issuer.invalid","credential_configuration_ids":["some-config"],` +
 		`"grants":{"urn:ietf:params:oauth:grant-type:pre-authorized_code":{"pre-authorized_code":"abc","tx_code":{"length":6,"input_mode":"numeric"}}}}`
@@ -1665,8 +1639,6 @@ func TestIssuanceConsentSurvivesMissingIssuerMetadata(t *testing.T) {
 	}
 }
 
-// proofNonceOf reads the nonce claim out of the first key proof of a credential
-// request body.
 func proofNonceOf(t *testing.T, reqBody map[string]any) string {
 	t.Helper()
 	proofs, _ := reqBody["proofs"].(map[string]any)
@@ -1884,7 +1856,6 @@ func TestProcessCredentialOffer_TokenResponseCNonceByValidationMode(t *testing.T
 				t.Errorf("proof nonce = %q, want %q", seen, tc.wantNonce)
 			}
 
-			// Either way the wallet says the issuer is behind the specification.
 			found := false
 			for _, entry := range w.GetLog() {
 				if strings.Contains(entry.Detail, "c_nonce") && strings.Contains(entry.Detail, "token response") {
@@ -1935,8 +1906,6 @@ func TestProcessCredentialOffer_AuthCodeWithoutPARorDPoP(t *testing.T) {
 				},
 			})
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/.well-known/oauth-authorization-server"):
-			// No pushed_authorization_request_endpoint and no
-			// dpop_signing_alg_values_supported: an ordinary OAuth server.
 			rw.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(rw).Encode(map[string]any{
 				"issuer":                 serverURL,
@@ -2001,8 +1970,6 @@ func TestProcessCredentialOffer_AuthCodeWithoutPARorDPoP(t *testing.T) {
 	if sawDPoPHeader {
 		t.Error("the wallet sent a DPoP proof to a server that advertises no DPoP support")
 	}
-	// The parameters PAR would have carried have to reach the authorization
-	// endpoint instead.
 	for _, key := range []string{"response_type", "client_id", "redirect_uri", "scope", "state", "code_challenge", "code_challenge_method"} {
 		if authQuery.Get(key) == "" {
 			t.Errorf("the authorization request carried no %s: %v", key, authQuery.Encode())
@@ -2016,10 +1983,8 @@ func TestProcessCredentialOffer_AuthCodeWithoutPARorDPoP(t *testing.T) {
 	}
 }
 
-// A wallet started without --base-url still serves /callback: the serve
-// command records the origin it answers on, and the callback check falls
-// back to it. Without the fallback, the Docker image's default command could
-// not complete any authorization code flow.
+// Without --base-url, use the recorded serving origin for /callback. Otherwise the
+// default Docker command could not complete authorization code issuance.
 func TestCallbackIsAcceptedOnAWalletWithoutABaseURL(t *testing.T) {
 	w := generateTestWallet(t)
 	w.BaseURL = ""
@@ -2036,7 +2001,6 @@ func TestCallbackIsAcceptedOnAWalletWithoutABaseURL(t *testing.T) {
 		t.Error("accepted a callback on a port this server does not answer on")
 	}
 
-	// An explicit base URL still wins.
 	w.BaseURL = "https://wallet.example"
 	if canUseInteractiveAuthorizationCallback(w, "http://localhost:8085/callback") {
 		t.Error("accepted a callback that does not match the configured base URL")
@@ -2076,15 +2040,12 @@ func TestProcessCredentialOffer_KeepsCredentialWhenNotificationIsRefused(t *test
 		t.Fatalf("holding %d credentials, want the issued one kept", len(creds))
 	}
 
-	// The refusal is reported in the activity log.
 	logs := w.GetLog()
 	assertWalletLogEvent(t, logs, "notification_response")
 	assertWalletLogEvent(t, logs, "notification_failed")
 }
 
-// TestReadNotificationRefusal covers what a developer is told about an answer
-// from the Notification Endpoint. §11.3 defines two, and an issuer answering
-// outside them is named as such rather than left as a bare status.
+// Report notification refusals using the response rules in OpenID4VCI §11.3.
 func TestReadNotificationRefusal(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

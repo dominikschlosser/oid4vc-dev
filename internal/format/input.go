@@ -28,25 +28,17 @@ import (
 	"time"
 )
 
-// DefaultRemoteTimeout is how long a request to a counterparty may take before
-// the wallet gives up on it.
-//
-// Short on purpose: a developer pointed at an issuer or verifier that does not
-// answer learns more from a prompt failure than from a long wait.
+// DefaultRemoteTimeout keeps unresponsive issuers and verifiers from delaying flows
+// indefinitely.
 const DefaultRemoteTimeout = 15 * time.Second
 
-// remoteTimeoutEnv names the environment variable that overrides it, as a Go
-// duration ("45s", "2m"). A counterparty sharing the machine (a conformance
-// harness, say) can take tens of seconds to answer, and giving up there costs
-// the whole exchange.
+// Allow longer waits for slow counterparties, such as a conformance suite sharing the
+// host.
 const remoteTimeoutEnv = "EUDI_REMOTE_TIMEOUT"
 
-// remoteTimeout resolves the timeout once, at startup.
 var remoteTimeout = resolveRemoteTimeout(os.Getenv(remoteTimeoutEnv))
 
-// resolveRemoteTimeout reads the override. Anything unparseable or not
-// positive leaves the default in place, because a mistyped duration should not
-// silently turn every remote read into one that never times out.
+// Invalid or nonpositive durations keep the default. They must not disable timeouts.
 func resolveRemoteTimeout(raw string) time.Duration {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -65,18 +57,13 @@ var httpClient = &http.Client{
 	Transport: newPolicyTransport(),
 }
 
-// localHTTPClient fetches developer endpoints on localhost or
-// host.docker.internal: it bypasses proxies and accepts self-signed HTTPS
-// certs. Like httpClient it is shared, so connections are pooled and reused
-// instead of a fresh socket per fetch (which exhausts ephemeral ports under a
-// load of many rapid local fetches).
+// Reuse connections to avoid exhausting local ports during rapid fetches. Local
+// endpoints bypass proxies and accept self-signed certificates.
 var localHTTPClient = &http.Client{
 	Timeout:   remoteTimeout,
 	Transport: newLocalPolicyTransport(),
 }
 
-// newPolicyTransport clones the default transport with a dialer that routes
-// every connection through the fetch policy (see policy.go).
 func newPolicyTransport() *http.Transport {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = (&net.Dialer{
@@ -87,18 +74,13 @@ func newPolicyTransport() *http.Transport {
 	return transport
 }
 
-// newLocalPolicyTransport is newPolicyTransport tuned for local developer
-// endpoints: no proxy, self-signed HTTPS accepted, and a host.docker.internal
-// dial that falls back to localhost.
 func newLocalPolicyTransport() *http.Transport {
 	transport := newPolicyTransport()
 	transport.Proxy = nil
 	//nolint:gosec // Local dev endpoints use self-signed certificates on localhost/host.docker.internal.
 	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	// host.docker.internal is the container-side name for this machine. On the
-	// host itself it usually does not resolve, so URLs baked into credentials by
-	// Docker setups (status lists, issuer metadata) would fail locally. Fall
-	// back to localhost, which is the same endpoint.
+	// On the host, host.docker.internal may not resolve. Fall back to localhost so
+	// URLs issued for Docker clients also work locally.
 	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: dialControl}
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		conn, err := dialer.DialContext(ctx, network, addr)
@@ -137,7 +119,6 @@ func isLocalFetchHost(host string) bool {
 	}
 }
 
-// readStdin reads all input from stdin, returning an error if stdin is a terminal.
 func readStdin() (string, error) {
 	stat, err := os.Stdin.Stat()
 	if err != nil {
@@ -153,7 +134,6 @@ func readStdin() (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// readFile reads a file and returns its trimmed contents.
 func readFile(path string) (string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -208,12 +188,10 @@ func ReadInputRaw(input string) (string, error) {
 		return readStdin()
 	}
 
-	// Skip URLs and URI schemes. Return as-is for format detection
 	if strings.Contains(input, "://") {
 		return input, nil
 	}
 
-	// Try as file path (but not if it looks like a JWT or JSON)
 	if !strings.HasPrefix(input, "{") {
 		if _, err := os.Stat(input); err == nil {
 			return readFile(input)
@@ -223,15 +201,10 @@ func ReadInputRaw(input string) (string, error) {
 	return input, nil
 }
 
-// MaxRemoteBytes is the cap every remote response in this toolkit is read
-// under. Exported so the packages that fetch on their own account (status
-// lists, issuer metadata, token and credential endpoints) hold to the same
-// limit rather than reading whatever a peer decides to send.
+// MaxRemoteBytes limits credential, metadata and status list responses consistently.
 const MaxRemoteBytes = maxFetchBytes
 
-// ReadRemoteBody reads a response body under MaxRemoteBytes and reports what
-// was being read when the limit is hit. An unbounded io.ReadAll on a peer's
-// response lets that peer decide how much memory this process uses.
+// ReadRemoteBody limits response size so peers cannot exhaust process memory.
 func ReadRemoteBody(r io.Reader, what string) ([]byte, error) {
 	b, err := io.ReadAll(io.LimitReader(r, MaxRemoteBytes+1))
 	if err != nil {
@@ -243,8 +216,6 @@ func ReadRemoteBody(r io.Reader, what string) ([]byte, error) {
 	return b, nil
 }
 
-// maxFetchBytes caps remote responses. Credentials, trust lists and status
-// lists are all far smaller, so anything larger is a misdirected fetch.
 const maxFetchBytes = 10 << 20
 
 // fetchAttempts is how many times a remote read is tried when the server does
@@ -253,10 +224,8 @@ const maxFetchBytes = 10 << 20
 // Wallet MUST terminate the process", and a timeout is not a response.
 const fetchAttempts = 3
 
-// fetchRetryDelay spaces those attempts out.
 var fetchRetryDelay = 500 * time.Millisecond
 
-// FetchURL fetches content from a URL and returns it as a trimmed string.
 func FetchURL(url string) (string, error) {
 	var resp *http.Response
 	for attempt := 1; ; attempt++ {

@@ -1,6 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="9 3 46 51" width="46" height="51">
-  <!-- eudi-dev logo mark (tile-less variant for headers and light
-       backgrounds). Original work, no relation to official EU emblems. -->
+  <!-- Original EUDI Dev logo. Independent of official EU emblems. -->
   <defs>
     <linearGradient id="gb" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#7aa2f7"/><stop offset="1" stop-color="#5a7ec9"/>

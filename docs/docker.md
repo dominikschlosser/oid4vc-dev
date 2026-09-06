@@ -37,7 +37,9 @@ The full deployment (TLS termination, rate limiting, usage statistics, persisten
 
 ## Storage
 
-The image sets `EUDI_DEV_STORAGE=memory` and `EUDI_DEV_SEED=eudi-dev`. The state lives in memory and the keys derive from that seed, so a container needs no volume, no database and no writable filesystem. It runs with `--read-only` (the start warns that it could not register the wallet instance). A volume mounted at `/home/app/.eudi-dev` is used once `EUDI_DEV_STORAGE=file` is set (see the table).
+The image defaults to `EUDI_DEV_STORAGE=memory` and `EUDI_DEV_SEED=eudi-dev`. It needs no volume, database or writable filesystem. With `--read-only`, startup warns that the wallet instance could not be registered, but the server still runs.
+
+To store state on a volume at `/home/app/.eudi-dev`, set `EUDI_DEV_STORAGE=file`.
 
 Pass `-e EUDI_DEV_STORAGE=...` (or `--storage` on the command) to keep the state elsewhere:
 
@@ -46,15 +48,15 @@ Pass `-e EUDI_DEV_STORAGE=...` (or `--storage` on the command) to keep the state
 | `memory` | The process. Gone when the container stops (the image default) |
 | `file` | The wallet directory, on a volume mounted at `/home/app/.eudi-dev`. Set `EUDI_DEV_SEED=` as well, so a private CA persists |
 | `auto` | Files when a state directory is mounted or named, memory otherwise |
-| `postgres://user:pass@host:5432/db` | One table (`eudi_dev_state`) in that database, created on first use |
+| `postgres://user:pass@host:5432/db` | Rows in `eudi_dev_state`, with a sequence for write versions. Created on first use |
 
 `eudi wallet use http://localhost:8085` drives the container from the CLI over its HTTP API on every backend (see [remote control](wallet/http-api.md#remote-control)).
 
 ### Stateless container
 
-With `EUDI_DEV_SEED` set, the holder key, the issuer key, the CA key and the TLS key derive from that string, so every start (and every container started with the same seed) serves the same keys and the same CA. Verifiers keep trusting the trust list they fetched before a restart, and no volume, backup or database is needed. The CA and TLS certificates are signed anew on each start with random serials, so their bytes differ while their keys and subjects stay the same.
+Containers with the same `EUDI_DEV_SEED` derive the same holder, issuer, CA and TLS keys. Verifiers can keep trusting the CA across restarts without persistent storage. The wallet creates new CA and TLS certificates on each start, with random serial numbers. Their bytes change, but their keys and subjects stay the same.
 
-The image's seed `eudi-dev` is public, so anyone can derive those keys (see [SECURITY.md](../SECURITY.md)). The startup summary shows `Keys: derived from the built-in seed`, and `wallet serve` warns when that seed meets `--demo` or a persisting backend (`file` or Postgres). Set your own value with `-e EUDI_DEV_SEED=<seed>` (or `--seed`) for a test bench, or an empty value for random keys. `auto` seeds the memory backend only and leaves every other backend with random keys.
+The image's seed `eudi-dev` is public, so anyone can derive those keys (see [SECURITY.md](../SECURITY.md)). The startup summary shows `Keys: derived from the built-in seed`, and `wallet serve` warns when that seed is used with `--demo` or a persistent backend (`file` or Postgres). Set your own value with `-e EUDI_DEV_SEED=<seed>` (or `--seed`) for a test bench, or an empty value for random keys. `auto` seeds the memory backend only and leaves every other backend with random keys.
 
 ```bash
 docker run --read-only -p 8085:8085 -p 8086:8086 -e EUDI_DEV_SEED=my-bench ghcr.io/dominikschlosser/eudi-dev
@@ -62,9 +64,11 @@ docker run --read-only -p 8085:8085 -p 8086:8086 -e EUDI_DEV_SEED=my-bench ghcr.
 
 ### Shared database
 
-Several containers pointed at the same database serve one wallet: the same keys, the same CA, the same credentials. [examples/load-test](../examples/load-test/README.md) runs two wallet servers on one database behind an nginx ingress, the target for load and performance tests.
+Containers using the same database and wallet prefix share credentials, keys and the CA. [examples/load-test](../examples/load-test/README.md) runs two wallet servers on one database behind an nginx ingress, the target for load and performance tests.
 
-Each wallet server re-reads the shared state on every request and writes only what it changed (a row per credential, log entry and status entry), so servers issuing and presenting at the same time keep each other's changes. The database holds the keys and the CA in the clear, as the wallet directory does (see [SECURITY.md](../SECURITY.md)).
+Each server checks revisions at request boundaries and reloads changed state. Saves update changed entities and their section revisions. Writes are atomic per row. Concurrent changes to the same entity can overwrite each other. Browser flows and demo requests stay in memory, so route each flow to the same server. See [the storage design](adr/0016-state-goes-through-one-storage-layer.md) for the schema and reload behavior.
+
+The database stores private keys unencrypted, just like the file backend (see [SECURITY.md](../SECURITY.md)). [ADR-0018](adr/0018-postgres-stores-wallet-entities-as-keyed-blobs.md) explains the choice of keyed blobs and its tradeoffs.
 
 ## How it works
 

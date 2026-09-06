@@ -72,7 +72,6 @@ func TestScanCEKLastWins(t *testing.T) {
 }
 
 func TestScanCredentials(t *testing.T) {
-	// A realistic-looking JWT (header.payload.signature, each part base64url)
 	jwt := "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
 
 	tests := []struct {
@@ -129,7 +128,6 @@ func TestScanCredentials(t *testing.T) {
 
 func TestScanJWK(t *testing.T) {
 	s := NewOutputScanner()
-	// A line containing a JWK with private key "d" parameter
 	line := `Verifier key: {"kty":"EC","crv":"P-256","x":"abc","y":"def","d":"privatekeyvalue"}`
 	s.Scan(line)
 
@@ -144,7 +142,6 @@ func TestScanJWK(t *testing.T) {
 
 func TestScanJWKKeycloakFormat(t *testing.T) {
 	s := NewOutputScanner()
-	// Realistic keycloak log line
 	line := `2026-03-02 10:15:59,849 TRACE [de.arbeitsagentur.keycloak.oid4vp.service] Generated ephemeral encryption key: kid=9eabcc30, jwk={"kty":"EC","d":"soZ-J57DCNYJZ5k_0aUQopc7ehTAhab0da6-Cs4jRr0","crv":"P-256","kid":"9eabcc30","x":"TAEcOVsZF8NTgBoJoTSZlaFU_RTHcJZni63UiyB4_vQ","y":"1g_bke-8_ZPWtPFohNeBM0hHqX69oSu_yUE4Sfp5AFk","alg":"ECDH-ES"}`
 	s.Scan(line)
 
@@ -180,7 +177,6 @@ func containsHelper(s, substr string) bool {
 
 func TestScanVPTokenJSON(t *testing.T) {
 	s := NewOutputScanner()
-	// Simulate keycloak log with mDoc CBOR data in VP token
 	mdocData := "o2d2ZXJzaW9uYzEuMGlkb2N1bWVudHOBo2dkb2NUeXBld2V1LmV1cm9wYS5lYy5ldWRpLnBpZC4xbGlzc3VlclNpZ25lZKJqbmFtZVNwYWNlc6F3ZXUuZXVyb3BhLmVjLmV1ZGkucGlkLjGG"
 	line := `Processing VP token (length=3600): {"cred2":["` + mdocData + `"]}`
 	s.Scan(line)
@@ -212,12 +208,11 @@ func TestScanVPTokenJSONMultipleCredentials(t *testing.T) {
 
 func TestScanVPTokenJSONSkipsJWTs(t *testing.T) {
 	s := NewOutputScanner()
-	// JWT-shaped tokens starting with eyJ should not be double-counted
+	// Avoid counting JWTs in both scanners.
 	jwt := "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
 	line := `VP token: {"cred1":"` + jwt + `"}`
 	s.Scan(line)
 
-	// The JWT should be picked up by scanCredentials, not by scanVPTokenJSON
 	creds := s.Credentials()
 	for _, c := range creds {
 		if c.Label == "vp_token.cred1" {
@@ -231,7 +226,6 @@ func TestScanVPTokenJSONIgnoresNonVPLines(t *testing.T) {
 	line := `Some other data: {"key":"` + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" + `"}`
 	s.Scan(line)
 
-	// scanVPTokenJSON should not trigger on lines without vp_token/VP token
 	creds := s.Credentials()
 	for _, c := range creds {
 		if c.Label == "vp_token.key" {
@@ -250,7 +244,6 @@ func TestDrainCredentials(t *testing.T) {
 		t.Fatalf("DrainCredentials() returned %d, want 1", len(drained))
 	}
 
-	// After drain, credentials should be empty
 	if remaining := s.Credentials(); len(remaining) != 0 {
 		t.Errorf("after drain, Credentials() returned %d, want 0", len(remaining))
 	}
@@ -268,7 +261,6 @@ func TestScanSkipsOAuthAuthzReqJWT(t *testing.T) {
 
 func TestScanShortTokenIgnored(t *testing.T) {
 	s := NewOutputScanner()
-	// eyJ followed by very short content. Should be ignored
 	s.Scan("eyJhbGci.eyJz.abc")
 	if len(s.Credentials()) != 0 {
 		t.Error("short token should be ignored")

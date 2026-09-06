@@ -21,7 +21,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// sdjwtQuery builds a well-formed Credential Query for the SD-JWT PID.
 func sdjwtQuery(id, vct string, claims ...any) map[string]any {
 	q := map[string]any{
 		"id":     id,
@@ -34,7 +33,6 @@ func sdjwtQuery(id, vct string, claims ...any) map[string]any {
 	return q
 }
 
-// mdocQuery builds a well-formed Credential Query for the mdoc PID.
 func mdocQuery(id, docType string, claims ...any) map[string]any {
 	q := map[string]any{
 		"id":     id,
@@ -67,9 +65,8 @@ func TestEvaluateDCQL_PartialFulfilmentReturnsNoCredential(t *testing.T) {
 	}
 }
 
-// The held half of the same request must still be returned once the request
-// asks only for it, so the all-or-nothing rule does not simply refuse
-// everything.
+// The satisfiable part must succeed when requested alone, proving validation does not
+// reject every query.
 func TestEvaluateDCQL_FullFulfilmentStillReturnsCredentials(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
@@ -113,7 +110,6 @@ func TestEvaluateDCQL_OptionalCredentialSetsWithNoSatisfiableOptionReturnNothing
 	}
 }
 
-// A satisfiable optional set still selects the credentials its option names.
 func TestEvaluateDCQL_OptionalCredentialSetSelectsSatisfiableOption(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 

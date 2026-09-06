@@ -19,26 +19,22 @@ import "fmt"
 // processor carries the state RFC 9901 §7.1 step 3 needs while it walks the
 // Issuer-signed JWT payload and the Disclosure values reached from it.
 type processor struct {
-	// byDigest maps a Disclosure digest to the Disclosure that produced it.
 	byDigest map[string]*Disclosure
 	// seen records every embedded digest encountered anywhere in the
 	// credential, for step 4.
 	seen map[string]bool
 	// used records the digests that resolved to a Disclosure, for step 5.
 	used map[string]bool
-	// deviations collects rule breaks that a strict consumer rejects but that
-	// still leave the payload resolvable, so lenient parsing can carry on.
+	// Keep recoverable violations so lenient parsing can continue and strict parsing
+	// can reject them.
 	deviations []string
-	// reportedDuplicateDigest keeps the mirrored-claims deviation to one entry
-	// however many digests repeat.
+	// Report repeated digests once, even when many claims are mirrored.
 	reportedDuplicateDigest bool
 }
 
-// processPayload applies RFC 9901 §7.1 steps 3 to 5 and returns the Processed
-// SD-JWT Payload with the deviations it found. A condition the specification
-// marks MUST-reject is recorded as a deviation and the payload resolved around
-// it, so lenient parsing stays usable. Parse turns any deviation into the
-// rejection §7.1 requires.
+// Resolve claims under RFC 9901 §7.1 steps 3 to 5 and record recoverable violations.
+// Parse rejects every violation, while lenient callers can inspect the remaining
+// claims.
 func processPayload(payload map[string]any, disclosures []Disclosure) (map[string]any, []string, error) {
 	p := &processor{
 		byDigest: make(map[string]*Disclosure, len(disclosures)),
@@ -87,10 +83,8 @@ func (p *processor) object(obj map[string]any, top bool) map[string]any {
 			// Issuer-signed JWT payload."
 			continue
 		case "_sd_alg":
-			// Step 3.f removes _sd_alg from the payload. RFC 9901 §4.1.1 keeps
-			// it at the top level only, and a nested copy names the same hash
-			// the top level already fixed, so it is redundant: drop it and
-			// record the rule break for a strict caller.
+			// RFC 9901 §7.1 step 3.f removes _sd_alg. Section 4.1.1 forbids nested
+			// copies, so remove them and record a deviation.
 			if !top {
 				p.deviations = append(p.deviations, "_sd_alg is inside a nested object. RFC 9901 §4.1.1 allows it only at the top level.")
 			}
@@ -254,8 +248,7 @@ func arrayElementDigest(item any) (digest string, isPlaceholder bool, err error)
 	return value, true, nil
 }
 
-// shortDigest keeps an error message readable while still naming the digest
-// the reader has to find in the payload.
+// Shorten digest labels while retaining enough to locate them in the payload.
 func shortDigest(digest string) string {
 	const shown = 12
 	if len(digest) <= shown {

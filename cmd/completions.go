@@ -29,8 +29,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/remote"
 )
 
-// completionClient returns a client for the active remote wallet with a
-// completion-friendly short timeout, or nil for local management.
+// completionClient uses a short timeout so remote completion stays responsive.
 func completionClient() *remote.Client {
 	url, err := activeRemoteURL()
 	if err != nil || url == "" {
@@ -41,8 +40,6 @@ func completionClient() *remote.Client {
 	return c
 }
 
-// completeTemplateNames completes credential template names, local or
-// remote, with the format as description.
 func completeTemplateNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	var completions []string
 	if c := completionClient(); c != nil {
@@ -70,8 +67,6 @@ func completeTemplateNames(cmd *cobra.Command, args []string, toComplete string)
 	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeCredentialIDs completes stored credential IDs with the credential
-// type as description.
 func completeCredentialIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -105,8 +100,6 @@ func completeCredentialIDs(cmd *cobra.Command, args []string, toComplete string)
 	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeDeferredIDs completes deferred issuance ids for `wallet deferred
-// check` and `wallet deferred abandon`.
 func completeDeferredIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -130,8 +123,6 @@ func completeDeferredIDs(cmd *cobra.Command, args []string, toComplete string) (
 	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeInstanceTargets completes running wallet instances for
-// `wallet kill` (URLs, ports, and pids).
 func completeInstanceTargets(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -148,8 +139,6 @@ func completeInstanceTargets(cmd *cobra.Command, args []string, toComplete strin
 	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeUseTargets completes `wallet use`: running instances
-// plus the literal "local".
 func completeUseTargets(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -165,12 +154,10 @@ func completeUseTargets(cmd *cobra.Command, args []string, toComplete string) ([
 	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeRemoteFlag completes --remote: running instances plus "local".
 func completeRemoteFlag(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	return completeUseTargets(cmd, nil, toComplete)
 }
 
-// staticCompletion returns a completion function for a fixed value set.
 func staticCompletion(values ...string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return values, cobra.ShellCompDirectiveNoFileComp

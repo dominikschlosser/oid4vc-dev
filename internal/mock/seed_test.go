@@ -16,8 +16,6 @@ package mock
 
 import "testing"
 
-// The same seed and label always give the same key, different labels give
-// independent ones, and an empty seed gives fresh ones.
 func TestSeed_DerivesTheSameKeyForTheSameLabel(t *testing.T) {
 	seed := Seed("bench")
 	first, err := seed.Key("holder")

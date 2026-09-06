@@ -18,8 +18,6 @@ import (
 	"net/url"
 )
 
-// RegisterAuthorizationCodeCallback reserves a callback slot for the given state.
-// The returned channel receives the eventual redirect query values.
 func (w *Wallet) RegisterAuthorizationCodeCallback(state string) (<-chan url.Values, func()) {
 	ch := make(chan url.Values, 1)
 	rt := w.runtimeState()
@@ -34,7 +32,6 @@ func (w *Wallet) RegisterAuthorizationCodeCallback(state string) (<-chan url.Val
 	}
 }
 
-// CompleteAuthorizationCodeCallback delivers the redirect query values to a waiting flow.
 func (w *Wallet) CompleteAuthorizationCodeCallback(values url.Values) bool {
 	state := values.Get("state")
 	if state == "" {

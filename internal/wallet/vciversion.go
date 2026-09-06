@@ -16,21 +16,16 @@ package wallet
 
 import "fmt"
 
-// VCIVersion selects which OpenID4VCI feature level the wallet uses as a
-// client. The wallet speaks 1.0 either way. 1.1 adds the draft features listed
-// in docs/spec-compliance.md, each of which is negotiated in metadata, so
-// selecting it changes nothing against an issuer that offers none of them.
+// VCIVersion enables the documented 1.1 draft features when set to 1.1 and advertised by
+// the issuer. Both versions support OpenID4VCI 1.0 flows.
 type VCIVersion string
 
 const (
-	// VCIVersion10 is OpenID4VCI 1.0, the published version and the default.
 	VCIVersion10 VCIVersion = "1.0"
 
-	// VCIVersion11 adds the parts of the 1.1 draft this wallet implements.
 	VCIVersion11 VCIVersion = "1.1"
 )
 
-// ParseVCIVersion validates and normalizes the user-provided version.
 func ParseVCIVersion(raw string) (VCIVersion, error) {
 	switch VCIVersion(raw) {
 	case "", VCIVersion10:
@@ -42,17 +37,14 @@ func ParseVCIVersion(raw string) (VCIVersion, error) {
 	}
 }
 
-// UsesInteractiveAuthorization reports whether the wallet may use Interactive
-// Authorization (OpenID4VCI 1.1 §6). §13.3 makes the endpoint's presence the
-// server's half of that negotiation. This is the wallet's half.
+// UsesInteractiveAuthorization requires wallet support and an advertised challenge
+// endpoint (OpenID4VCI 1.1 §13.3).
 func (v VCIVersion) UsesInteractiveAuthorization() bool {
 	return v == VCIVersion11
 }
 
-// ABCADraft is the draft of OAuth 2.0 Attestation-Based Client Authentication
-// this OpenID4VCI version pins: 1.0 pins draft-07 (its §14.7 says to keep
-// using the pinned versions in preference to later ones), the 1.1 editor
-// draft pins draft-08.
+// ABCADraft uses draft-07 for OpenID4VCI 1.0, following its pinned reference rule (§14.7).
+// The 1.1 editor's draft pins draft-08.
 func (v VCIVersion) ABCADraft() int {
 	if v == VCIVersion11 {
 		return 8
@@ -60,8 +52,5 @@ func (v VCIVersion) ABCADraft() int {
 	return 7
 }
 
-// ABCALatestDraft is the newest published ABCA draft this wallet supports on
-// top of the pinned ones. Its additions (the attest_jwt_client_auth_dpop
-// method and the client_attestation_pop_methods_supported metadata) are
-// negotiated through server metadata.
+// ABCALatestDraft identifies additional ABCA methods negotiated through server metadata.
 const ABCALatestDraft = 10

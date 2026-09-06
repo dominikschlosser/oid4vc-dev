@@ -47,7 +47,6 @@ func TestStoreEviction(t *testing.T) {
 	if len(entries) != 3 {
 		t.Fatalf("expected 3 entries after eviction, got %d", len(entries))
 	}
-	// Oldest should be ID 3 (IDs 1,2 evicted)
 	if entries[0].ID != 3 {
 		t.Errorf("expected oldest entry ID 3, got %d", entries[0].ID)
 	}
@@ -75,21 +74,19 @@ func TestStoreFlowsMapBounded(t *testing.T) {
 func TestStoreFlowCorrelation(t *testing.T) {
 	s := NewStore(100)
 
-	// Add VP Auth Request with state
 	e1 := &TrafficEntry{
 		Method:     "GET",
 		URL:        "http://example.com/authorize?client_id=test&response_type=vp_token&state=state123",
 		Class:      ClassVPAuthRequest,
 		ClassLabel: "VP Auth Request",
 	}
-	Classify(e1) // to set Decoded for correlation
+	Classify(e1)
 	s.Add(e1)
 
 	if e1.FlowID == "" {
 		t.Fatal("expected FlowID to be set on first entry")
 	}
 
-	// Add VP Auth Response with same state
 	e2 := &TrafficEntry{
 		Method:      "POST",
 		URL:         "http://example.com/response",
@@ -104,7 +101,6 @@ func TestStoreFlowCorrelation(t *testing.T) {
 		t.Errorf("expected same flow ID, got %q and %q", e1.FlowID, e2.FlowID)
 	}
 
-	// Verify FlowEntries
 	flowEntries := s.FlowEntries(e1.FlowID)
 	if len(flowEntries) != 2 {
 		t.Fatalf("expected 2 flow entries, got %d", len(flowEntries))

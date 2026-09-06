@@ -289,9 +289,8 @@ func TestSubmitDirectPost_RejectsRelativeRedirectURI(t *testing.T) {
 	}
 }
 
-// The wallet UI navigates to the redirect_uri a verifier returns, so a
-// javascript: or data: URI (which url.Parse calls absolute) would run script
-// on the wallet's own origin.
+// url.Parse accepts javascript: and data: as absolute URIs. Navigating to them could
+// execute script on the wallet's origin.
 func TestSubmitDirectPost_RejectsScriptRedirectURI(t *testing.T) {
 	for _, redirect := range []string{
 		"javascript:window.__pwned=1",
@@ -316,7 +315,6 @@ func TestSubmitDirectPost_RejectsScriptRedirectURI(t *testing.T) {
 	}
 }
 
-// The same applies to a Location header, which takes the same path.
 func TestSubmitDirectPost_RejectsScriptLocationHeader(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "javascript:window.__pwned=1")
@@ -361,11 +359,8 @@ func TestBuildFragmentRedirect_NilVPToken(t *testing.T) {
 	}
 }
 
-// RFC 6749 §4.2.2, which OID4VP 1.0 §5.6 inherits for the fragment Response
-// Mode, has the wallet add the response parameters to the fragment component
-// of the redirect URI. A second "#" does not add to a fragment, it buries the
-// response parameters inside the first fragment's value where no verifier can
-// read them.
+// OID4VP 1.0 §5.6 follows RFC 6749 §4.2.2. Response parameters must be added to the
+// existing fragment. A second # would become part of its value.
 func TestFragmentResponsesMergeIntoAnExistingFragment(t *testing.T) {
 	got, err := BuildFragmentRedirect("https://verifier.example/callback#session=abc", "s1", map[string][]string{"pid": {"tok1"}}, "")
 	if err != nil {

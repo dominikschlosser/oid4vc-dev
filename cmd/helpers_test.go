@@ -382,7 +382,6 @@ func TestVerifyWithBestKey(t *testing.T) {
 		keyID string
 	}
 
-	// Mock keys as simple int pointers for testing
 	key1 := new(int)
 	*key1 = 1
 	key2 := new(int)
@@ -392,7 +391,7 @@ func TestVerifyWithBestKey(t *testing.T) {
 		called := false
 		r := verifyWithBestKey(
 			[]crypto.PublicKey{key1},
-			key2, // x5cKey
+			key2,
 			func(key crypto.PublicKey) (result, bool) {
 				called = true
 				if key == key2 {
@@ -413,7 +412,7 @@ func TestVerifyWithBestKey(t *testing.T) {
 		callCount := 0
 		r := verifyWithBestKey(
 			[]crypto.PublicKey{key1, key2},
-			nil, // no x5cKey
+			nil,
 			func(key crypto.PublicKey) (result, bool) {
 				callCount++
 				if key == key2 {
@@ -505,8 +504,7 @@ func TestWalletRegisterOptions_Defaults(t *testing.T) {
 	}
 }
 
-// The handler a register command installs starts the wallet with the
-// wallet flags the register command was given.
+// The URL handler must pass the registration flags to the server it starts.
 func TestWalletRegisterInheritedServeArgs(t *testing.T) {
 	parent := &cobra.Command{Use: "wallet"}
 	parent.PersistentFlags().String("wallet-dir", "", "")
@@ -527,9 +525,8 @@ func TestWalletRegisterInheritedServeArgs(t *testing.T) {
 	}
 }
 
-// The detached server gets every serve flag except the registration flags,
-// with the wallet flags of the parent command. The seed stays off its
-// command line.
+// A detached server inherits wallet settings but skips URL registration. The seed
+// stays in the environment.
 func TestSerializeWalletServeArgs(t *testing.T) {
 	parent := &cobra.Command{Use: "wallet"}
 	parent.PersistentFlags().String("wallet-dir", "", "")

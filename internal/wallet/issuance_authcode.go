@@ -88,8 +88,8 @@ func (w *Wallet) processAuthorizationCodeOffer(
 			return nil, err
 		}
 	default:
-		// Everything else needs a credential the wallet was never issued, such
-		// as the client secret the client_secret_* methods sign or send.
+		// Other methods require credentials this wallet lacks, such as a client
+		// secret.
 		return nil, fmt.Errorf("unsupported token endpoint auth method %q", clientAuthMethod)
 	}
 	dpopKey := w.dpopKeyFor(oauthMeta)
@@ -118,9 +118,8 @@ func (w *Wallet) processAuthorizationCodeOffer(
 	if offer.Grants.IssuerState != "" {
 		parForm.Set("issuer_state", offer.Grants.IssuerState)
 	}
-	// How this authorization server wants the client authenticated, resolved
-	// once here and kept with the credential: a refresh is another token
-	// request at the same endpoint, long after this metadata is gone.
+	// Keep client authentication settings with the credential for later refresh
+	// requests.
 	authCtx := clientAuthContext{oauthMeta: oauthMeta, clientID: clientID, tokenEndpoint: tokenEndpoint}
 	clientAuth := w.resolveClientAuthentication(clientAuthMethod, authCtx)
 	if err := applyClientAuthentication(parForm, clientAuth, w.HolderKey); err != nil {
@@ -175,9 +174,8 @@ func (w *Wallet) processAuthorizationCodeOffer(
 			}
 			return w.completeAuthorizationCodeIssuance(issuance, code)
 		case isRedirectToWeb(err):
-			// The server sent this exchange to a browser after all, so the
-			// redirect flow below finishes it, with the pushed request the
-			// server offered where it offered one.
+			// Continue with browser sign-in, using the server's pushed request when
+			// supplied.
 			if err := w.noteRedirectToWeb(challengeEndpoint, redirectURI, authorizationEndpoint); err != nil {
 				return nil, err
 			}
@@ -236,9 +234,6 @@ func (w *Wallet) processAuthorizationCodeOffer(
 	return w.completeAuthorizationCodeIssuance(issuance, code)
 }
 
-// authorizationCodeSetup is what both routes to an authorization code need:
-// the client's identity to the authorization server, and the keys and nonces
-// the exchange uses.
 type authorizationCodeSetup struct {
 	clientID      string
 	redirectURI   string
@@ -265,8 +260,8 @@ type authorizationCodeSetup struct {
 	owner string
 }
 
-// authorizationCodeIssuance carries what the second half of an authorization
-// code issuance needs, and nothing about how the code was obtained.
+// Keep the token and credential exchange independent of how the authorization code was
+// obtained.
 type authorizationCodeIssuance struct {
 	offer              *oid4vc.CredentialOffer
 	metadata           map[string]any
@@ -283,8 +278,6 @@ type authorizationCodeIssuance struct {
 	configID     string
 }
 
-// completeAuthorizationCodeIssuance exchanges an authorization code for an
-// access token and takes the flow through to an imported credential.
 func (w *Wallet) completeAuthorizationCodeIssuance(ctx authorizationCodeIssuance, code string) (*IssuanceResult, error) {
 	offer := ctx.offer
 	metadata := ctx.metadata
@@ -308,8 +301,7 @@ func (w *Wallet) completeAuthorizationCodeIssuance(ctx authorizationCodeIssuance
 		return nil, err
 	}
 
-	// The wallet attestation and the DPoP proof travel as headers, so the
-	// log names them next to the form.
+	// Include authentication headers in the log alongside the token request form.
 	attestor := w.attestorFor(clientAuth)
 	tokenDetails := formRequestLogDetails(tokenEndpoint, "token", tokenForm)
 	tokenDetails["client_attestation"] = attestor != nil
@@ -446,14 +438,11 @@ func (w *Wallet) completeAuthorizationCodeIssuance(ctx authorizationCodeIssuance
 // not authenticate (RFC 8414, via the IANA registry).
 const unauthenticatedClientMethod = "none"
 
-// unregisteredPublicClientMethod is a value some deployments publish for the
-// same thing. It is not in the registry, so it is reported as a deviation
-// before the wallet acts on what it evidently means.
+// Some servers advertise public for unauthenticated clients. Report it as an
+// unregistered alias before treating it as none.
 const unregisteredPublicClientMethod = "public"
 
-// noteDeclinedInteractiveAuthorization records an offer of Interactive
-// Authorization (OID4VCI 1.1 §6) the wallet is not taking up, and names the
-// flag that would.
+// Log that interactive authorization is available and name the flag that enables it.
 func (w *Wallet) noteDeclinedInteractiveAuthorization(oauthMeta map[string]any, endpoint string) {
 	if endpoint == "" {
 		return
@@ -471,8 +460,7 @@ func (w *Wallet) noteDeclinedInteractiveAuthorization(oauthMeta map[string]any, 
 	log.Printf("[VCI] %s", detail)
 }
 
-// reportServerDeviation records something the counterparty got wrong. Strict
-// refuses to go on, debug names it and continues.
+// Log protocol deviations in debug mode and return errors in strict mode.
 func (w *Wallet) reportServerDeviation(detail string) error {
 	details := map[string]any{"deviation": detail}
 	if w.Mode() == ValidationModeStrict {
@@ -484,10 +472,8 @@ func (w *Wallet) reportServerDeviation(detail string) error {
 	return nil
 }
 
-// detectTokenEndpointAuthMethod picks the client authentication method from
-// the ones the authorization server offers. Attestation wins wherever it is
-// offered. The methods that ask nothing are read too, so a server offering
-// only those stays usable.
+// Prefer attestation when advertised. Use unauthenticated access only if no supported
+// authentication method is offered.
 func detectTokenEndpointAuthMethod(oauthMeta map[string]any) string {
 	methods, ok := oauthMeta["token_endpoint_auth_methods_supported"].([]any)
 	if !ok || len(methods) == 0 {
@@ -514,7 +500,6 @@ func detectTokenEndpointAuthMethod(oauthMeta map[string]any) string {
 			return method
 		}
 	}
-	// Last: a client that authenticates is preferred to one that does not.
 	for _, raw := range methods {
 		method, _ := raw.(string)
 		if method == unauthenticatedClientMethod || method == unregisteredPublicClientMethod {
@@ -590,19 +575,16 @@ func (w *Wallet) attestsClient(oauthMeta map[string]any) bool {
 	return method == ""
 }
 
-// clientAuthContext is what deciding, and re-deciding, client authentication
-// needs: the authorization server's metadata, who the wallet says it is, and
-// the token endpoint that stands in for a server that does not name itself.
+// Keep authorization metadata, client identity and a fallback token endpoint for
+// selecting client authentication.
 type clientAuthContext struct {
 	oauthMeta     map[string]any
 	clientID      string
 	tokenEndpoint string
 }
 
-// resolveClientAuthentication reads how this authorization server wants the
-// client authenticated (nil when it asked for nothing). The answer is kept
-// with the credential, since a refresh is another request to the same
-// endpoint.
+// Save the selected client authentication with the credential for later refresh
+// requests. Return nil for unauthenticated access.
 func (w *Wallet) resolveClientAuthentication(method string, ctx clientAuthContext) *ClientAuthentication {
 	if method == ClientAuthPrivateKeyJWT {
 		return &ClientAuthentication{
@@ -697,8 +679,6 @@ func (w *Wallet) dpopKeyFor(oauthMeta map[string]any) *ecdsa.PrivateKey {
 	return nil
 }
 
-// attestorFor builds the attestor a request carries its wallet
-// attestation with, or nil when this authentication needs no headers.
 func (w *Wallet) attestorFor(auth *ClientAuthentication) *clientAttestor {
 	if auth == nil || auth.Method != ClientAuthAttestation {
 		return nil
@@ -763,7 +743,6 @@ func (a *clientAttestor) dpopChallenge() (string, error) {
 	return a.requestChallenge()
 }
 
-// observe reads the challenge a response hands out for the next PoP.
 func (a *clientAttestor) observe(headers http.Header) {
 	if value := strings.TrimSpace(headers.Get("OAuth-Client-Attestation-Challenge")); value != "" {
 		a.challenge = value
@@ -791,8 +770,7 @@ func (a *clientAttestor) retryAfterRefusal(body []byte) bool {
 	return false
 }
 
-// applyClientAuthentication puts into the form what belongs in the form.
-// private_key_jwt authenticates there, an attestation in the headers.
+// private_key_jwt uses form fields. Attestation authentication uses headers.
 func applyClientAuthentication(form url.Values, auth *ClientAuthentication, holderKey *ecdsa.PrivateKey) error {
 	if auth == nil || auth.Method != ClientAuthPrivateKeyJWT {
 		return nil
@@ -983,8 +961,6 @@ func (w *Wallet) keyAttestationClaims(requirement map[string]any) map[string]any
 	}
 }
 
-// requiredKeyAttestationClaims returns the levels a key_attestations_required
-// object names.
 func requiredKeyAttestationClaims(requirement map[string]any) map[string]any {
 	required := map[string]any{}
 	for _, claim := range keyAttestationClaimNames {
@@ -995,9 +971,8 @@ func requiredKeyAttestationClaims(requirement map[string]any) map[string]any {
 	return required
 }
 
-// noteKeyAttestationClaims marks in the activity log what the attestation
-// says about its key storage: a claim this wallet's file-held keys cannot
-// back, or a requirement the attestation leaves unanswered.
+// Log key storage claims this wallet cannot substantiate, along with issuer
+// requirements left unsatisfied.
 func (w *Wallet) noteKeyAttestationClaims(claims, requirement map[string]any) {
 	if len(claims) > 0 {
 		w.AddWarning("issuance", "The key attestation claims key storage levels this wallet's file-held keys cannot back (a test setting, see --key-attestation-level)", claims)
@@ -1006,8 +981,6 @@ func (w *Wallet) noteKeyAttestationClaims(claims, requirement map[string]any) {
 	}
 }
 
-// credentialProofTypes returns the proof_types_supported of a credential
-// configuration (§12.2.4), keyed by proof type.
 func credentialProofTypes(metadata map[string]any, configID string) map[string]any {
 	configs, _ := metadata["credential_configurations_supported"].(map[string]any)
 	cfg, _ := configs[configID].(map[string]any)
@@ -1059,14 +1032,9 @@ func proofSigningAlgFinding(metadata map[string]any, configID string, requireHAI
 	return finding
 }
 
-// credentialKeyAttestationRequirement reports whether the credential request
-// carries a key attestation, and what the configuration requires of it. The
-// attestation proof type is a key attestation, so it always carries one, and
-// the levels it states are those the attestation entry names, else those the
-// jwt entry names (the entry whose requirement chose the type). For the jwt
-// proof type the presence of key_attestations_required alone makes it
-// mandatory, so an empty one (or a non-object, which some issuers send) still
-// gets an attestation.
+// The attestation proof type always carries a key attestation. Use its required
+// levels, falling back to the jwt entry that selected it. For jwt proofs, the presence
+// of key_attestations_required requires attestation even when empty or malformed.
 func credentialKeyAttestationRequirement(metadata map[string]any, configID string) (map[string]any, bool) {
 	proofTypes := credentialProofTypes(metadata, configID)
 	proofType := credentialProofType(metadata, configID)
@@ -1179,17 +1147,15 @@ func responseMapLogDetails(endpoint, endpointName string, response map[string]an
 	}
 	if err != nil {
 		details["error"] = err.Error()
-		// What the server sent. The headline is the refusal's own code, which a
-		// server answering outside the OAuth 2.0 error format fills with its
-		// HTTP status text.
+		// Use the OAuth error code as the headline, falling back to HTTP status text
+		// for other response formats.
 		var refusal *serverRefusal
 		if errors.As(err, &refusal) {
 			if refusal.StatusCode != 0 {
 				details["status_code"] = refusal.StatusCode
 			}
-			// Only when the message does not already carry it: a body that is
-			// not an error response at all is reported whole, and repeating it
-			// here would put a second copy in the stored log.
+			// Keep one copy of the response body in the log when the message already
+			// includes it.
 			if refusal.Body != "" && !strings.Contains(refusal.Message, refusal.Body) {
 				details["response_body"] = refusal.Body
 			}
@@ -1228,10 +1194,8 @@ func accessTokenScheme(tokenResp map[string]any, sentDPoP bool) string {
 	return "Bearer"
 }
 
-// serverRefusal is an authorization server's refusal, kept whole. Message is
-// what the flow reports. The status and body travel with it for the log
-// details, since a server that does not answer in the OAuth 2.0 error format
-// states its reason only in the body.
+// Keep the status and response body for diagnostics, including refusals outside the
+// OAuth error format.
 type serverRefusal struct {
 	StatusCode int
 	Body       string
@@ -1244,8 +1208,6 @@ func postFormWithDPoP(target string, form url.Values, key *ecdsa.PrivateKey, acc
 	body := []byte(form.Encode())
 	respBody, status, err := doDPoPRequest("POST", target, "application/x-www-form-urlencoded", "", body, "", accessToken, key, nonce, attestor)
 	if err != nil {
-		// A refusal states its reason in the two fields RFC 6749 §5.2 defines
-		// for it.
 		message := oauthErrorMessage(respBody)
 		if message == "" {
 			message = err.Error()
@@ -1264,13 +1226,9 @@ func postFormWithDPoP(target string, form url.Values, key *ecdsa.PrivateKey, acc
 	return out, nil
 }
 
-// oauthErrorMessage renders an OAuth 2.0 error response as "code: what it
-// says", or empty when the body is not one.
-//
-// RFC 6749 §5.2 defines error and error_description. A server that fills
-// error with the HTTP status phrase and says why in a message member is read
-// for that message. An error member is still what makes the body an error
-// response, since this also decides whether a 200 carries a refusal.
+// Format OAuth errors as code and description under RFC 6749 §5.2. Accept a message
+// field when servers use it for details. Require an error field so a successful
+// response is not mistaken for a refusal.
 func oauthErrorMessage(body []byte) string {
 	var doc struct {
 		Error       string          `json:"error"`
@@ -1290,9 +1248,7 @@ func oauthErrorMessage(body []byte) string {
 	return doc.Error + ": " + reason
 }
 
-// errorBodyMessage reads the message member of an error body, which servers
-// write as one string or as the list of things that were wrong with the
-// request.
+// Servers can return message as a string or a list of validation errors.
 func errorBodyMessage(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -1308,9 +1264,6 @@ func errorBodyMessage(raw json.RawMessage) string {
 	return ""
 }
 
-// credentialRequestBody is the credential request (§8.2): the proofs, the
-// credential named by identifier or configuration, and the response
-// encryption the wallet asks for.
 func credentialRequestBody(proofs credentialProofs, credentialIdentifier, credentialConfigurationID string, credentialResponseEncryption map[string]any) map[string]any {
 	reqBody := map[string]any{
 		"proofs": map[string]any{proofs.Type: proofs.Values},
@@ -1367,16 +1320,12 @@ func (e credentialErrorResponse) Error() string {
 	return "credential error: " + e.code + ": " + e.description
 }
 
-// isInvalidNonceError reports whether the issuer refused the request for the
-// challenge its key proofs carried.
 func isInvalidNonceError(err error) bool {
 	var credErr credentialErrorResponse
 	return errors.As(err, &credErr) && credErr.code == "invalid_nonce"
 }
 
-// deferredContext carries what a deferred credential request needs, both for
-// the poll that happens inside the issuance flow and for the record left
-// behind when the issuer wants more time than the flow can wait.
+// Keep request settings for deferred collection after the original issuance flow ends.
 type deferredContext struct {
 	metadata         map[string]any
 	tokenEndpoint    string
@@ -1395,13 +1344,8 @@ type deferredContext struct {
 	nonce            *string
 }
 
-// resolveDeferredCredential completes an issuance the issuer deferred. A
-// response with a transaction_id and no credential is not ready yet. One that
-// already carries the credential is returned untouched, so both flows call
-// this unconditionally.
-//
-// A short deferral is waited out here. A longer one returns a DeferredIssuance
-// for the background poller.
+// Return completed responses unchanged. Persist a transaction_id response for
+// background collection so callers do not wait through the issuer's delay.
 func (w *Wallet) resolveDeferredCredential(credResp map[string]any, ctx deferredContext) (map[string]any, *DeferredIssuance, error) {
 	txID, _ := credResp["transaction_id"].(string)
 	if txID == "" {
@@ -1425,11 +1369,10 @@ func (w *Wallet) resolveDeferredCredential(credResp map[string]any, ctx deferred
 	return nil, pending, nil
 }
 
-// deferredPollInterval is used when the issuer names no interval of its own.
 const deferredPollInterval = 5 * time.Second
 
-// stillPendingError says the issuer has not finished the credential yet. Not a
-// failure: the transaction is good and the interval says when to come back.
+// Pending is a valid transaction waiting for issuance. The interval sets the next
+// attempt.
 type stillPendingError struct {
 	transactionID string
 	interval      time.Duration
@@ -1657,9 +1600,8 @@ func nonceRequest(method, ep string, nonce *string) (string, int, error) {
 	return value, status, nil
 }
 
-// nonceFailureReason describes a failed nonce request by its HTTP status,
-// keeping a long error-page body out of the log and the warning. A transport
-// error that never reached a status is reported by its message instead.
+// Use HTTP status for nonce failures instead of long error pages. Transport failures
+// retain their error message.
 func nonceFailureReason(status int, err error) string {
 	if status >= 400 {
 		return fmt.Sprintf("HTTP %d", status)
@@ -1681,12 +1623,8 @@ func credentialAccept(credentialResponseEncryption map[string]any) string {
 	return "application/json"
 }
 
-// doDPoPRequest sends one issuance request, optionally DPoP-bound. A nil key
-// sends no DPoP proof, which is what an issuer that does not advertise
-// dpop_signing_alg_values_supported expects. A refusal that comes with the
-// material to do better is answered once: a DPoP nonce (RFC 9449 §8), and an
-// attestation challenge or freshness demand (ABCA §6.2 and §7.4), each with its own
-// retry so one does not spend the other's.
+// Retry a DPoP nonce challenge and an attestation challenge independently, once each
+// (RFC 9449 §8, ABCA §6.2 and §7.4). A retry for one must not consume the other.
 func doDPoPRequest(method, target, contentType, accept string, body []byte, authScheme, token string, key *ecdsa.PrivateKey, nonce *string, attestor *clientAttestor) ([]byte, int, error) {
 	if accept == "" {
 		accept = "application/json, application/jwt"
@@ -1793,11 +1731,9 @@ func derefString(v *string) string {
 	return *v
 }
 
-// runAuthorizationCodeRequest takes the authorization request to whoever can
-// answer it. A browser does where it can reach the wallet's redirect URI, and
-// the wallet itself where no browser can. RFC 9126 §4 says "the client MUST
-// only use a request_uri value once", so only one of them requests the
-// endpoint.
+// Use one caller for the authorization URL. A browser handles reachable callbacks,
+// otherwise the wallet follows the endpoint. RFC 9126 §4 permits one use of
+// request_uri.
 func runAuthorizationCodeRequest(w *Wallet, endpoint, clientID, requestURI string, params url.Values, redirectURI, expectedState, expectedIssuer, owner string, issRequired bool) (url.Values, error) {
 	authURL, err := authorizationRequestURL(endpoint, clientID, requestURI, params)
 	if err != nil {
@@ -1808,9 +1744,8 @@ func runAuthorizationCodeRequest(w *Wallet, endpoint, clientID, requestURI strin
 		callbackCh, unregister := w.RegisterAuthorizationCodeCallback(expectedState)
 		defer unregister()
 
-		// The wallet never opens a browser itself (a hosted wallet would open
-		// one on its own server). It hands the URL to whoever holds the user's
-		// attention and waits.
+		// Return the URL to the user's browser. Opening one on a hosted wallet server
+		// would not reach the user.
 		if !w.NotifyAuthorization(AuthorizationPrompt{URL: authURL, Owner: owner}) {
 			return nil, fmt.Errorf("this offer needs an interactive sign-in at %s, and nothing is attached to this wallet that can open it", authURL)
 		}
@@ -1908,8 +1843,6 @@ func authorizationRequestURL(endpoint, clientID, requestURI string, params url.V
 	return authURL, nil
 }
 
-// callAuthorizationEndpoint makes the request no browser is there to make,
-// and reports where it was sent.
 func callAuthorizationEndpoint(authURL string) (string, string, error) {
 	req, err := http.NewRequest("GET", authURL, nil)
 	if err != nil {
@@ -2006,8 +1939,6 @@ func truncateBody(body string) string {
 	return body[:200] + "..."
 }
 
-// tokenGrantRenewal reads what a token response offers for renewing the
-// access token later.
 func tokenGrantRenewal(tokenResp map[string]any) (refreshToken string, expiresIn int) {
 	refreshToken, _ = tokenResp["refresh_token"].(string)
 	if seconds, ok := tokenResp["expires_in"].(float64); ok && seconds > 0 {

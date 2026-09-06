@@ -28,10 +28,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/format"
 )
 
-// These pin what JWK parsing accepts and rejects, independent of the library
-// underneath.
-
-// jwkFor renders a public key as a JWK document the way a peer would send it.
 func ecJWK(t *testing.T, key *ecdsa.PublicKey, crv string) []byte {
 	t.Helper()
 	x, y, err := format.ECPublicCoords(key)
@@ -77,8 +73,6 @@ func ecPrivateJWK(t *testing.T, key *ecdsa.PrivateKey, crv string) []byte {
 	return out
 }
 
-// Every curve the parser claims to support must survive a round trip with
-// its coordinates intact.
 func TestParseJWK_ECCurves(t *testing.T) {
 	for _, tc := range []struct {
 		crv   string
@@ -161,8 +155,6 @@ func TestParseJWK_RSARoundTrip(t *testing.T) {
 	}
 }
 
-// What the parser must refuse. A parser that accepts these hands a caller a
-// key that is not the one the peer meant.
 func TestParseJWK_Rejects(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -183,8 +175,7 @@ func TestParseJWK_Rejects(t *testing.T) {
 	}
 }
 
-// The private form has to come back with the same D, or a signature made
-// with the parsed key verifies against nobody.
+// Parsing a private JWK must preserve its scalar so it signs with the original key.
 func TestParseJWKPrivate_ECRoundTrip(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -269,7 +260,6 @@ func TestParseJWK_ShortCoordinateStrictVersusLenient(t *testing.T) {
 	t.Fatal("no key with a short X coordinate generated in 20000 attempts")
 }
 
-// A conformant document parses without a repair finding.
 func TestParseJWKLenient_ReportsNoRepairForAConformantKey(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -287,8 +277,7 @@ func TestParseJWKLenient_ReportsNoRepairForAConformantKey(t *testing.T) {
 	}
 }
 
-// Leniency is about padding only. A document that is wrong in some other way
-// must still be refused by both readings.
+// Lenient mode repairs padding only. Other malformed fields must still fail.
 func TestParseJWKLenient_StillRefusesRealErrors(t *testing.T) {
 	for _, doc := range []string{
 		`{"kty":"EC","crv":"P-192","x":"AAAA","y":"AAAA"}`,

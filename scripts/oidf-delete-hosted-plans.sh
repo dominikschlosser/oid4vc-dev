@@ -1,7 +1,6 @@
 #!/bin/sh
-# Deletes every test plan the token's account owns on a hosted OIDF
-# conformance service, for cleanup between certification attempts. Published
-# plans are immutable on the service and are reported and kept.
+# Delete unpublished plans owned by the token's account. Published plans are immutable and
+# remain on the service.
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

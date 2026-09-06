@@ -53,7 +53,6 @@ func SplitClaimsByNamespace(claims map[string]any, defaultNamespace string) map[
 	return out
 }
 
-// fullDatePattern matches an ISO 8601 calendar date with no time component.
 var fullDatePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // cborDateValue wraps date-shaped strings in the CBOR tags ISO 18013-5 uses
@@ -87,7 +86,6 @@ func cborDateValue(v any) any {
 	}
 }
 
-// MDOCConfig holds options for generating a mock mDOC credential.
 type MDOCConfig struct {
 	DocType   string
 	Namespace string
@@ -98,7 +96,7 @@ type MDOCConfig struct {
 	NamespaceClaims map[string]map[string]any
 	Key             *ecdsa.PrivateKey
 	HolderKey       *ecdsa.PublicKey    // optional: adds deviceKeyInfo to MSO
-	ExpiresIn       time.Duration       // validity duration; defaults to 30 days if zero
+	ExpiresIn       time.Duration       // Validity duration. Defaults to 30 days when zero.
 	ValidFrom       *time.Time          // optional: override validFrom (defaults to now)
 	StatusListURI   string              // optional: status list URI for revocation
 	StatusListIdx   int                 // optional: index in the status list
@@ -115,7 +113,6 @@ type MDOCConfig struct {
 	OmitDigestAlgorithm bool
 }
 
-// GenerateMDOC creates a mock mDOC (IssuerSigned) credential.
 func GenerateMDOC(cfg MDOCConfig) (string, error) {
 	now := time.Now().UTC().Truncate(time.Second)
 	expiresIn := cfg.ExpiresIn
@@ -133,8 +130,7 @@ func GenerateMDOC(cfg MDOCConfig) (string, error) {
 		namespaceClaims = SplitClaimsByNamespace(cfg.Claims, cfg.Namespace)
 	}
 
-	// Build IssuerSignedItems and compute value digests per namespace.
-	// Digest IDs stay unique across all namespaces.
+	// Keep digest IDs unique across namespaces.
 	tag24ItemsByNS := make(map[string]any, len(namespaceClaims))
 	valueDigestsByNS := make(map[string]any, len(namespaceClaims))
 
@@ -160,7 +156,6 @@ func GenerateMDOC(cfg MDOCConfig) (string, error) {
 				return "", fmt.Errorf("encoding IssuerSignedItem: %w", err)
 			}
 
-			// Wrap in Tag 24 (embedded CBOR)
 			tag24 := cbor.Tag{
 				Number:  24,
 				Content: itemBytes,
@@ -180,7 +175,6 @@ func GenerateMDOC(cfg MDOCConfig) (string, error) {
 		valueDigestsByNS[ns] = valueDigests
 	}
 
-	// Build MSO (Mobile Security Object)
 	mso := map[string]any{
 		"version":      "1.0",
 		"docType":      cfg.DocType,
@@ -245,10 +239,8 @@ func GenerateMDOC(cfg MDOCConfig) (string, error) {
 	msg.Headers.Protected.SetAlgorithm(cose.AlgorithmES256)
 	msg.Payload = taggedMSOBytes
 
-	// x5chain (label 33) carries the leaf and any intermediates, never the
-	// root. A reader gets the trust anchor from its trust list, and a chain
-	// that carries its own root proves nothing to anyone who does not already
-	// have it. KeepTrustAnchor embeds a provided chain as given anyway.
+	// Publish the leaf and intermediates in x5chain. Verifiers obtain the root from
+	// their trust list. KeepTrustAnchor preserves a supplied root for tests.
 	chain := cfg.CertChain
 	if !cfg.KeepTrustAnchor {
 		chain = WithoutSelfSignedTrustAnchor(chain)

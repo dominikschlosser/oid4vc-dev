@@ -140,7 +140,6 @@ func bigEndianInt(n int) []byte {
 	return out
 }
 
-// ParseCertificatesPEM reads every CERTIFICATE block from PEM data.
 func ParseCertificatesPEM(data []byte) ([]*x509.Certificate, error) {
 	var certs []*x509.Certificate
 	rest := data

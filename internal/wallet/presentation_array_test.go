@@ -24,8 +24,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
-// importNationalitiesPID imports an SD-JWT PID whose nationalities array has
-// selectively disclosable elements (the mock's per-element array encoding).
 func importNationalitiesPID(t *testing.T, w *Wallet) StoredCredential {
 	t.Helper()
 	raw, err := mock.GenerateSDJWT(mock.SDJWTConfig{
@@ -88,10 +86,8 @@ func TestPresentation_BareArrayPathDisclosesEmptyArray(t *testing.T) {
 	}
 }
 
-// A path with an array index the credential cannot satisfy (index 1 on a
-// one-element array) leaves the claim unsatisfiable. Debug mode still offers the
-// credential on its other claims and marks the claim missing, so the consent
-// dialog shows it as not disclosed. Strict mode refuses the whole request.
+// An out-of-range array index is a missing claim. Debug mode can offer the credential
+// with that warning if other claims match. Strict mode rejects it.
 func TestPresentation_OutOfRangeIndexIsMissingNotDisclosed(t *testing.T) {
 	w := generateTestWallet(t)
 	importNationalitiesPID(t, w)
@@ -127,9 +123,7 @@ func TestPresentation_OutOfRangeIndexIsMissingNotDisclosed(t *testing.T) {
 	}
 }
 
-// Presenting a credential that cannot disclose every requested claim records
-// one grouped activity log warning, covering both an array disclosed empty and
-// a claim no matching credential provides.
+// Group missing and empty-array claims into one presentation warning.
 func TestPresentation_UndisclosedClaimsLoggedGrouped(t *testing.T) {
 	w := generateTestWallet(t)
 	importNationalitiesPID(t, w)
@@ -171,8 +165,6 @@ func TestPresentation_UndisclosedClaimsLoggedGrouped(t *testing.T) {
 	}
 }
 
-// A credential that satisfies every requested claim is preferred over one that
-// leaves some unsatisfiable, so it is the wallet's auto-selection.
 func TestSortMatchesCompleteFirst(t *testing.T) {
 	matches := []CredentialMatch{
 		{QueryID: "q", CredentialID: "partial", MissingClaims: []string{"x"}},
@@ -184,9 +176,8 @@ func TestSortMatchesCompleteFirst(t *testing.T) {
 	}
 }
 
-// A missing claim is labelled in the same form as the claims the credential
-// discloses: namespace:element for an mdoc data element, and the dotted path
-// with array brackets for an SD-JWT VC.
+// Use the same selector format for missing and disclosed claims: namespace:element for
+// mdoc and dotted paths with array brackets for SD-JWT.
 func TestMissingClaimLabel(t *testing.T) {
 	mdoc := StoredCredential{Format: "mso_mdoc"}
 	if got := missingClaimLabel(mdoc, []any{"eu.europa.ec.eudi.pid.1", "given_name"}); got != "eu.europa.ec.eudi.pid.1:given_name" {
@@ -198,8 +189,6 @@ func TestMissingClaimLabel(t *testing.T) {
 	}
 }
 
-// Ending the path with null selects the elements, so they are disclosed and the
-// claim is not flagged.
 func TestPresentation_NullArrayPathDisclosesElements(t *testing.T) {
 	w := generateTestWallet(t)
 	importNationalitiesPID(t, w)

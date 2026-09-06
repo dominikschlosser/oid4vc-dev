@@ -21,9 +21,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// The demo profile implies the EUDI profile. A plain `wallet serve` keeps its
-// permissive defaults, and the flags stay overridable so a self-hosted demo
-// can opt out.
+// Explicit flags can override each demo default.
 func TestDemoModeImpliesEUDIProfile(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -99,8 +97,7 @@ func TestDemoModeImpliesEUDIProfile(t *testing.T) {
 	}
 }
 
-// TestServeRejectsAnUnknownVCIVersion keeps the failure at flag-resolution
-// time, where the operator sees it, rather than at the first issuance.
+// Reject invalid versions during flag parsing, before the first issuance.
 func TestServeRejectsAnUnknownVCIVersion(t *testing.T) {
 	cmd, opts := walletServeCmdWithOptions()
 	if err := cmd.ParseFlags([]string{"--port", "0", "--vci-version", "1.2"}); err != nil {
@@ -112,8 +109,6 @@ func TestServeRejectsAnUnknownVCIVersion(t *testing.T) {
 	}
 }
 
-// resolveServeProfile applies the serve flags the way RunE does, through the
-// same helpers, without starting a server.
 func resolveServeProfile(t *testing.T, args []string) *wallet.Wallet {
 	w, _ := resolveServeProfileWithOptions(t, args)
 	return w
@@ -147,8 +142,6 @@ func resolveServeProfileWithOptions(t *testing.T, args []string) (*wallet.Wallet
 	return w, opts
 }
 
-// The demo baseline is a default like the others: an explicit --pid=false
-// starts the demo without seeding one.
 func TestDemoModePIDBaselineIsOverridable(t *testing.T) {
 	_, withDefault := resolveServeProfileWithOptions(t, []string{"--port", "0", "--demo"})
 	if !withDefault.PID {

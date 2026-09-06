@@ -84,8 +84,6 @@ func TestIssueWithTemplateAndOverrides(t *testing.T) {
 		t.Fatalf("PUT template: %d: %s", resp.Code, resp.Body.String())
 	}
 
-	// Issue from the template with one overridden claim. Format comes from
-	// the template.
 	resp := serverRequest(t, srv, http.MethodPost, "/api/issue", `{"template": "employee-card", "claims": {"employee_id": "E-42"}}`)
 	if resp.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", resp.Code, resp.Body.String())
@@ -106,7 +104,7 @@ func TestIssueWithTemplateAndOverrides(t *testing.T) {
 	if token.ResolvedClaims["employee_id"] != "E-42" {
 		t.Errorf("claim override not applied: %v", token.ResolvedClaims["employee_id"])
 	}
-	// department is always disclosed: plainly in the payload, not a disclosure
+	// department is always disclosed, so it appears directly in the payload.
 	if token.Payload["department"] != "IT" {
 		t.Errorf("expected department plainly in payload, got %v", token.Payload["department"])
 	}
@@ -168,7 +166,6 @@ func TestIssueSaveAsTemplate(t *testing.T) {
 func TestIssuePIDUsesTemplateOverride(t *testing.T) {
 	srv := newTestServer(t, true)
 
-	// Override the pre-defined pid-sdjwt template with a tiny claim set.
 	body := `{"format": "sdjwt", "vct": "urn:custom:pid", "claims": {"given_name": "OVERRIDDEN"}}`
 	if resp := serverRequest(t, srv, http.MethodPut, "/api/templates/pid-sdjwt", body); resp.Code != http.StatusOK {
 		t.Fatalf("PUT template: %d: %s", resp.Code, resp.Body.String())
@@ -192,10 +189,8 @@ func TestIssuePIDUsesTemplateOverride(t *testing.T) {
 	}
 }
 
-// credtemplate.Load takes a name or a path, because the CLI documents
-// `templates show ./some-template.json`. The endpoint accepts a bare name
-// only, so a path in the URL segment cannot turn it into a file read over
-// HTTP (template reads are open on the demo profile).
+// The CLI loader accepts file paths. The HTTP endpoint must restrict input to names to
+// prevent arbitrary file reads.
 func TestGetTemplate_RefusesAPathInsteadOfAName(t *testing.T) {
 	srv := newTestServer(t, false)
 	dir := t.TempDir()
@@ -224,7 +219,6 @@ func TestGetTemplate_RefusesAPathInsteadOfAName(t *testing.T) {
 	}
 }
 
-// The endpoint serves an ordinary template by name.
 func TestGetTemplate_StillServesABareName(t *testing.T) {
 	srv := newTestServer(t, false)
 	srv.wallet.Templates = credtemplate.FileLocation(t.TempDir())

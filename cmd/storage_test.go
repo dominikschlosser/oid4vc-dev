@@ -21,8 +21,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// --storage wins over EUDI_DEV_STORAGE, and an unknown value is refused
-// before anything is loaded.
 func TestOpenStore_FlagBeatsEnvironment(t *testing.T) {
 	t.Setenv(storage.EnvVar, storage.KindMemory)
 	walletDir = t.TempDir()
@@ -62,7 +60,6 @@ func TestResolvedWalletDir_IsBackendIndependent(t *testing.T) {
 	}
 }
 
-// --seed wins over EUDI_DEV_SEED.
 func TestOpenStore_SeedFlagBeatsEnvironment(t *testing.T) {
 	walletDir = t.TempDir()
 	t.Cleanup(func() { walletDir, storageSpec, keySeed = "", "", "" })

@@ -33,31 +33,9 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
-// On the memory and database backends the wallet is stored as one blob per
-// entity under <prefix>/state/. A save writes the entities that differ from
-// its snapshot and deletes the ones that went away, so several
-// wallet servers on one database only clash when they change the same
-// entity. The activity log, the hot path under load, is append-only rows.
-//
-// Sections under state/:
-//
-//	credentials/<id>         {"seq": n, "value": StoredCredential}, seq keeps the order
-//	log/<time>-<hash>        one LogEntry
-//	status/<credential id>   one StatusEntry with its credential id
-//	status-counter/value     the next status list index, moved with WriteIf
-//	deferred/<id>            {"seq": n, "value": DeferredIssuance}
-//	attestations/<hash>      one IssuedAttestationSpec
-//	settings/value           base and issuer URL
-//	revision/<section>       rewritten whenever the section changes
-//
-// Every key is derived from the entity's identity alone, so a server whose
-// view is behind rewrites the same row and never adds a second one.
-//
-// A server reloads per request: it compares the revision rows with its
-// loaded revisions and refreshes only the sections, and within them the
-// rows, whose stamps changed. It writes the revision of a section it changed
-// with WriteIf, so it can tell its own change from another server's. The log
-// is loaded on demand by the log views.
+// Memory and Postgres store entities separately under <prefix>/state/. Saves write
+// changed entities and section revisions. Reloads compare revisions and row versions.
+// See ADR-0016 for the layout and ADR-0018 for the design rationale.
 const (
 	stateSection        = "state"
 	credentialsSection  = "credentials"
@@ -70,52 +48,41 @@ const (
 	statusCounterEntity = "status-counter"
 )
 
-// allSections are the sections a full load reads. A running server refreshes
-// serverSections only: its deferred issuances live in memory and its serving
-// URLs come from its own flags.
+// Running servers reload only serverSections. They manage deferred issuances in memory
+// and use their own configured URLs.
 var (
 	allSections    = []string{credentialsSection, logSection, statusSection, deferredSection, attestationsSection, settingsSection}
 	serverSections = []string{credentialsSection, logSection, statusSection, attestationsSection}
 )
 
-// logTrimEvery is how many saves a server makes between trims of the stored
-// log to maxLogEntries.
 const logTrimEvery = 64
 
-// bulkReadAbove is the number of changed rows above which a section is read
-// in one query.
+// Read the full section in one query when more than this many rows changed.
 const bulkReadAbove = 16
 
-// revisionMark is the content of a revision row. Only the row's stamp is
-// compared.
+// Only the revision row's version matters. Its content stays fixed.
 var revisionMark = []byte("1")
 
-// stateSnapshot is the wallet's snapshot: entity key to the blob as loaded
-// or written. A save compares the wallet against it and a reload compares
-// the store's stamps against it. It is never changed in place, so a save can
-// read it without holding the wallet lock.
+// Snapshots are immutable so saves can read them outside the wallet lock.
 type stateSnapshot map[string]storage.Blob
 
-// walletSettings is the settings entity.
 type walletSettings struct {
 	BaseURL   string `json:"base_url,omitempty"`
 	IssuerURL string `json:"issuer_url,omitempty"`
 }
 
-// statusRecord is the status entity. It carries the credential id, so the id
-// does not have to be recoverable from the key.
+// Store the credential ID explicitly because it may not be recoverable from the key.
 type statusRecord struct {
 	CredentialID string `json:"credential_id"`
 	StatusEntry
 }
 
-// orderedEntity wraps an entity of an ordered section with its position.
+// Preserves insertion order within a section.
 type orderedEntity struct {
 	Seq   int             `json:"seq"`
 	Value json.RawMessage `json:"value"`
 }
 
-// entityMode reports whether this store keeps the wallet as entities.
 func (s *WalletStore) entityMode() bool {
 	return s.backend.Kind() != storage.KindFile
 }
@@ -136,7 +103,6 @@ func (s *WalletStore) revisionKey(section string) string {
 	return s.stateKey(revisionSection, section)
 }
 
-// sectionOf returns the section an entity key belongs to.
 func (s *WalletStore) sectionOf(key string) string {
 	rest := strings.TrimPrefix(key, s.stateKey()+"/")
 	section, _, _ := strings.Cut(rest, "/")
@@ -146,9 +112,7 @@ func (s *WalletStore) sectionOf(key string) string {
 	return section
 }
 
-// changedSections returns the sections a running server refreshes whose
-// stored revision differs from the loaded one. The log is included only
-// when asked.
+// Include the activity log only when requested.
 func (s *WalletStore) changedSections(w *Wallet, includeLog bool) ([]string, error) {
 	revisions, err := s.backend.Stamps(s.stateKey(revisionSection))
 	if err != nil {
@@ -168,11 +132,9 @@ func (s *WalletStore) changedSections(w *Wallet, includeLog bool) ([]string, err
 	return changed, nil
 }
 
-// loadSections refreshes sections of w from the store. The revisions are
-// read first, so a change that lands during the read is loaded again on the
-// next check. A credential whose row is unchanged keeps its in-memory form,
-// and its stored form stays what it was, so a change made in memory is still
-// saved.
+// Read revisions first so changes made during loading are detected on the next check.
+// Keep unchanged credential objects and their stored bytes so unsaved in-memory
+// changes remain detectable.
 func (s *WalletStore) loadSections(w *Wallet, sections []string) error {
 	revisions, err := s.backend.Stamps(s.stateKey(revisionSection))
 	if err != nil {
@@ -243,8 +205,6 @@ func (s *WalletStore) loadSections(w *Wallet, sections []string) error {
 	return nil
 }
 
-// refreshSection reads the rows of section whose stamp differs from known
-// into updated and drops the rows that are gone.
 func (s *WalletStore) refreshSection(section string, known, updated stateSnapshot) error {
 	stamps, err := s.sectionStamps(section)
 	if err != nil {
@@ -283,8 +243,7 @@ func (s *WalletStore) refreshSection(section string, known, updated stateSnapsho
 	return nil
 }
 
-// sectionStamps returns the stamps of a section's rows. The status counter
-// belongs to the status section under its own prefix.
+// The status counter uses its own prefix but belongs to the status section.
 func (s *WalletStore) sectionStamps(section string) (map[string]storage.Stamp, error) {
 	stamps, err := s.backend.Stamps(s.stateKey(section))
 	if err != nil {
@@ -300,7 +259,6 @@ func (s *WalletStore) sectionStamps(section string) (map[string]storage.Stamp, e
 	return stamps, nil
 }
 
-// loadedSections are the parsed entities of a load.
 type loadedSections struct {
 	credentials       []StoredCredential
 	log               []LogEntry
@@ -311,9 +269,7 @@ type loadedSections struct {
 	settings          walletSettings
 }
 
-// parseSections parses the rows of the given sections and returns them with
-// the positions of the ordered rows by key. A credential in held whose row
-// is unchanged is kept as it is.
+// Keep held credentials whose stored row has not changed.
 func (s *WalletStore) parseSections(blobs stateSnapshot, sections []string, known stateSnapshot, knownSeqs map[string]int, held map[string]StoredCredential) (loadedSections, map[string]int, error) {
 	var loaded loadedSections
 	seqs := maps.Clone(knownSeqs)
@@ -397,10 +353,9 @@ func (s *WalletStore) parseSections(blobs stateSnapshot, sections []string, know
 	return loaded, seqs, nil
 }
 
-// saveEntities writes what changed since the snapshot and deletes what went
-// away, then bumps the revision of every section it touched. The wallet
-// state and the snapshot it is compared against are read under one lock, so
-// a reload between them cannot pair an older state with a newer snapshot.
+// Write changed entities, delete removed entities, then update section revisions. Read
+// wallet state and its snapshot under one lock so a concurrent reload cannot pair
+// state with the wrong snapshot.
 func (s *WalletStore) saveEntities(w *Wallet) error {
 	w.mu.RLock()
 	snapshot := w.persisted
@@ -438,10 +393,8 @@ func (s *WalletStore) saveEntities(w *Wallet) error {
 		touched[s.sectionOf(key)] = true
 	}
 
-	// WriteIf with the loaded version succeeds only when nobody else changed
-	// the section, so the new stamp is the server's own and skipped on the
-	// next check. On a conflict the plain write leaves the loaded stamp
-	// behind and the next check loads the section.
+	// On a WriteIf conflict, retain the older cached revision so the next request
+	// reloads the section.
 	own := make(map[string]storage.Stamp)
 	for section := range touched {
 		key := s.revisionKey(section)
@@ -459,9 +412,7 @@ func (s *WalletStore) saveEntities(w *Wallet) error {
 		return err
 	}
 
-	// A reload during the save replaced the snapshot and the state together.
-	// Its snapshot stands. At worst the next save writes again what was
-	// written here.
+	// Keep a concurrent reload's snapshot. The next save may repeat these writes.
 	w.mu.Lock()
 	if w.persisted.is(snapshot) {
 		w.persisted = next
@@ -476,8 +427,7 @@ func (s *WalletStore) saveEntities(w *Wallet) error {
 	return nil
 }
 
-// appendLogEntry stores one activity log entry the wallet appended, without
-// comparing the rest of the wallet.
+// Append one log entry without comparing the rest of the wallet.
 func (s *WalletStore) appendLogEntry(w *Wallet, entry LogEntry) error {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
@@ -519,7 +469,6 @@ func (s *WalletStore) appendLogEntry(w *Wallet, entry LogEntry) error {
 	return nil
 }
 
-// trimLogPeriodically trims the stored log every logTrimEvery saves.
 func (s *WalletStore) trimLogPeriodically() error {
 	s.saves++
 	if s.saves%logTrimEvery != 0 {
@@ -528,8 +477,6 @@ func (s *WalletStore) trimLogPeriodically() error {
 	return s.trimLogRows()
 }
 
-// trimLogRows deletes the oldest stored log rows beyond maxLogEntries and
-// marks the log changed.
 func (s *WalletStore) trimLogRows() error {
 	names, err := s.backend.List(s.stateKey(logSection))
 	if err != nil {
@@ -547,10 +494,8 @@ func (s *WalletStore) trimLogRows() error {
 	return err
 }
 
-// currentEntities marshals the wallet into entities, reusing the stored
-// bytes of every credential equal to its stored form. It returns the
-// entities, the credentials as now stored by row key and the positions of
-// the ordered rows by key. Caller holds w.mu.
+// Caller must hold w.mu. Reuse stored bytes for unchanged credentials to avoid
+// serializing them again.
 func (s *WalletStore) currentEntities(w *Wallet, snapshot stateSnapshot) (map[string][]byte, map[string]StoredCredential, map[string]int, error) {
 	current := make(map[string][]byte)
 	put := func(key string, v any) error {
@@ -621,9 +566,8 @@ func (s *WalletStore) currentEntities(w *Wallet, snapshot stateSnapshot) (map[st
 	if err := put(s.settingsKey(), walletSettings{BaseURL: w.BaseURL, IssuerURL: w.IssuerURL}); err != nil {
 		return nil, nil, nil, err
 	}
-	// The counter is created and moved by the allocator alone, so a save
-	// with a counter behind the store's never sets it back. A reset to zero
-	// of a stored counter is written.
+	// Only the allocator advances the counter. An ordinary save must not overwrite it
+	// with an older value. An explicit reset to zero is still persisted.
 	counterKey := s.counterKey()
 	if stored, ok := snapshot[counterKey]; ok {
 		current[counterKey] = stored.Data
@@ -634,9 +578,8 @@ func (s *WalletStore) currentEntities(w *Wallet, snapshot stateSnapshot) (map[st
 	return current, saved, seqs, nil
 }
 
-// orderedSeqs returns the position of each item of an ordered section. An
-// item keeps the position it was stored under, a new one gets the next, so
-// a load returns the items in the order they were added.
+// Keep existing positions and append new items after them to preserve insertion order
+// on reload.
 func (s *WalletStore) orderedSeqs(section string, known map[string]int, n int, idAt func(int) string) []int {
 	prefix := s.stateKey(section) + "/"
 	next := 0
@@ -657,13 +600,11 @@ func (s *WalletStore) orderedSeqs(section string, known map[string]int, n int, i
 	return seqs
 }
 
-// logEntryName keys a log entry by its time, so a load returns the log in
-// order, and by what it says, so two entries in one nanosecond stay apart.
+// The content hash distinguishes entries with the same timestamp.
 func logEntryName(entry LogEntry) string {
 	return fmt.Sprintf("%020d-%s", entry.Time.UnixNano(), shortHash(entry.Action+"\x00"+entry.Detail+"\x00"+entry.Severity+"\x00"+strconv.FormatBool(entry.Success)))
 }
 
-// entityName makes an identifier safe as one key segment.
 func entityName(id string) string {
 	if id == "" || strings.Contains(id, "/") || strings.HasPrefix(id, ".") {
 		return shortHash(id)
@@ -676,15 +617,13 @@ func shortHash(s string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// allocateStatusIndex moves the shared status counter forward with a
-// compare-and-swap, so two servers issuing at the same time never hand out
-// the same status list index. The status revision moves with it, so the
-// other servers pick up the counter their status list is sized by.
+// Use compare-and-swap to allocate distinct status indices across servers. Update the
+// status revision so other servers reload the counter used to size their lists.
 func (s *WalletStore) allocateStatusIndex(w *Wallet) (int, error) {
 	key := s.counterKey()
 	for attempt := 0; attempt < 100; attempt++ {
-		// The stamp is taken before the value. A value newer than the stamp
-		// fails the write below, and the loop reads again.
+		// Read the version before the value. If the value changed meanwhile, WriteIf
+		// fails and retries.
 		next, expected := 0, ""
 		if stamp, ok := s.backend.Stat(key); ok {
 			expected = stamp.Version
@@ -719,12 +658,10 @@ func (s *WalletStore) allocateStatusIndex(w *Wallet) (int, error) {
 	return 0, errors.New("the status counter kept changing under the allocation")
 }
 
-// is reports whether both are the same snapshot.
 func (snap stateSnapshot) is(other stateSnapshot) bool {
 	return reflect.ValueOf(snap).Pointer() == reflect.ValueOf(other).Pointer()
 }
 
-// with returns a copy of the snapshot with one entity replaced.
 func (snap stateSnapshot) with(key string, blob storage.Blob) stateSnapshot {
 	next := maps.Clone(snap)
 	if next == nil {

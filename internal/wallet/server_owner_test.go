@@ -24,8 +24,6 @@ import (
 	"testing"
 )
 
-// caller describes how one client reaches the wallet: a browser holding a
-// session cookie, a client naming the browser it acts for, or neither.
 type caller struct {
 	cookie string
 	owner  string
@@ -63,9 +61,6 @@ func pendingPresentation(owner string) *ConsentRequest {
 	}
 }
 
-// TestPendingRequests_ReachTheBrowserThatStartedThem covers a wallet several
-// people reach: a consent request is listed for the browser it came from, and
-// for no other.
 func TestPendingRequests_ReachTheBrowserThatStartedThem(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)
@@ -80,16 +75,12 @@ func TestPendingRequests_ReachTheBrowserThatStartedThem(t *testing.T) {
 	}
 }
 
-// TestPendingRequests_ClientNamingTheBrowserItActsFor covers the URL handler
-// and the CLI: they submit over the API and open a page separately, naming the
-// same browser on both, which is what ties the two acts together.
 func TestPendingRequests_ClientNamingTheBrowserItActsFor(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)
 	w.CreateConsentRequest(pendingPresentation("dispatch-nonce"))
 
-	// The page the client opened carries the nonce it was opened with, next to
-	// a session cookie of its own.
+	// The opened page has the client's browser ID as well as its own session cookie.
 	page := listRequestsAs(t, srv, caller{cookie: "browser-a", owner: "dispatch-nonce"})
 	if len(page) != 1 || page[0]["mine"] != true {
 		t.Fatalf("the page the client opened sees %v, want the request as its own", page)
@@ -99,11 +90,8 @@ func TestPendingRequests_ClientNamingTheBrowserItActsFor(t *testing.T) {
 	}
 }
 
-// TestPendingRequests_UnownedStayVisible is the compatibility rule. A client
-// that names no browser is every client written before the wallet asked for
-// one, and the CLI and API clients that have no browser at all. What they
-// create stays visible to every caller, so a single-user wallet and every
-// existing integration keep working.
+// Older clients and API callers may omit a browser ID. Their requests remain visible
+// to every caller for compatibility.
 func TestPendingRequests_UnownedStayVisible(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)
@@ -124,7 +112,6 @@ func TestPendingRequests_UnownedStayVisible(t *testing.T) {
 	}
 }
 
-// TestRequestOwner covers which owner a call stamps on the request it creates.
 func TestRequestOwner(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -144,8 +131,8 @@ func TestRequestOwner(t *testing.T) {
 	}
 }
 
-// TestOwnerFromQuery covers the event stream, which EventSource opens without
-// headers, so the page puts the owner in the URL instead.
+// EventSource cannot set custom headers, so the event stream accepts the browser ID in
+// its URL.
 func TestOwnerFromQuery(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/requests/stream?owner=dispatch-nonce", nil)
 	if got := presentedOwner(req); got != "dispatch-nonce" {
@@ -153,7 +140,6 @@ func TestOwnerFromQuery(t *testing.T) {
 	}
 }
 
-// TestBrowserSession covers where a session comes from and what it carries.
 func TestBrowserSession(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -182,8 +168,6 @@ func TestBrowserSession(t *testing.T) {
 		t.Error("a session cookie lives as long as the browser is open")
 	}
 
-	// A browser that already has one keeps it, so every tab answers for the
-	// same requests.
 	again := httptest.NewRecorder()
 	kept := httptest.NewRequest(http.MethodGet, "/", nil)
 	kept.AddCookie(&http.Cookie{Name: sessionCookieName, Value: id})
@@ -195,13 +179,11 @@ func TestBrowserSession(t *testing.T) {
 	}
 }
 
-// TestBrowserSecure covers which browsers get a Secure session. A reverse
-// proxy terminates TLS and forwards plain http, so it says so in a header, and
-// a browser on plain http must not be marked Secure or it keeps nothing.
+// Setting Secure on a cookie received over plain HTTP would prevent the browser from
+// keeping it.
 func TestBrowserSecure(t *testing.T) {
 	w := generateTestWallet(t)
-	// The base URL says https even for the browser reaching localhost over
-	// plain http, which is the documented reverse-proxy shape.
+	// The public URL can use HTTPS while a local browser connects over HTTP.
 	w.BaseURL = "https://eudi-test.dev"
 	srv := NewServer(w, 0, nil)
 
@@ -228,9 +210,8 @@ func TestBrowserSecure(t *testing.T) {
 	}
 }
 
-// TestPageRequestMintsTheSession covers the middleware on the UI: a browser
-// that starts at the page rather than at a link needs a session by the time it
-// submits a URI of its own, and the files the page pulls in need none.
+// The main page needs a session before it submits a request. Asset requests do not
+// need to create sessions.
 func TestPageRequestMintsTheSession(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)
@@ -255,7 +236,6 @@ func TestPageRequestMintsTheSession(t *testing.T) {
 	}
 }
 
-// TestClientName covers the marker every client this project ships sends.
 func TestClientName(t *testing.T) {
 	for _, tc := range []struct {
 		header, name string
@@ -275,9 +255,8 @@ func TestClientName(t *testing.T) {
 	}
 }
 
-// TestNoteStaleClient covers what a client too old to name itself is told. Its
-// own output cannot be changed any more, so the wallet says it in the activity
-// log, which the page that client opens is served fresh to read.
+// Older handlers have no warning UI. The activity log lets the current wallet page
+// display the upgrade notice.
 func TestNoteStaleClient(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)
@@ -298,7 +277,7 @@ func TestNoteStaleClient(t *testing.T) {
 		t.Errorf("severity = %q, want %q", entry.Severity, severityWarning)
 	}
 
-	// Once per server, so the flow the user is watching stays readable.
+	// Report once per server to avoid repeating the warning in every flow.
 	srv.noteStaleClient(httptest.NewRequest(http.MethodPost, "/api/presentations", nil))
 	var notices int
 	for _, e := range w.GetLog() {
@@ -310,7 +289,6 @@ func TestNoteStaleClient(t *testing.T) {
 		t.Errorf("%d notices, want one per server", notices)
 	}
 
-	// A second server reports for itself: one wallet's silence is not another's.
 	other := NewServer(w, 0, nil)
 	other.noteStaleClient(httptest.NewRequest(http.MethodPost, "/api/presentations", nil))
 	notices = 0
@@ -324,10 +302,8 @@ func TestNoteStaleClient(t *testing.T) {
 	}
 }
 
-// TestApprovingOwner covers a presentation the issuer asks for mid-issuance.
-// It belongs to the browser the offer belonged to, and an offer submitted by a
-// client that named none takes the browser that approved it, so the issuer's
-// question reaches whoever answered the offer.
+// A presentation requested during issuance belongs to the offer's owner, or to the
+// browser that approved an unowned offer.
 func TestApprovingOwner(t *testing.T) {
 	if got := approvingOwner("browser-a", "browser-b"); got != "browser-a" {
 		t.Errorf("owner = %q, want the browser the offer belonged to", got)
@@ -340,11 +316,8 @@ func TestApprovingOwner(t *testing.T) {
 	}
 }
 
-// TestBackwardsCompatibility_ClientsThatNameNoBrowser pins what a wallet owes
-// clients written before it asked to be told which browser a flow is for: an
-// installed URL handler script, a CLI from an older release, and anything
-// driving the HTTP API directly. They submit over the API and name nothing, so
-// what they create is unowned, and unowned stays reachable from every caller.
+// Older URL handlers and CLI clients omit the browser ID. Their requests must remain
+// accessible to all callers.
 func TestBackwardsCompatibility_ClientsThatNameNoBrowser(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)
@@ -381,10 +354,7 @@ func TestBackwardsCompatibility_ClientsThatNameNoBrowser(t *testing.T) {
 	}
 }
 
-// TestBackwardsCompatibility_OlderClientIsToldToUpgrade pins the one channel
-// left for a client whose own output cannot be changed any more. The wallet
-// says it in the activity log, which the page that client opens is served
-// fresh to read, and the flow itself is untouched.
+// An upgrade warning must not prevent an older client from completing its flow.
 func TestBackwardsCompatibility_OlderClientIsToldToUpgrade(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)
@@ -404,9 +374,6 @@ func TestBackwardsCompatibility_OlderClientIsToldToUpgrade(t *testing.T) {
 	}
 }
 
-// TestBackwardsCompatibility_CurrentClientNamesThePageItOpened pins the other
-// side: a client shipped with this wallet names the page on both acts, so what
-// it submits reaches that page and no other.
 func TestBackwardsCompatibility_CurrentClientNamesThePageItOpened(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)
@@ -432,10 +399,8 @@ func TestBackwardsCompatibility_CurrentClientNamesThePageItOpened(t *testing.T) 
 	}
 }
 
-// TestProtocolURLCannotNameTheBrowser covers /authorize and /credential-offer.
-// Their full URL is written by the verifier or the issuer, so a query
-// parameter on them is a counterparty's word about whose browser this is. Only
-// a header names a browser, and a navigation cannot set one.
+// Issuers and verifiers construct protocol URLs. Query parameters on these URLs must
+// not select the browser that owns a consent request.
 func TestProtocolURLCannotNameTheBrowser(t *testing.T) {
 	navigation := httptest.NewRequest(http.MethodGet, "/authorize?client_id=x&owner=elsewhere", nil)
 	navigation.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "browser-a"})
@@ -448,17 +413,14 @@ func TestProtocolURLCannotNameTheBrowser(t *testing.T) {
 		t.Errorf("owner = %q, want none: the link says nothing about whose browser this is", got)
 	}
 
-	// The event stream is the one place the query carries it, because
-	// EventSource sets no headers, and it only says what the caller may see.
+	// EventSource needs the query parameter because it cannot set custom headers.
 	stream := httptest.NewRequest(http.MethodGet, "/api/requests/stream?owner=dispatch-nonce", nil)
 	if got := callerOwners(stream); len(got) != 1 || got[0] != "dispatch-nonce" {
 		t.Errorf("stream owners = %v, want the name the page holds", got)
 	}
 }
 
-// TestAnswerBelongsToTheBrowserThatWasAsked covers approve and deny. The id
-// travels in an address bar, so knowing one is not the same as being the
-// browser the question was put to.
+// Knowing an ID from an address bar does not establish ownership.
 func TestAnswerBelongsToTheBrowserThatWasAsked(t *testing.T) {
 	for _, action := range []string{"approve", "deny"} {
 		w := generateTestWallet(t)
@@ -482,9 +444,6 @@ func TestAnswerBelongsToTheBrowserThatWasAsked(t *testing.T) {
 	}
 }
 
-// TestUnownedRequestStaysAnswerable is the other half: a request no client
-// named a browser for is every client written before this, and any caller may
-// still answer it.
 func TestUnownedRequestStaysAnswerable(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)
@@ -504,10 +463,8 @@ func TestUnownedRequestStaysAnswerable(t *testing.T) {
 	}
 }
 
-// TestRedirectedBrowserReachesItsRequest covers a browser that keeps no
-// session: an iframe where a Lax cookie is not sent, or one with cookies off.
-// The wallet handed it the request id in the redirect, so naming that id is
-// enough to reach the request it was redirected for.
+// A redirected browser may not send cookies, for example inside an iframe. The request
+// ID in its redirect URL must still let it access that request.
 func TestRedirectedBrowserReachesItsRequest(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)
@@ -529,7 +486,6 @@ func TestRedirectedBrowserReachesItsRequest(t *testing.T) {
 		t.Fatalf("naming the redirected id sees %v, want that request", docs)
 	}
 
-	// Naming an id nobody was handed reaches nothing.
 	other := pendingPresentation("another-browser")
 	w.CreateConsentRequest(other)
 	guess := httptest.NewRequest(http.MethodGet, "/api/requests?request=not-an-id", nil)
@@ -544,10 +500,8 @@ func TestRedirectedBrowserReachesItsRequest(t *testing.T) {
 	}
 }
 
-// TestUIRequestNamesTheRequestItIsFor covers what the wallet hands whoever
-// runs it: the id of the request waiting, so the page it leads to answers that
-// one. Whether that means opening a window is the command's call, which is
-// what lets a run that opens nothing still say where the request is.
+// The callback receives the request ID so the command can open or print the URL for
+// that consent request.
 func TestUIRequestNamesTheRequestItIsFor(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)
@@ -567,9 +521,7 @@ func TestUIRequestNamesTheRequestItIsFor(t *testing.T) {
 	}
 }
 
-// TestOwnerNeverLeavesTheServer pins that the value naming a browser stays
-// here. ConsentRequest is marshalled field by field, so a field added there
-// could echo it and let any caller claim the request.
+// Serializing the owner would let callers claim another browser's request.
 func TestOwnerNeverLeavesTheServer(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)
@@ -588,9 +540,6 @@ func TestOwnerNeverLeavesTheServer(t *testing.T) {
 	}
 }
 
-// TestLastErrorReachesTheFlowItBelongsTo covers the report a failure raises.
-// It goes to the browser whose flow raised it, and one raised by a client that
-// named no browser stays readable by every caller.
 func TestLastErrorReachesTheFlowItBelongsTo(t *testing.T) {
 	w := generateTestWallet(t)
 	w.NotifyError(WalletError{Message: "A's flow", Owner: "browser-a"})
@@ -609,8 +558,8 @@ func TestLastErrorReachesTheFlowItBelongsTo(t *testing.T) {
 		}
 	}
 
-	// A caller clears every slot it reads, so an error it was shown is one it
-	// can dismiss. Otherwise the unowned one would come back on every reload.
+	// Clear every error the caller can read, including unowned errors. Otherwise
+	// dismissed errors would return after reloading.
 	w.ClearLastError([]string{"browser-b"})
 	for _, owners := range [][]string{nil, {"browser-b"}} {
 		if got := w.PeekLastError(owners); got != nil {
@@ -622,11 +571,10 @@ func TestLastErrorReachesTheFlowItBelongsTo(t *testing.T) {
 	}
 }
 
-// TestStoredErrorsStayBounded covers a map keyed by a value callers choose.
+// Caller-selected keys must not allow the error map to grow without limit.
 func TestStoredErrorsStayBounded(t *testing.T) {
 	w := generateTestWallet(t)
-	// The unowned slot is a key like the rest, so it is in the map while the
-	// rest arrive: it must not stop eviction or be evicted out of turn.
+	// Include the unowned slot when testing eviction.
 	w.NotifyError(WalletError{Message: "a client with no browser"})
 	for i := 0; i < maxStoredErrors*3; i++ {
 		w.NotifyError(WalletError{Message: "failed", Owner: fmt.Sprintf("browser-%d", i)})
@@ -640,8 +588,6 @@ func TestStoredErrorsStayBounded(t *testing.T) {
 	}
 }
 
-// TestOwnerNameIsBounded covers the same for the name itself, which arrives in
-// a header and ends up as a key.
 func TestOwnerNameIsBounded(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/presentations", nil)
 	req.Header.Set(OwnerHeader, strings.Repeat("x", maxOwnerLength+1))
@@ -654,10 +600,8 @@ func TestOwnerNameIsBounded(t *testing.T) {
 	}
 }
 
-// TestALateAnswerIsToldWhichHappened covers the sentence a user gets when the
-// dialog they left open is no longer answerable. A request that ran out of
-// time was answered by nobody, and saying otherwise sends them looking for the
-// tab that did it.
+// Distinguish timed out requests from requests answered in another tab. The message
+// determines what the user should check.
 func TestALateAnswerIsToldWhichHappened(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, nil)

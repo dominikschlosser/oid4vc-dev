@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
-"""Demo UI for URI-based issuance and verification.
+"""Demo UI for issuance and verification through wallet web URLs.
 
-A plain web app: issuance renders a credential-offer link that targets the
-wallet's /credential-offer URL, and verification is an ordinary OIDC login
-against Keycloak — whose login page links straight to the wallet's /authorize
-URL (the identity provider's walletScheme is configured with the wallet URL).
-Everything runs on localhost: all services share one network namespace, so
-the browser and the containers see the same URLs.
-"""
+Issuance links to /credential-offer. Keycloak login links to /authorize through its walletScheme setting. All local services share a network namespace so containers and the browser use the same localhost URLs."""
 import http.cookies
 import json
 import os
@@ -237,9 +231,8 @@ class Handler(BaseHTTPRequestHandler):
             if not session:
                 self.redirect("/", set_cookie=expired_cookie)
                 return
-            # OIDC RP-initiated logout: end the Keycloak session, then land
-            # back on this page. post.logout.redirect.uris is configured on
-            # the wallet-mock client in the realm import.
+                        # End the Keycloak session before returning here. The realm import configures
+            # post.logout.redirect.uris for this client.
             logout_url = (
                 f"{demo.KEYCLOAK_BASE_URL}/realms/{demo.VERIFIER_REALM}/protocol/openid-connect/logout?"
                 + urllib.parse.urlencode(

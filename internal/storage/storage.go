@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package storage is the persistence layer. Everything the tool keeps between
-// runs (the wallet document, keys, certificates, display assets, user
-// templates) is a blob under a slash-separated key, and every backend stores
-// the same keys. The file backend lays them out as the directory tree under
-// the state directory, so an existing wallet directory is a file store.
+// Package storage stores wallet state, keys, certificates, assets and templates as
+// blobs under slash-separated keys. File storage preserves the existing directory
+// layout.
 package storage
 
 import (
@@ -29,11 +27,8 @@ import (
 	"sync"
 )
 
-// EnvVar is the environment variable that selects the backend when no flag
-// does.
 const EnvVar = "EUDI_DEV_STORAGE"
 
-// Backend names.
 const (
 	KindFile     = "file"
 	KindMemory   = "memory"
@@ -68,14 +63,12 @@ type Store interface {
 	// Locate returns a readable location of key for messages (the file path
 	// on the file backend). The root when key is "".
 	Locate(key string) string
-	// Kind is the backend name.
 	Kind() string
 }
 
 // ErrConflict reports that a WriteIf found the blob changed by someone else.
 var ErrConflict = errors.New("storage: blob changed concurrently")
 
-// Blob is a stored blob with its stamp.
 type Blob struct {
 	Data  []byte
 	Stamp Stamp
@@ -89,7 +82,6 @@ type Stamp struct {
 	Size    int64
 }
 
-// Options describe the state directory to Open.
 type Options struct {
 	// Root is the directory of the file backend, and what "auto" inspects.
 	Root string
@@ -103,11 +95,8 @@ var (
 	autoKind string
 )
 
-// Open returns the store for a spec. A spec is "file" (or empty), "memory",
-// "auto", or a postgres:// connection URL. "auto" picks files when a state
-// directory was named or holds state (a mounted volume, empty or not) and
-// memory otherwise. It is decided once per process, so every opener lands on
-// the same store.
+// Open resolves auto once per process so all callers use the same backend. A named or
+// existing state directory selects files. Otherwise use memory.
 func Open(spec string, opts Options) (Store, error) {
 	spec = strings.TrimSpace(spec)
 	switch {
@@ -130,10 +119,9 @@ func Open(spec string, opts Options) (Store, error) {
 	}
 }
 
-// rootHoldsState reports whether the state directory exists and holds more
-// than the process bookkeeping a memory-backed server writes there (the
-// instance registry and the remote target). Without that exception a
-// memory-backed container would switch to files on its next start.
+// Ignore the instance registry and remote target when detecting wallet state. Those
+// local files also exist for memory storage and must not change the next backend
+// selection.
 func rootHoldsState(root string) bool {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -150,9 +138,7 @@ func rootHoldsState(root string) bool {
 	return false
 }
 
-// FromEnv opens the store set in EUDI_DEV_STORAGE, files when it is unset.
-// A value Open refuses yields a store whose every operation returns that
-// error, so the mistake surfaces on first use.
+// FromEnv returns a store that reports invalid backend configuration on first use.
 func FromEnv(opts Options) Store {
 	store, err := Open(os.Getenv(EnvVar), opts)
 	if err != nil {
@@ -161,7 +147,6 @@ func FromEnv(opts Options) Store {
 	return store
 }
 
-// failingStore stands in for a store that could not be opened.
 type failingStore struct {
 	err error
 }
@@ -185,7 +170,6 @@ func isPostgresSpec(spec string) bool {
 	return strings.HasPrefix(spec, "postgres://") || strings.HasPrefix(spec, "postgresql://")
 }
 
-// cleanKey validates a key: relative, slash-separated, no dot segments.
 func cleanKey(key string) (string, error) {
 	if key == "" {
 		return "", errors.New("storage: empty key")
@@ -196,7 +180,6 @@ func cleanKey(key string) (string, error) {
 	return key, nil
 }
 
-// cleanPrefix validates a List prefix: a key, or "" for the root.
 func cleanPrefix(prefix string) (string, error) {
 	if prefix == "" {
 		return "", nil
@@ -204,8 +187,7 @@ func cleanPrefix(prefix string) (string, error) {
 	return cleanKey(prefix)
 }
 
-// notExist builds the error every backend returns for a missing key, so
-// callers can test it with errors.Is(err, fs.ErrNotExist).
+// Use errors.Is(err, fs.ErrNotExist) consistently across backends.
 func notExist(op, key string) error {
 	return &fs.PathError{Op: op, Path: key, Err: fs.ErrNotExist}
 }

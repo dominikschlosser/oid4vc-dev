@@ -22,7 +22,6 @@ import (
 	"sync"
 )
 
-// memoryStore keeps every key in a map. State lives as long as the process.
 type memoryStore struct {
 	mu    sync.RWMutex
 	blobs map[string]memoryBlob

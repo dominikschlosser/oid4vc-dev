@@ -515,7 +515,6 @@ func TestParseVPJWTPayloadMerge(t *testing.T) {
 	}
 }
 
-// makeTestJWT creates a test JWT string (unsigned) from header and payload maps.
 func makeTestJWT(header, payload map[string]any) string {
 	h, _ := json.Marshal(header)
 	p, _ := json.Marshal(payload)

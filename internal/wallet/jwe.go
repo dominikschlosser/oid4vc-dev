@@ -22,7 +22,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha1" //nolint:gosec // RSA-OAEP (JWA "RSA-OAEP", RFC 7518 §4.2) uses SHA-1 by definition; not a signature hash
+	"crypto/sha1" //nolint:gosec // RSA-OAEP (JWA "RSA-OAEP", RFC 7518 §4.2) requires SHA-1 for encryption padding. This is not a signature hash
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
@@ -182,8 +182,6 @@ func EncryptJWERSA(payload []byte, recipientKey *rsa.PublicKey, kid, alg, enc st
 	return jweStr, cek, nil
 }
 
-// rsaPublicKeyFromJWK reads a verifier's RSA encryption key from a JWK (its
-// base64url modulus n and exponent e).
 func rsaPublicKeyFromJWK(jwk map[string]any) (*rsa.PublicKey, error) {
 	nB64, _ := jwk["n"].(string)
 	eB64, _ := jwk["e"].(string)
@@ -208,7 +206,6 @@ func rsaPublicKeyFromJWK(jwk map[string]any) (*rsa.PublicKey, error) {
 	return &rsa.PublicKey{N: new(big.Int).SetBytes(nBytes), E: e}, nil
 }
 
-// encryptAESGCM encrypts with AES-GCM (for A128GCM / A256GCM).
 func encryptAESGCM(key, plaintext, aad []byte) (iv, ciphertext, tag []byte, err error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -240,7 +237,7 @@ func encryptAESCBCHS256(derivedKey, plaintext, aad []byte) (iv, ciphertext, tag 
 	macKey := derivedKey[:16]
 	encKey := derivedKey[16:]
 
-	iv = make([]byte, aes.BlockSize) // 16 bytes
+	iv = make([]byte, aes.BlockSize)
 	if _, err := rand.Read(iv); err != nil {
 		return nil, nil, nil, fmt.Errorf("generating IV: %w", err)
 	}
@@ -272,7 +269,6 @@ func encryptAESCBCHS256(derivedKey, plaintext, aad []byte) (iv, ciphertext, tag 
 	return iv, ciphertext, tag, nil
 }
 
-// pkcs7Pad adds PKCS#7 padding to plaintext.
 func pkcs7Pad(data []byte, blockSize int) []byte {
 	padding := blockSize - (len(data) % blockSize)
 	padded := make([]byte, len(data)+padding)
@@ -283,7 +279,6 @@ func pkcs7Pad(data []byte, blockSize int) []byte {
 	return padded
 }
 
-// unmarshalECDHPublicKey extracts the raw x, y coordinates from an ECDH public key.
 func unmarshalECDHPublicKey(pub *ecdh.PublicKey) (x, y []byte) {
 	raw := pub.Bytes() // uncompressed point: 0x04 || x || y
 	coordLen := (len(raw) - 1) / 2

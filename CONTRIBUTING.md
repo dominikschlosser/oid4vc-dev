@@ -31,7 +31,7 @@ go test ./internal/sdjwt/...
 go test -v -count=1 ./internal/wallet/...
 ```
 
-Every store the tests open follows `EUDI_DEV_STORAGE`, so the same suite runs on each storage backend. CI runs it on all three. Locally:
+Tests use `EUDI_DEV_STORAGE` to select a storage backend. CI runs them on files, memory and Postgres. To test the other backends locally:
 
 ```bash
 EUDI_DEV_STORAGE=memory go test ./...
@@ -39,7 +39,7 @@ docker run -d --name eudi-pg -e POSTGRES_PASSWORD=pg -e POSTGRES_DB=eudi -p 5432
 EUDI_DEV_STORAGE='postgres://postgres:pg@localhost:5432/eudi?sslmode=disable' go test ./...
 ```
 
-A database keeps the rows of earlier runs. Tests use wallet directories of their own, so the rows do not collide, but a fresh database is the clean baseline.
+Tests use separate wallet directories to avoid collisions. Rows from earlier runs remain in the database. Start with a fresh database when those rows could affect a measurement.
 
 ### E2E Tests
 

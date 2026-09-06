@@ -46,12 +46,9 @@ func activeRemoteURL() (string, error) {
 	return remote.Active(), nil
 }
 
-// remoteClientIfConfigured returns a client for the wallet the CLI should
-// manage over HTTP, or nil when it manages the local store directly. The
-// target is resolved in order: --remote, the target persisted by `wallet
-// use`, then a running instance serving the same wallet directory.
-// The last rule keeps one writer per directory, since a running server holds
-// its state in memory. `--remote local` or --templates-dir forces local access.
+// Route through a running server to keep one writer per wallet directory. Selection
+// order is --remote, the saved remote target, then a server for the same directory.
+// --remote local and --templates-dir force direct storage access.
 func remoteClientIfConfigured() (*remote.Client, error) {
 	url, err := activeRemoteURL()
 	if err != nil {
@@ -154,7 +151,6 @@ func walletUseCmd() *cobra.Command {
 	return cmd
 }
 
-// instanceIdentity is what an instance reports about itself on /api/version.
 type instanceIdentity struct {
 	Version string
 	PID     int
@@ -177,8 +173,6 @@ func (i instanceIdentity) String() string {
 	return strings.Join(parts, " ")
 }
 
-// instanceIdentityOf probes a wallet URL and reports what it says about
-// itself, or false when nothing answers there.
 func instanceIdentityOf(url string) (instanceIdentity, bool) {
 	client := remote.NewClient(url)
 	doc, err := client.Version()
@@ -195,11 +189,8 @@ func instanceIdentityOf(url string) (instanceIdentity, bool) {
 	return identity, true
 }
 
-// incompatibilityNotice compares an instance's release with this CLI's and
-// returns the message a user needs to see, or "" when the two can work
-// together. Semantic versioning puts breaking changes in the major release,
-// so only that difference is a problem. A development build on either side
-// reports nothing comparable and is left alone.
+// Only a major version difference indicates an incompatible API. Development builds
+// have no comparable release version.
 func incompatibilityNotice(url, instanceVersion string) string {
 	if remote.CheckCompatibility(Version, instanceVersion) != remote.Incompatible {
 		return ""
@@ -208,8 +199,6 @@ func incompatibilityNotice(url, instanceVersion string) string {
 		url, instanceVersion, Version)
 }
 
-// walletInstancesCmd is the deprecated, hidden spelling of `wallet ps`,
-// `wallet use`, and `wallet kill`.
 func walletInstancesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "instances",
@@ -319,8 +308,7 @@ func runInstancesList() error {
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	// A major release apart is where the management API may break, so the
-	// marked rows deserve the reason rather than a bare "(!)".
+	// Explain the version warning so users know why the CLI may be incompatible.
 	for _, inst := range skewed {
 		fmt.Fprintf(os.Stderr, "(!) %s runs %s, incompatible with this CLI (%s)\n", inst.URL, inst.Version, Version)
 	}
@@ -411,14 +399,10 @@ func walletKillCmd() *cobra.Command {
 	return cmd
 }
 
-// matchInstance resolves a kill target (pid, port, or URL) against the
-// discovered instances.
 func matchInstance(instances []remote.DiscoveredInstance, target string) (remote.DiscoveredInstance, error) {
 	target = strings.TrimSpace(target)
 	noMatch := fmt.Errorf("no running wallet instance matches %q (run `wallet ps`)", target)
 
-	// A bare integer is a pid or a port. Anything else is a URL or
-	// host[:port].
 	if number, err := strconv.Atoi(target); err == nil {
 		// A port match wins: a port is what a user reads off a URL or
 		// `wallet ps`, so `kill 8085` stops the server on port 8085 rather
@@ -457,8 +441,6 @@ func matchInstance(instances []remote.DiscoveredInstance, target string) (remote
 	return remote.DiscoveredInstance{}, noMatch
 }
 
-// stopInstance asks the instance to shut down via its API and falls back to
-// SIGTERM for local processes.
 func stopInstance(inst remote.DiscoveredInstance) error {
 	client := remote.NewClient(inst.URL)
 	if err := client.Shutdown(); err == nil {

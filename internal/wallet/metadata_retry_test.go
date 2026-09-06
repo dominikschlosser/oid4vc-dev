@@ -22,10 +22,7 @@ import (
 	"time"
 )
 
-// Issuer metadata is read from somebody else's server at the start of every
-// flow. One slow or failed answer is not evidence that the issuer cannot be
-// talked to, and giving up on it ends the flow reporting what the metadata did
-// not contain rather than that it was never read.
+// Retry transient metadata failures before reporting unavailable metadata.
 func TestMetadataFetchRetriesATransientFailure(t *testing.T) {
 	previous := metadataRetryDelay
 	metadataRetryDelay = time.Millisecond
@@ -34,7 +31,6 @@ func TestMetadataFetchRetriesATransientFailure(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if calls.Add(1) == 1 {
-			// The shape of a server that is briefly unable to answer.
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
@@ -59,9 +55,7 @@ func TestMetadataFetchRetriesATransientFailure(t *testing.T) {
 	}
 }
 
-// A 404 is the server saying it publishes nothing at that location, which is
-// an answer rather than a moment to wait out. Retrying it would multiply every
-// well-known probe that is expected to miss.
+// Do not retry 404 responses because well-known endpoint probes can legitimately miss.
 func TestMetadataFetchDoesNotRetryANotFound(t *testing.T) {
 	previous := metadataRetryDelay
 	metadataRetryDelay = time.Millisecond
@@ -90,8 +84,8 @@ func TestMetadataFetchDoesNotRetryANotFound(t *testing.T) {
 	}
 }
 
-// A server that never answers is reported once the attempts are used up,
-// naming the read rather than what the document did not contain.
+// After retry exhaustion, report the failed metadata fetch instead of missing document
+// fields.
 func TestMetadataFetchGivesUpAfterTheAttempts(t *testing.T) {
 	previous := metadataRetryDelay
 	metadataRetryDelay = time.Millisecond

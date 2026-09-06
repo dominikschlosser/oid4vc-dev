@@ -121,10 +121,8 @@ func TestFetchURLSizeCap(t *testing.T) {
 	}
 }
 
-// The wallet has to be able to reach its own demo issuer and verifier: their
-// request_uri and response_uri sit on its own origin, which on a local demo
-// instance resolves to loopback and would otherwise be refused. Everything
-// else internal stays blocked.
+// The demo must reach its own issuer and verifier on loopback. Other private addresses
+// must stay blocked.
 func TestAllowOwnOrigins(t *testing.T) {
 	policy := AllowOwnOrigins(BlockPrivateAddresses, "http://localhost:18951", "https://localhost:18952")
 

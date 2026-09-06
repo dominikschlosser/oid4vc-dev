@@ -1,6 +1,6 @@
 # Load test target: two wallet servers, one database, one ingress
 
-Two `eudi-dev` wallet servers share one Postgres database and sit behind an nginx ingress. Every request through the ingress lands on either server, and both serve the same wallet (the same keys, CA, credentials and activity log). This is the target for load and performance tests of verifiers, issuers and the wallet itself.
+Two wallet servers share Postgres behind nginx. Both use the same keys, CA, credentials and activity log. Use this setup to test the wallet under load or as a test wallet for issuers and verifiers.
 
 ## Layout
 
@@ -25,7 +25,7 @@ The ingress log shows `upstream=` alternating between the two server addresses. 
 
 ## Drive it
 
-The [wallet HTTP API](../../docs/wallet/http-api.md) is the load surface. A presentation, an import and an issuance are each one request:
+Send load to the [wallet HTTP API](../../docs/wallet/http-api.md). A presentation, an import and an issuance are each one request:
 
 ```bash
 # Present: your verifier sends an OID4VP authorization request, the wallet answers it
@@ -50,7 +50,9 @@ A browser session stays on one server (the ingress hashes the `eudi_session` coo
 
 ## Check correctness under load
 
-`loadtest` drives the target with concurrent issuances, presentations and listings, then checks that nothing was lost: every issued credential is listed once, no two credentials share a status list index, every presentation reached the verifier callback, and every server reports the same credential count. It runs a verifier callback on this machine, which the containers reach as `host.docker.internal`.
+The Go load generator runs issuance, presentation and listing concurrently. It checks that every issued credential appears once, status indices are unique, presentation callbacks arrive and both servers report the same count.
+
+Its verifier callback runs on the host. Containers reach it through `host.docker.internal`.
 
 ```bash
 go run ./examples/load-test/loadtest -url http://localhost:8080
@@ -60,7 +62,7 @@ go run ./examples/load-test/loadtest -url http://localhost:8080
 
 ## Scale
 
-Add a `wallet-3` service to the compose file with the same anchor and add it to both upstreams in `nginx.conf`. Each server re-reads the shared state at the request boundary and writes only the rows it changed, so servers issuing and presenting at the same time keep each other's changes.
+Add a `wallet-3` service using the existing compose anchor and include it in both nginx upstreams. Servers reload changed sections and save changed rows. Updates to different entities are preserved. Updates to the same entity can overwrite each other. Browser flows must keep reaching the same server. See [the storage design](../../docs/adr/0018-postgres-stores-wallet-entities-as-keyed-blobs.md).
 
 ## Clean up
 

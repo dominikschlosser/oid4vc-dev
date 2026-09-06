@@ -20,10 +20,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
-// draft-ietf-oauth-sd-jwt-vc-19 §2.2.1: "The Issuer MUST include the typ
-// header parameter in the SD-JWT. The typ value MUST use dc+sd-jwt". The
-// earlier vc+sd-jwt still decodes but deviates from that MUST, so the
-// decoder flags it.
+// draft-ietf-oauth-sd-jwt-vc-19 §2.2.1 requires dc+sd-jwt. The earlier vc+sd-jwt value
+// decodes but fails validation.
 func TestCheckSDJWTType(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -48,10 +46,8 @@ func TestCheckSDJWTType(t *testing.T) {
 	}
 }
 
-// RFC 9901 §4.2.4.2: a digest placeholder is an object of the form
-// {"...": "<digest>"} and "There MUST NOT be any other keys in the object."
-// An object carrying a second key references no disclosure, so the disclosure
-// whose digest it names is unaccounted for.
+// RFC 9901 §4.2.4.2 permits only the ... key in a digest placeholder. Additional keys
+// invalidate the reference.
 func TestCheckSDJWTIntegrity_PlaceholderWithExtraKeyIsNoReference(t *testing.T) {
 	const digest = "X9yH0Ajrdm1Oij4tWso9UzzKJvPoDxwmuEcO3XAdRC0"
 
@@ -67,7 +63,6 @@ func TestCheckSDJWTIntegrity_PlaceholderWithExtraKeyIsNoReference(t *testing.T) 
 		t.Errorf("CheckSDJWTIntegrity().Status = %q (%s), want fail", got.Status, got.Detail)
 	}
 
-	// The same disclosure behind a well-formed placeholder is accounted for.
 	token.Payload["nationalities"] = []any{map[string]any{"...": digest}}
 	if got := CheckSDJWTIntegrity(token); got.Status != "pass" {
 		t.Errorf("CheckSDJWTIntegrity().Status = %q (%s), want pass", got.Status, got.Detail)

@@ -264,7 +264,6 @@ func init() {
 
 	templatesImportCmd.Flags().StringVar(&templateImportName, "name", "", "Save the imported template under this name")
 
-	// Shell completion for knowable values
 	_ = templatesSaveCmd.RegisterFlagCompletionFunc("from", completeTemplateNames)
 	_ = templatesSaveCmd.RegisterFlagCompletionFunc("format", staticCompletion("sdjwt", "jwt", "mdoc"))
 	_ = templatesCmd.RegisterFlagCompletionFunc("remote", completeRemoteFlag)
@@ -272,9 +271,7 @@ func init() {
 	_ = templatesCmd.MarkPersistentFlagDirname("templates-dir")
 }
 
-// printTemplateSaved reports a saved or imported template. The path is only
-// known for the local store. A remote instance keeps its file layout to
-// itself.
+// Remote wallets return no file path, so only local saves print one.
 func printTemplateSaved(verb, name, path string) {
 	if path != "" {
 		fmt.Fprintf(os.Stderr, "%s template %q to %s\n", verb, name, path)
@@ -283,9 +280,6 @@ func printTemplateSaved(verb, name, path string) {
 	fmt.Fprintf(os.Stderr, "%s template %q\n", verb, name)
 }
 
-// resolveTemplates returns where the credential templates live: the
-// --templates-dir flag when set, otherwise the wallet's templates/ in its
-// storage backend.
 func resolveTemplates() (credtemplate.Location, error) {
 	if templatesDir != "" {
 		return credtemplate.FileLocation(templatesDir), nil

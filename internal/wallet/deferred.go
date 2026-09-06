@@ -22,11 +22,8 @@ import (
 	"time"
 )
 
-// DeferredIssuance is a credential the issuer deferred, kept until the wallet
-// manages to collect it. The issuer's interval can be hours, too long to hold
-// the request that started the issuance, so the ticket is persisted and a
-// poller works through it. It carries everything the deferred request needs:
-// the flow that created it is gone by the time it runs.
+// DeferredIssuance persists independently because issuance may take hours. Store
+// everything the poller needs after the original flow ends.
 type DeferredIssuance struct {
 	ID               string `json:"id"`
 	TransactionID    string `json:"transaction_id"`
@@ -39,8 +36,8 @@ type DeferredIssuance struct {
 	// ids).
 	VCT     string `json:"vct,omitempty"`
 	DocType string `json:"doctype,omitempty"`
-	// Display travels with the record the way VCT does: the metadata that
-	// declared it is gone by the time the poller collects the credential.
+	// Keep display metadata until collection completes, after the original metadata
+	// fetch has ended.
 	Display     *CredentialDisplay `json:"display,omitempty"`
 	AccessToken string             `json:"access_token"`
 	AuthScheme  string             `json:"auth_scheme,omitempty"`
@@ -49,8 +46,7 @@ type DeferredIssuance struct {
 	// an issuer may ask the wallet back in an hour.
 	RefreshToken         string    `json:"refresh_token,omitempty"`
 	AccessTokenExpiresAt time.Time `json:"access_token_expires_at,omitempty"`
-	// TokenEndpoint and ClientID are what a refresh needs, and the flow that
-	// knew them is gone by the time the poller runs.
+	// Keep the token endpoint and client ID for later refresh requests.
 	TokenEndpoint string `json:"token_endpoint,omitempty"`
 	ClientID      string `json:"client_id,omitempty"`
 	// ClientAuth is how the issuance authenticated this client, when it had
@@ -77,16 +73,12 @@ func (p *DeferredIssuance) Interval() time.Duration {
 	return time.Duration(p.IntervalSeconds) * time.Second
 }
 
-// Expired reports whether a deferred issuance is past being worth keeping.
 func (p *DeferredIssuance) Expired(now time.Time) bool {
 	return p != nil && now.Sub(p.CreatedAt) > deferredIssuanceMaxAge
 }
 
-// deferredIssuanceMaxAge is how long a deferred issuance is carried before the
-// wallet gives up on it.
 const deferredIssuanceMaxAge = 24 * time.Hour
 
-// newDeferredIssuance builds a record from a deferred issuance in flight.
 func newDeferredIssuance(ctx deferredContext, transactionID string, interval time.Duration) (*DeferredIssuance, error) {
 	pems := make([]string, 0, len(ctx.proofKeys))
 	for _, key := range ctx.proofKeys {
@@ -130,7 +122,6 @@ func newDeferredIssuance(ctx deferredContext, transactionID string, interval tim
 	}, nil
 }
 
-// ProofKeys decodes the keys the credential request was bound to.
 func (p *DeferredIssuance) ProofKeys() ([]*ecdsa.PrivateKey, error) {
 	keys := make([]*ecdsa.PrivateKey, 0, len(p.ProofKeyPEMs))
 	for _, encoded := range p.ProofKeyPEMs {
@@ -159,7 +150,6 @@ func decodeECPrivateKeyPEM(encoded string) (*ecdsa.PrivateKey, error) {
 	return x509.ParseECPrivateKey(block.Bytes)
 }
 
-// AddDeferredIssuance records a deferred credential to collect later.
 func (w *Wallet) AddDeferredIssuance(pending *DeferredIssuance) {
 	if w == nil || pending == nil {
 		return
@@ -169,8 +159,6 @@ func (w *Wallet) AddDeferredIssuance(pending *DeferredIssuance) {
 	w.DeferredIssuances = append(w.DeferredIssuances, *pending)
 }
 
-// DeferredIssuanceList returns a copy of the deferred credentials waiting to be
-// collected.
 func (w *Wallet) DeferredIssuanceList() []DeferredIssuance {
 	if w == nil {
 		return nil
@@ -180,8 +168,6 @@ func (w *Wallet) DeferredIssuanceList() []DeferredIssuance {
 	return append([]DeferredIssuance(nil), w.DeferredIssuances...)
 }
 
-// RemoveDeferredIssuance drops a deferred credential by ID and reports whether
-// it was there.
 func (w *Wallet) RemoveDeferredIssuance(id string) bool {
 	if w == nil {
 		return false
@@ -197,7 +183,6 @@ func (w *Wallet) RemoveDeferredIssuance(id string) bool {
 	return false
 }
 
-// UpdateDeferredIssuance applies a change to one record by ID.
 func (w *Wallet) UpdateDeferredIssuance(id string, apply func(*DeferredIssuance)) {
 	if w == nil || apply == nil {
 		return
@@ -212,9 +197,8 @@ func (w *Wallet) UpdateDeferredIssuance(id string, apply func(*DeferredIssuance)
 	}
 }
 
-// recordDeferredIssuance stores a deferred credential and reports it as the
-// outcome. Nothing failed: the issuer took the request and named a time to
-// come back.
+// A deferred response is a successful handoff to background collection, not a failed
+// issuance.
 func (w *Wallet) recordDeferredIssuance(pending *DeferredIssuance) *IssuanceResult {
 	w.AddDeferredIssuance(pending)
 	w.addProtocolLog("issuance", "issuance_deferred",
@@ -233,9 +217,8 @@ func (w *Wallet) recordDeferredIssuance(pending *DeferredIssuance) *IssuanceResu
 	}
 }
 
-// credentialTypeForConfiguration reads the credential type an issuer declares
-// for one configuration id, so a deferred credential can be named the way a
-// delivered one is.
+// Use the credential type from metadata to label deferred records. Offers carry only
+// configuration IDs.
 func credentialTypeForConfiguration(metadata map[string]any, configID string) (vct, docType string) {
 	configs, ok := metadata["credential_configurations_supported"].(map[string]any)
 	if !ok {
@@ -250,9 +233,8 @@ func credentialTypeForConfiguration(metadata map[string]any, configID string) (v
 	return vct, docType
 }
 
-// AccessTokenExpired reports whether the stored access token is past use. A
-// small margin covers the round trip: a token expiring while the request is in
-// flight is refused just the same.
+// AccessTokenExpired includes a small margin so the token is unlikely to expire during
+// the request.
 func (p *DeferredIssuance) AccessTokenExpired(now time.Time) bool {
 	if p == nil || p.AccessTokenExpiresAt.IsZero() {
 		return false
@@ -260,14 +242,10 @@ func (p *DeferredIssuance) AccessTokenExpired(now time.Time) bool {
 	return now.Add(15 * time.Second).After(p.AccessTokenExpiresAt)
 }
 
-// CanRefresh reports whether the record carries what obtaining a new access
-// token needs.
 func (p *DeferredIssuance) CanRefresh() bool {
 	return p != nil && p.RefreshToken != "" && p.TokenEndpoint != ""
 }
 
-// DeferredIssuanceSummary is the document a caller reads a deferred credential
-// from, wherever it asked.
 func DeferredIssuanceSummary(p DeferredIssuance) map[string]any {
 	return map[string]any{
 		"id":                          p.ID,

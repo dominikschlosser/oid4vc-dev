@@ -257,7 +257,6 @@ func headerValue(h map[any]any, label int64) (any, bool) {
 	return nil, false
 }
 
-// cwtClaim looks up an integer-keyed CWT claim.
 func cwtClaim(claims map[any]any, key int64) any {
 	v, _ := headerValue(claims, key)
 	return v
@@ -306,8 +305,7 @@ func GenerateStatusListCWT(bitstring []byte, signingKey *ecdsa.PrivateKey, cfg S
 	msg.Headers.Protected[int64(coseHeaderType)] = MediaTypeCWT
 	msg.Payload = payload
 
-	// The trust anchor must not travel in x5chain: a relying party has it out
-	// of band, and a chain that carries its own root proves nothing.
+	// Omit the root because relying parties obtain their trust anchors separately.
 	if chain := mock.WithoutSelfSignedTrustAnchor(cfg.CertChain); len(chain) > 0 {
 		if len(chain) == 1 {
 			msg.Headers.Unprotected[int64(coseHeaderX5Chain)] = chain[0].Raw

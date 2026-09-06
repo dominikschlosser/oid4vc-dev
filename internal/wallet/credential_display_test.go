@@ -32,14 +32,11 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// tinyPNG is a 1x1 transparent PNG, small enough to embed and valid enough
-// for a content-type check.
 var tinyPNG, _ = base64.StdEncoding.DecodeString(
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
 
-// cardArtPNG builds an opaque image the shape of real card art: smooth color
-// bands with a light dither, which PNG stores far over the cache cap while a
-// card-size JPEG comes out small.
+// Generate a PNG larger than the cache limit that shrinks to a small JPEG. This
+// exercises image resizing.
 func cardArtPNG(t *testing.T) []byte {
 	t.Helper()
 	const width, height = 1700, 1080
@@ -67,10 +64,8 @@ func cardArtPNG(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
-// pixelBombPNG builds an all-white image whose dimensions exceed the pixel
-// cap while its bytes stay well within the download cap, the shape of a
-// decompression bomb: cheap to serve, ruinous to decode. The dimension guard
-// rejects it on its declared size before the pixels are ever allocated.
+// Use a small compressed file with dimensions over the pixel limit. Reject it before
+// allocating the decoded image.
 func pixelBombPNG(t *testing.T) []byte {
 	t.Helper()
 	side := 8192 // 67 megapixels, past the 32-megapixel cap
@@ -88,9 +83,6 @@ func pixelBombPNG(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
-// displayIssuer serves an issuer whose test-config carries the given
-// credential_metadata display array (§12.2.4), plus image endpoints the
-// display entries can point at.
 func displayIssuer(t *testing.T, w *Wallet, display []map[string]any) (*httptest.Server, string) {
 	t.Helper()
 
@@ -182,8 +174,6 @@ func displayIssuer(t *testing.T, w *Wallet, display []map[string]any) (*httptest
 	return srv, "openid-credential-offer://?credential_offer=" + url.QueryEscape(string(offerJSON))
 }
 
-// issueWithDisplay runs the offer and returns the credential as the store
-// keeps it, which is where the display lands.
 func issueWithDisplay(t *testing.T, w *Wallet, display []map[string]any) *StoredCredential {
 	t.Helper()
 	srv, offerURI := displayIssuer(t, w, display)
@@ -206,10 +196,8 @@ func issueWithDisplay(t *testing.T, w *Wallet, display []map[string]any) *Stored
 	return nil
 }
 
-// TestProcessCredentialOffer_CredentialDisplay covers the §12.2.4 display
-// properties of the offered configuration: the wallet persists them with the
-// credential and caches the referenced images, so the card can carry the
-// issuer's appearance without asking the issuer again.
+// Persist OpenID4VCI §12.2.4 display metadata and cache images so cards render without
+// fetching from the issuer again.
 func TestProcessCredentialOffer_CredentialDisplay(t *testing.T) {
 	t.Run("name, colors and images are stored with the credential", func(t *testing.T) {
 		w := generateTestWallet(t)
@@ -393,8 +381,7 @@ func TestProcessCredentialOffer_CredentialDisplay(t *testing.T) {
 			"text_color":       "#777777",
 		}})
 
-		// The pair is kept and the warning is logged: the card face paints the
-		// declared colors, so a low-contrast pair renders as declared.
+		// Keep the declared colors and log the contrast warning.
 		d := imported.Display
 		if d == nil || d.BackgroundColor != "#888888" || d.TextColor != "#777777" {
 			t.Fatalf("expected the pair to be kept, got %+v", d)
@@ -458,13 +445,8 @@ func TestProcessCredentialOffer_CredentialDisplay(t *testing.T) {
 	})
 }
 
-// TestGenerateDefaultCredentials_Display gives the wallet's own generated
-// PID credentials the eudi-dev appearance, so the demo baseline looks like an
-// issuer-styled credential.
 func TestGenerateDefaultCredentials_Display(t *testing.T) {
 	w := generateTestWallet(t)
-	// Both baseline PID types, so the German one can be told from the
-	// country-independent one.
 	for _, vct := range []string{mock.DefaultPIDVCT, mock.GermanPIDVCT} {
 		if err := w.GenerateDefaultCredentials(nil, vct); err != nil {
 			t.Fatalf("GenerateDefaultCredentials(%s): %v", vct, err)
@@ -487,8 +469,6 @@ func TestGenerateDefaultCredentials_Display(t *testing.T) {
 		}
 	}
 
-	// The German PID is told apart from the country-independent one: its own
-	// name and a background image the country-independent PID does not carry.
 	var german, independent *StoredCredential
 	for i := range creds {
 		switch creds[i].VCT {
@@ -512,15 +492,12 @@ func TestGenerateDefaultCredentials_Display(t *testing.T) {
 	}
 }
 
-// TestCacheDisplayImage_BlocksInternalAddress covers the shared-demo case: the
-// image URI comes from the offer's issuer metadata, which a visitor controls,
-// so a display fetch must be held to the same policy as every other issuance
-// fetch and refused when it names an internal address (ADR-0004).
+// Issuer metadata is untrusted. Apply the same private-address checks to display
+// images as other fetches (ADR-0004).
 func TestCacheDisplayImage_BlocksInternalAddress(t *testing.T) {
 	w := generateTestWallet(t)
 
-	// The real policed path runs only for the default client, so the test
-	// override is dropped for the duration.
+	// Use the default client to exercise its address policy.
 	oldClient := httpClient
 	httpClient = defaultHTTPClient
 	defer func() { httpClient = oldClient }()
@@ -640,7 +617,6 @@ func TestIssueUnboundCredentialHasNoHolderKey(t *testing.T) {
 		t.Fatalf("an unbound credential reads as %q, want no key binding", got)
 	}
 
-	// Bound is the default.
 	bound, err := w.IssueCredential(IssueOptions{
 		Format:        "sdjwt",
 		VCT:           "urn:example:bound",
@@ -735,7 +711,6 @@ func TestPresentUnboundSDJWTOmitsKeyBinding(t *testing.T) {
 		t.Fatalf("an unbound SD-JWT must present without a KB-JWT, got %q", token)
 	}
 
-	// A bound credential still carries one.
 	bound, err := w.IssueCredential(IssueOptions{
 		Format: "sdjwt", VCT: "urn:example:bound", StatusListURI: &noStatus,
 	})

@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// The stored credential collection: listing, importing, deleting, and
-// setting revocation status.
-
 package wallet
 
 import (
@@ -28,9 +25,8 @@ import (
 	"strings"
 )
 
-// resolveDisplayImage turns a stored display image value into bytes: an
-// "asset:" reference reads the file beside wallet.json, and an embedded data URI
-// (as an unsaved, freshly issued credential carries) is decoded in place.
+// An asset: reference loads an image from storage. Newly issued credentials can still
+// contain an embedded data URI.
 func (s *Server) resolveDisplayImage(uri string) (contentType string, data []byte, ok bool) {
 	if strings.HasPrefix(uri, "asset:") {
 		store := s.store.Load()
@@ -42,10 +38,8 @@ func (s *Server) resolveDisplayImage(uri string) (contentType string, data []byt
 	return dataURIImage(uri)
 }
 
-// handleCredentialDisplayImage serves a stored credential's display logo or
-// background image, referenced by the credential listing instead of inlined as
-// a data URI. The bytes are fixed for the credential, so the response is cached
-// hard (immutable) with a content ETag.
+// Images do not change for a stored credential. Cache them as immutable with a content
+// ETag.
 func (s *Server) handleCredentialDisplayImage(w http.ResponseWriter, r *http.Request) {
 	cred, ok := s.wallet.GetCredential(r.PathValue("id"))
 	if !ok || cred.Display == nil {
@@ -80,12 +74,9 @@ func (s *Server) handleCredentialDisplayImage(w http.ResponseWriter, r *http.Req
 	_, _ = w.Write(data)
 }
 
-// handleListCredentials serves the stored credentials, optionally windowed
-// with ?limit= and ?offset=. The response is a plain array. The full count
-// travels in X-Total-Count, which a paging UI needs to know how many pages
-// there are.
+// Returns an array. X-Total-Count gives the total before applying limit and offset.
 func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request) {
-	// A batch counts once, so paging matches what the window returns.
+	// Count each batch once to match the paginated result.
 	total := len(s.wallet.ListedCredentials())
 	limit, err := intParam(r, "limit", 0)
 	if err != nil {
@@ -108,7 +99,6 @@ func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-// intParam reads a non-negative integer query parameter.
 func intParam(r *http.Request, name string, fallback int) (int, error) {
 	raw := strings.TrimSpace(r.URL.Query().Get(name))
 	if raw == "" {
@@ -124,7 +114,6 @@ func intParam(r *http.Request, name string, fallback int) (int, error) {
 	return value, nil
 }
 
-// handleImportCredential imports a credential from the request body.
 func (s *Server) handleImportCredential(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -155,7 +144,6 @@ func (s *Server) handleImportCredential(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusCreated, s.wallet.CredentialSummaryWithStatus(*imported))
 }
 
-// handleDeleteCredential removes a credential by ID.
 func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	label := id
@@ -188,12 +176,11 @@ func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleSetCredentialStatus sets the revocation status for a credential.
 func (s *Server) handleSetCredentialStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	// Resolve a short id prefix to the full id so the protection gate and the
-	// status write below act on the same credential.
+	// Resolve the prefix first so the protection check and status update use the same
+	// credential ID.
 	if cred, ok := s.wallet.GetCredential(id); ok {
 		id = cred.ID
 	}
@@ -212,9 +199,8 @@ func (s *Server) handleSetCredentialStatus(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
-	// draft-ietf-oauth-status-list §7: "Status Types MUST have a numeric value
-	// between 0 and 255." A value outside it cannot be published, and saying
-	// so is a different answer from not knowing the credential.
+	// draft-ietf-oauth-status-list §7 limits status values to 0 through 255. Report an
+	// invalid value separately from an unknown credential.
 	if body.Status < 0 || body.Status > 255 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": fmt.Sprintf("status %d is outside the range 0 to 255 that a status type may take", body.Status),
@@ -245,8 +231,6 @@ func (s *Server) handleSetCredentialStatus(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, entry)
 }
 
-// handleRefreshCredential re-requests a credential from its issuer now,
-// rather than waiting for the background task to notice it nearing expiry.
 func (s *Server) handleRefreshCredential(w http.ResponseWriter, r *http.Request) {
 	renewed, err := s.RefreshCredential(r.PathValue("id"))
 	if err != nil {

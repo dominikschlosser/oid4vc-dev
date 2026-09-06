@@ -14,9 +14,7 @@
 
 package cmd
 
-// Shell completion command. It takes the place of cobra's generated one and
-// adds `completion install`, which wires the completion into the user's
-// shell init (bash, zsh, fish).
+// This replaces Cobra's generated completion command to add `completion install`.
 
 import (
 	"fmt"
@@ -102,8 +100,6 @@ func completionInstallCmd() *cobra.Command {
 	}
 }
 
-// installRCLine appends the completion source line to an rc file in the home
-// directory unless it is already present.
 func installRCLine(rcName, shell string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -139,8 +135,6 @@ func installRCLine(rcName, shell string) error {
 	return nil
 }
 
-// installFishCompletion writes the completion file into fish's completions
-// directory.
 func installFishCompletion() error {
 	home, err := os.UserHomeDir()
 	if err != nil {

@@ -97,12 +97,10 @@ func subjectKeyIdentifier(pub *ecdsa.PublicKey) ([]byte, error) {
 	return sum[:], nil
 }
 
-// GenerateKey creates an ephemeral P-256 private key.
 func GenerateKey() (*ecdsa.PrivateKey, error) {
 	return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 }
 
-// PublicKeyJWKMap returns the JWK representation of a P-256 public key as a map.
 func PublicKeyJWKMap(key *ecdsa.PublicKey) map[string]string {
 	xBytes, yBytes, err := format.ECPublicCoords(key)
 	if err != nil {
@@ -125,7 +123,6 @@ func KeyIDForPublicKey(key *ecdsa.PublicKey) string {
 	return format.EncodeBase64URL(sum[:])
 }
 
-// SigningJWKMap returns a public JWK suitable for issuer metadata/JWKS publishing.
 func SigningJWKMap(key *ecdsa.PublicKey) map[string]any {
 	jwk := PublicKeyJWKMap(key)
 	return map[string]any{
@@ -139,7 +136,6 @@ func SigningJWKMap(key *ecdsa.PublicKey) map[string]any {
 	}
 }
 
-// PublicKeyJWK returns the JSON JWK representation of a P-256 public key.
 func PublicKeyJWK(key *ecdsa.PublicKey) string {
 	xBytes, yBytes, err := format.ECPublicCoords(key)
 	if err != nil {
@@ -202,12 +198,10 @@ func GenerateCACert(caKey *ecdsa.PrivateKey) (*x509.Certificate, error) {
 	return x509.ParseCertificate(der)
 }
 
-// GenerateLeafCert creates a leaf certificate signed by the CA.
 func GenerateLeafCert(caKey *ecdsa.PrivateKey, caCert *x509.Certificate, leafPubKey *ecdsa.PublicKey) (*x509.Certificate, error) {
 	return GenerateLeafCertWithOptions(caKey, caCert, leafPubKey, LeafCertOptions{})
 }
 
-// LeafCertOptions customizes the generated leaf certificate.
 type LeafCertOptions struct {
 	CommonName   string
 	SerialNumber *big.Int
@@ -306,7 +300,6 @@ func WithoutSelfSignedTrustAnchor(chain []*x509.Certificate) []*x509.Certificate
 	return out
 }
 
-// PrivateKeyJWK returns the JSON JWK representation of a P-256 private key (includes d).
 func PrivateKeyJWK(key *ecdsa.PrivateKey) string {
 	xBytes, yBytes, err := format.ECPublicCoords(&key.PublicKey)
 	if err != nil {
@@ -332,8 +325,8 @@ func PrivateKeyJWK(key *ecdsa.PrivateKey) string {
 	return string(b)
 }
 
-// Seed derives keys from a secret string, so a wallet that stores nothing
-// gets the same keys on every start. An empty Seed generates at random.
+// Seed keeps generated keys stable across restarts with memory storage. An empty seed
+// generates random keys.
 type Seed []byte
 
 // Key derives the P-256 key for a label: HKDF-SHA256 over the seed, reduced

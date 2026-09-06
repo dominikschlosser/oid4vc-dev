@@ -24,16 +24,9 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// walletService is the single surface the wallet management commands operate
-// on. Both backends speak the wallet server's API document shapes, so every
-// command formats its output once and the local store and a running instance
-// behave identically.
-//
-// A wallet IS its store (the wallet directory). An instance is that store plus
-// the URL it is exposed at, and the same store can be reached both ways. The
-// store has one writer at a time, so managedWallet prefers the URL whenever a
-// live server owns it: an explicit target (--remote, `wallet use`)
-// first, then a discovered instance serving the local directory.
+// Management commands use the same API documents for local and remote wallets. Prefer
+// a running server over direct file access to keep one writer per wallet directory.
+// Explicit remote targets take precedence over discovery.
 type walletService interface {
 	// URL is the managed instance's base URL, empty for the local store.
 	URL() string
@@ -43,8 +36,6 @@ type walletService interface {
 	// over yet. They are not in the store, so they are listed separately.
 	DeferredIssuances() ([]map[string]any, error)
 	ImportCredential(raw string) (map[string]any, error)
-	// RefreshCredential asks a credential's issuer for a fresh copy, for the
-	// credentials whose issuer handed over a refresh token.
 	RefreshCredential(id string) (map[string]any, error)
 	RemoveCredential(id string) error
 	RemoveAllCredentials() (int, error)
@@ -70,15 +61,10 @@ type walletCertOptions struct {
 	docker  bool
 }
 
-// managedWallet resolves the wallet the CLI manages: the remote client when
-// a remote target is set or a running instance owns the wallet directory,
-// otherwise the local store.
 func managedWallet() (walletService, error) {
 	return managedWalletWithLoader(loadWallet)
 }
 
-// managedWalletWithLoader is managedWallet with a custom local wallet loader
-// for commands that apply flag overrides while loading.
 func managedWalletWithLoader(load func() (*wallet.Wallet, *wallet.WalletStore, error)) (walletService, error) {
 	c, err := remoteClientIfConfigured()
 	if err != nil {
@@ -89,8 +75,6 @@ func managedWalletWithLoader(load func() (*wallet.Wallet, *wallet.WalletStore, e
 	}
 	return &localWallet{load: load}, nil
 }
-
-// --- remote backend ---
 
 type remoteWallet struct {
 	c *remote.Client
@@ -190,8 +174,6 @@ func decodeTemplateDoc(doc map[string]any) (*credtemplate.Template, error) {
 	return &tpl, nil
 }
 
-// --- local backend ---
-
 type localWallet struct {
 	load func() (*wallet.Wallet, *wallet.WalletStore, error)
 }
@@ -203,15 +185,13 @@ func (l *localWallet) Credentials() ([]map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A batch reads as one credential, the same collapse the HTTP API applies,
-	// so `wallet list` and the UI agree about what is stored and its order.
+	// Collapse batches just as the HTTP listing does so local and remote output agree.
 	creds := w.ListedCredentials()
 	wallet.SortCredentialsNewestFirst(creds)
 	summaries := make([]map[string]any, len(creds))
 	for i, c := range creds {
 		summaries[i] = w.CredentialSummaryWithBatch(c)
-		// The overview drops the claim values and the raw credential, the same
-		// as the HTTP listing, so `wallet list` agrees with a remote instance.
+		// Omit raw credentials and claim values to match the HTTP listing.
 		wallet.TrimCredentialListing(summaries[i])
 	}
 	return summaries, nil
@@ -415,10 +395,8 @@ func (l *localWallet) Config() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Mirrors the fields GET /api/config reports for a served wallet, so
-	// `wallet info` says the same thing about a local store as about a
-	// remote one. The conformance-relevant settings in particular have to be
-	// visible in both.
+	// Use the same configuration fields as GET /api/config so local and remote wallet
+	// info agree.
 	return map[string]any{
 		"remote_url":                "",
 		"wallet_dir":                store.Dir,

@@ -29,7 +29,6 @@
     </div>
   </header>
 
-  <!-- Demo-mode disclaimer banner -->
   <div id="demo-banner" hidden>
     <span>
       <strong>Shared demo instance.</strong> Everything here is visible to every
@@ -42,16 +41,12 @@
     <button class="btn" id="demo-banner-dismiss">Got it</button>
   </div>
 
-  <!-- Pending consent requests that this browser did not start. On a shared
-       demo nothing may pop a dialog unasked, but a scheme dispatch or another
-       device still needs a way in. -->
   <div id="pending-banner" hidden>
     <span id="pending-text"></span>
     <button class="btn" id="pending-review">Review</button>
   </div>
 
   <div class="main">
-    <!-- Actions -->
     <div>
       <div class="section-title">Actions</div>
       <div class="actions-bar">
@@ -67,13 +62,11 @@
       </div>
     </div>
 
-    <!-- Credentials the issuer deferred, still being collected -->
     <div id="deferred-section" hidden>
       <div class="section-title">Awaiting issuance</div>
       <div id="deferred-list" class="deferred-list"></div>
     </div>
 
-    <!-- Credentials -->
     <div>
       <div class="section-title">Credentials</div>
       <div id="credentials" class="credentials">
@@ -87,8 +80,6 @@
     </div>
   </div>
 
-  <!-- Activity Log: a drawer at the bottom so the credentials own the main
-       scroll and the log is a glance away without pushing them down. -->
   <div class="activity-drawer" id="activity-drawer">
     <div class="drawer-head" id="activity-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="log">
       <span class="section-title">Activity</span>
@@ -111,7 +102,6 @@
     <div class="footer-disclaimer">Unofficial, independent open source project. Not affiliated with or endorsed by the European Commission or the European Union.</div>
   </footer>
 
-  <!-- How To Use Modal -->
   <div class="consent-overlay" id="howto-overlay">
     <div class="consent-dialog">
       <div class="consent-title">How to use this wallet</div>
@@ -139,7 +129,6 @@
     </div>
   </div>
 
-  <!-- Conformance Modal -->
   <div class="consent-overlay" id="conformance-overlay">
     <div class="consent-dialog">
       <div class="consent-title">Conformance</div>
@@ -183,7 +172,6 @@
     </div>
   </div>
 
-  <!-- Trust & Certificates Modal -->
   <div class="consent-overlay" id="trust-overlay">
     <div class="consent-dialog">
       <div class="consent-title">Trust &amp; certificates</div>
@@ -232,7 +220,6 @@
     </div>
   </div>
 
-  <!-- Get the CLI Modal -->
   <div class="consent-overlay" id="cli-overlay">
     <div class="consent-dialog">
       <div class="consent-title">Get the CLI</div>
@@ -254,12 +241,10 @@
     </div>
   </div>
 
-  <!-- Consent Overlay -->
   <div class="consent-overlay" id="consent-overlay">
     <div class="consent-dialog" id="consent-dialog"></div>
   </div>
 
-  <!-- Import Modal -->
   <div class="consent-overlay" id="import-overlay">
     <div class="consent-dialog">
       <div class="consent-title">Import Credential</div>
@@ -272,7 +257,6 @@
     </div>
   </div>
 
-  <!-- Issue Modal -->
   <div class="consent-overlay" id="issue-overlay">
     <div class="consent-dialog">
       <div class="consent-title">Issue Credential</div>
@@ -394,7 +378,6 @@
     </div>
   </div>
 
-  <!-- Templates Modal -->
   <div class="consent-overlay" id="templates-overlay">
     <div class="consent-dialog">
       <div class="consent-title">Credential Templates</div>

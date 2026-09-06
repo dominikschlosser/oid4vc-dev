@@ -29,7 +29,6 @@ func DecodeBase64URL(s string) ([]byte, error) {
 	return b, err
 }
 
-// DecodeBase64Std decodes a standard base64-encoded string.
 func DecodeBase64Std(s string) ([]byte, error) {
 	b, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
@@ -38,7 +37,6 @@ func DecodeBase64Std(s string) ([]byte, error) {
 	return b, err
 }
 
-// EncodeBase64URL encodes bytes as base64url without padding.
 func EncodeBase64URL(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
@@ -56,7 +54,6 @@ func Truncate(s string, max int) string {
 	return string(runes[:max]) + "..."
 }
 
-// DecodeHexOrBase64URL tries hex first, then base64url.
 func DecodeHexOrBase64URL(s string) ([]byte, error) {
 	s = strings.TrimSpace(s)
 	if isHex(s) {

@@ -162,8 +162,6 @@ after which the wallet gives up on its own.`,
 	}
 }
 
-// deferredClient returns the remote client. Deferred credentials are collected
-// by the wallet server, so without one there is nothing to talk to.
 func deferredClient() (*remote.Client, error) {
 	c, err := remoteClientIfConfigured()
 	if err != nil {

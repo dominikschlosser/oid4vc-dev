@@ -25,9 +25,8 @@ import (
 
 const testBatchVCT = "urn:example:batch-pid"
 
-// storeTestBatch generates a batch of SD-JWT copies of one credential, each
-// bound to one of keys (keys[0] must be the wallet holder key), and stores them
-// the way an issuance does: the holder copy imported, the rest tied to it.
+// Store the holder copy first and attach copies with separate keys, as issuance does.
+// keys[0] must be the wallet holder key.
 func storeTestBatch(t *testing.T, w *Wallet, keys []*ecdsa.PrivateKey) {
 	t.Helper()
 	issuerKey, err := mock.GenerateKey()
@@ -218,9 +217,8 @@ func TestIssueCredentialBatchGivesEachCopyAnOwnStatusIndex(t *testing.T) {
 	w := generateTestWallet(t)
 	w.IssuerURL = "https://issuer.example"
 	statusURL := w.StatusListURL()
-	// An explicit index must not be reused across the batch: every copy still
-	// lands on its own index, so two presentations cannot be linked by it. A low
-	// index would otherwise collide with the counter the copies draw from.
+	// Allocate distinct status indices even when an explicit starting index is
+	// supplied. A shared index would correlate batch copies.
 	explicit := 0
 	if _, err := w.IssueCredential(IssueOptions{
 		Format:        "sdjwt",
@@ -276,8 +274,8 @@ func TestRenewalKeepsBatchMembership(t *testing.T) {
 		t.Fatal("the batch has no group to keep")
 	}
 
-	// A renewal replaces the holder copy with a freshly signed one. It must stay
-	// in its batch, or the batch would list twice and stop presenting as one.
+	// Keep the renewed holder credential in its batch or it would appear and rotate
+	// separately.
 	issuerKey, err := mock.GenerateKey()
 	if err != nil {
 		t.Fatalf("issuer key: %v", err)
@@ -350,8 +348,8 @@ func TestBatchCopyHolderBindingReadsAsHeld(t *testing.T) {
 	keys := []*ecdsa.PrivateKey{w.HolderKey, testKey(t), testKey(t)}
 	storeTestBatch(t, w, keys)
 
-	// Every copy is presentable, so the card and the consent dialog must read
-	// it as bound to this wallet, the copy bound to its own key included.
+	// All batch copies must appear bound to this wallet, including copies using
+	// separate keys.
 	for _, c := range w.GetCredentials() {
 		if c.VCT != testBatchVCT {
 			continue
@@ -397,7 +395,6 @@ func TestBatchPresentsEachCopyOnceThenReuses(t *testing.T) {
 	keys := []*ecdsa.PrivateKey{w.HolderKey, testKey(t), testKey(t)}
 	storeTestBatch(t, w, keys)
 
-	// The key each stored copy signs with, to check the KB-JWT signer.
 	pubByID := make(map[string]*ecdsa.PublicKey)
 	for _, c := range w.GetCredentials() {
 		sk, err := w.batchSigningKey(c)
@@ -439,7 +436,6 @@ func TestBatchPresentsEachCopyOnceThenReuses(t *testing.T) {
 		}
 	}
 
-	// Every copy has now been used, so the batch reuses one instead of failing.
 	matches := w.EvaluateDCQL(query)
 	if len(matches) != 1 {
 		t.Fatalf("after exhaustion a batch still presents one copy, got %d", len(matches))

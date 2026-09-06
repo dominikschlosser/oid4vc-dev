@@ -24,15 +24,10 @@ import (
 	"time"
 )
 
-// maxBatchProofKeys caps the keys of one batch request. The wallet requests
-// the batch the issuer advertises, one credential per key (§8.3), so it holds
-// several copies and can present an unused one each time (EUDI ARF method C).
-// The cap keeps a large advertised batch_size from making a single request
-// enormous.
+// Limit batch proof keys so an advertised batch_size cannot make requests arbitrarily
+// large. Separate keys support EUDI ARF method C.
 const maxBatchProofKeys = 8
 
-// advertisedBatchSize returns the issuer's batch_credential_issuance.batch_size,
-// or 0 when the issuer does not advertise batch issuance support.
 func advertisedBatchSize(metadata map[string]any) int {
 	batch, ok := metadata["batch_credential_issuance"].(map[string]any)
 	if !ok {
@@ -72,8 +67,6 @@ func issuanceProofKeys(holderKey *ecdsa.PrivateKey, metadata map[string]any) ([]
 	return keys, nil
 }
 
-// createProofJWTs creates one proof JWT per key. All proofs share the same
-// audience, client id, nonce, and extra header members.
 func createProofJWTs(keys []*ecdsa.PrivateKey, audience, clientID, cNonce string, extraHeader map[string]any) ([]string, error) {
 	proofs := make([]string, 0, len(keys))
 	for _, key := range keys {
@@ -131,8 +124,6 @@ func selectPrimaryCredential(credResp map[string]any, keys []*ecdsa.PrivateKey) 
 	return creds[0], nil
 }
 
-// proofKeyIndex returns the index of the proof key a credential is bound to, or
-// -1 when it is bound to none of them.
 func proofKeyIndex(raw string, keys []*ecdsa.PrivateKey) int {
 	for i := range keys {
 		if credentialBindsToKey(raw, &keys[i].PublicKey) {
@@ -154,17 +145,12 @@ func primaryBindingKeyPEM(raw string, keys []*ecdsa.PrivateKey) string {
 	return ""
 }
 
-// storeBatchSiblings stores the other copies of a batch alongside the copy
-// importPrimaryCredential imported as primary. A batch credential response
-// holds one credential per key (§8.3). Each copy is stored bound to the
-// key it was issued against, under a batch group shared with the primary, so
-// the wallet presents an unused copy each time and a verifier cannot link two
-// presentations (EUDI ARF Annex 2 Topic 10 method C, ISSU_51-54).
+// Store batch copies under one group with their separate binding keys for EUDI ARF
+// method C (Annex 2 Topic 10, ISSU_51-54).
 //
-// A batch collected on a presentation clone keeps its primary copy alone: the
-// credentialSink forwarded that copy (with its key) to the real wallet at
-// import time, and the siblings would land there under a group the primary
-// copy does not carry back.
+// On a presentation clone, keep only the primary copy. The credential sink has already
+// forwarded it to the real wallet without the batch group, so storing siblings there
+// would leave them disconnected.
 func (w *Wallet) storeBatchSiblings(primary *StoredCredential, credResp map[string]any, keys []*ecdsa.PrivateKey, display *CredentialDisplay) {
 	creds := credentialStringsFromResponse(credResp)
 	if primary == nil || len(creds) <= 1 || len(keys) <= 1 {
@@ -182,8 +168,6 @@ func (w *Wallet) storeBatchSiblings(primary *StoredCredential, credResp map[stri
 	stored := 1
 	for _, raw := range creds {
 		idx := proofKeyIndex(raw, keys)
-		// The primary copy is already imported. A negative index was reported
-		// by selectPrimaryCredential.
 		if idx < 0 || idx == primaryIdx {
 			continue
 		}
@@ -205,10 +189,8 @@ func (w *Wallet) storeBatchSiblings(primary *StoredCredential, credResp map[stri
 	log.Printf("[VCI] Stored a batch of %d copies (group %s) for one-time-use presentation", stored, group)
 }
 
-// collapseBatchMatches reduces the copies of one batch that match a query to
-// the one copy chooseBatchCopy picks, so the consent dialog does not list
-// identical copies as alternatives. Matches outside a batch pass through in
-// order.
+// Offer one selected batch copy in consent so identical copies do not appear as
+// alternatives.
 func (w *Wallet) collapseBatchMatches(matches []CredentialMatch, credentials []StoredCredential) []CredentialMatch {
 	byID := make(map[string]StoredCredential, len(credentials))
 	for _, c := range credentials {
@@ -262,8 +244,6 @@ func chooseBatchCopy(idxs []int, matches []CredentialMatch, byID map[string]Stor
 	return least[secureIntn(len(least))]
 }
 
-// secureIntn returns a uniform random int in [0, n) from crypto/rand, or 0
-// when n <= 1 or the read fails.
 func secureIntn(n int) int {
 	if n <= 1 {
 		return 0
@@ -302,8 +282,6 @@ func (w *Wallet) recordBatchPresentation(id string) {
 	}
 }
 
-// setBatchFields records a copy's batch group and per-copy binding key on the
-// store entry with the given id, the way rememberDisplay records a display.
 func (w *Wallet) setBatchFields(id, group, bindingKeyPEM string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

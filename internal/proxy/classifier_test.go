@@ -34,8 +34,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/web"
 )
 
-// --- classifyEntry tests ---
-
 func TestClassifyVCIMetadata(t *testing.T) {
 	e := &TrafficEntry{
 		Method:     "GET",
@@ -85,7 +83,6 @@ func TestClassifyVPAuthRequest(t *testing.T) {
 }
 
 func TestClassifyVPRequestObject(t *testing.T) {
-	// A GET response that looks like a JWT
 	e := &TrafficEntry{
 		Method:       "GET",
 		URL:          "http://example.com/request/abc",
@@ -250,8 +247,6 @@ func TestClassifyUnknownSetsLabel(t *testing.T) {
 	}
 }
 
-// --- isJWTBody tests ---
-
 func TestIsJWTBody(t *testing.T) {
 	tests := []struct {
 		body string
@@ -274,8 +269,6 @@ func TestIsJWTBody(t *testing.T) {
 	}
 }
 
-// --- isJWE tests ---
-
 func TestIsJWE(t *testing.T) {
 	tests := []struct {
 		s    string
@@ -295,8 +288,6 @@ func TestIsJWE(t *testing.T) {
 		}
 	}
 }
-
-// --- hasBodyField tests ---
 
 func TestHasBodyFieldFormEncoded(t *testing.T) {
 	body := "vp_token=abc&state=s1"
@@ -329,8 +320,6 @@ func TestHasBodyFieldEmpty(t *testing.T) {
 		t.Error("expected false for empty body")
 	}
 }
-
-// --- parseFormOrJSON tests ---
 
 func TestParseFormOrJSONForm(t *testing.T) {
 	result := parseFormOrJSON("grant_type=authorization_code&code=abc123")
@@ -367,8 +356,6 @@ func TestParseFormOrJSONEmpty(t *testing.T) {
 	}
 }
 
-// --- truncate tests ---
-
 func TestTruncate(t *testing.T) {
 	if got := format.Truncate("short", 10); got != "short" {
 		t.Errorf("expected 'short', got %q", got)
@@ -380,8 +367,6 @@ func TestTruncate(t *testing.T) {
 		t.Errorf("expected 'exact', got %q", got)
 	}
 }
-
-// --- decodeEntry tests ---
 
 func TestDecodeEntryVPAuthRequest(t *testing.T) {
 	e := &TrafficEntry{
@@ -591,8 +576,6 @@ func TestDecodeEntryUnknownReturnsNil(t *testing.T) {
 		t.Errorf("expected nil Decoded for unknown class, got %v", e.Decoded)
 	}
 }
-
-// --- extractCredentials tests ---
 
 func TestExtractCredentialsVPAuthResponse(t *testing.T) {
 	e := &TrafficEntry{
@@ -820,8 +803,6 @@ func TestExtractCredentialsUnknown(t *testing.T) {
 	}
 }
 
-// --- decodeJARMResponse tests ---
-
 func makeJWS(header, payload map[string]any) string {
 	h, _ := json.Marshal(header)
 	p, _ := json.Marshal(payload)
@@ -886,8 +867,6 @@ func TestDecodeJARMResponseJWE(t *testing.T) {
 		t.Errorf("encryption_apv: got %v", decoded["encryption_apv"])
 	}
 }
-
-// --- ExtractCorrelationKey tests ---
 
 func TestExtractCorrelationKeyVPAuthRequest(t *testing.T) {
 	entry := &TrafficEntry{
@@ -1117,8 +1096,6 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
-// --- decodeJARMResponse with CEK decryption ---
-
 func TestDecodeJARMResponseJWEWithCEK(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -1151,7 +1128,6 @@ func TestDecodeJARMResponseJWEWithCEK(t *testing.T) {
 	if responsePayload["state"] != "s1" {
 		t.Errorf("expected state=s1, got %v", responsePayload["state"])
 	}
-	// Should also have header fields
 	if decoded["encryption_alg"] != "ECDH-ES" {
 		t.Errorf("expected encryption_alg=ECDH-ES, got %v", decoded["encryption_alg"])
 	}
@@ -1190,7 +1166,6 @@ func TestDecodeJARMResponseJWEWithJWK(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Build JWK JSON from private key
 	x, y, err := format.ECPublicCoords(&key.PublicKey)
 	if err != nil {
 		t.Fatal(err)
@@ -1221,10 +1196,6 @@ func TestDecodeJARMResponseJWEWithJWK(t *testing.T) {
 	}
 }
 
-// --- Classify with DebugJWEKey ---
-
-// --- extractJARMCredentials tests ---
-
 func TestExtractJARMCredentialsStringVPToken(t *testing.T) {
 	payload := map[string]any{
 		"vp_token": "credential-string",
@@ -1251,7 +1222,7 @@ func TestExtractJARMCredentialsMapVPToken(t *testing.T) {
 	if len(creds) != 4 {
 		t.Fatalf("expected 4 credentials, got %d: %v", len(creds), labels)
 	}
-	// Check all credentials are present (order may vary due to map iteration)
+	// Credential order can vary because extraction iterates over maps.
 	credSet := make(map[string]bool)
 	for _, c := range creds {
 		credSet[c] = true
@@ -1322,7 +1293,6 @@ func TestExtractCredentialsFromDecryptedJARM(t *testing.T) {
 	}
 	Classify(e)
 
-	// Should have credentials extracted from the decrypted JARM payload
 	found := false
 	for _, c := range e.Credentials {
 		if c == "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.sig" {
@@ -1375,7 +1345,6 @@ func TestClassifyVPAuthResponseWithDebugKey(t *testing.T) {
 }
 
 func TestClassifyPOSTRequestObjectWithWalletMetadata(t *testing.T) {
-	// POST with wallet_metadata and wallet_nonce should be classified as ClassVPRequestObject
 	jwt := makeTestJWT(map[string]any{"alg": "none"}, map[string]any{
 		"client_id":    "verifier",
 		"wallet_nonce": "test-nonce",
@@ -1394,17 +1363,14 @@ func TestClassifyPOSTRequestObjectWithWalletMetadata(t *testing.T) {
 		t.Errorf("expected ClassVPRequestObject, got %d (%s)", e.Class, e.ClassLabel)
 	}
 
-	// wallet_nonce should be surfaced in decoded
 	if e.Decoded["wallet_nonce"] != "test-nonce" {
 		t.Errorf("expected wallet_nonce=test-nonce, got %v", e.Decoded["wallet_nonce"])
 	}
 
-	// wallet_metadata should be parsed as JSON object
 	if e.Decoded["wallet_metadata"] == nil {
 		t.Error("expected wallet_metadata in decoded")
 	}
 
-	// wallet_nonce_in_response should be surfaced from JWT payload
 	if e.Decoded["wallet_nonce_in_response"] != "test-nonce" {
 		t.Errorf("expected wallet_nonce_in_response=test-nonce, got %v", e.Decoded["wallet_nonce_in_response"])
 	}

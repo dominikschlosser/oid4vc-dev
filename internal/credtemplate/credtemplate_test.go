@@ -25,8 +25,6 @@ import (
 
 func TestPredefinedTemplates(t *testing.T) {
 	predefined := PredefinedTemplates()
-	// A PID template per format, for the country-independent PID and the
-	// German one that extends it.
 	if len(predefined) != 4 {
 		t.Fatalf("expected 4 pre-defined templates, got %d", len(predefined))
 	}
@@ -57,7 +55,6 @@ func TestPredefinedTemplates(t *testing.T) {
 	}
 }
 
-// The German PID is its own credential type with its own claim set.
 func TestPredefinedGermanPIDTemplates(t *testing.T) {
 	sdjwt, err := Load("german-pid-sdjwt", FileLocation(t.TempDir()))
 	if err != nil {
@@ -84,8 +81,6 @@ func TestPredefinedGermanPIDTemplates(t *testing.T) {
 	}
 }
 
-// Each PID names the rulebook it follows and links to it, so the holder can
-// check the claim set against its source.
 func TestPIDTemplatesCarryDisplayDescription(t *testing.T) {
 	cases := map[string][]string{
 		"pid-sdjwt":        {"EUDI PID Rulebook v1.7", "https://github.com/eu-digital-identity-wallet/eudi-doc-attestation-rulebooks-catalog/blob/main/rulebooks/pid/pid-rulebook.md"},
@@ -109,10 +104,8 @@ func TestPIDTemplatesCarryDisplayDescription(t *testing.T) {
 	}
 }
 
-// The claim sets are package variables, so their dates are those of the
-// moment the process started. Materializing a template has to recompute them,
-// or a server that stays up for a month hands out PIDs issued the day it
-// booted.
+// Template claims are package variables initialized at startup. Refresh their dates
+// when loading a template so issuance uses the current date.
 func TestPredefinedTemplates_RecomputeDatedClaims(t *testing.T) {
 	stale := "2000-01-01"
 	original := mock.SDJWTPIDClaims["date_of_issuance"]
@@ -148,8 +141,7 @@ func TestPIDTemplateNames(t *testing.T) {
 		{"", "pid-sdjwt", "pid-mdoc", true},
 		{mock.DefaultPIDVCT, "pid-sdjwt", "pid-mdoc", true},
 		{mock.GermanPIDVCT, "german-pid-sdjwt", "german-pid-mdoc", true},
-		// A type nothing knows still gets a claim set, the
-		// country-independent one, under the type it was asked for.
+		// Unknown PID types use the base PID claims with the requested VCT.
 		{"urn:example:custom:1", "pid-sdjwt", "pid-mdoc", false},
 	}
 	for _, tt := range tests {
@@ -261,7 +253,7 @@ func TestSaveAndDelete(t *testing.T) {
 		VCT:             "urn:example:test",
 		Claims:          map[string]any{"given_name": "ERIKA"},
 		AlwaysDisclosed: []string{"given_name"},
-		Predefined:      true, // must be cleared on save
+		Predefined:      true,
 	}
 	path, err := Save(FileLocation(dir), tpl)
 	if err != nil {

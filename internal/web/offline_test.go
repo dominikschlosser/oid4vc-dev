@@ -26,7 +26,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/statuslist"
 )
 
-// checkByName returns the named check from a /api/validate response.
 func checkByName(t *testing.T, w *httptest.ResponseRecorder, name string) map[string]any {
 	t.Helper()
 	if w.Code != http.StatusOK {
@@ -60,8 +59,7 @@ func postValidate(t *testing.T, body map[string]any) *httptest.ResponseRecorder 
 	return apiPostTo(t, "/api/validate", string(raw))
 }
 
-// The offline pass never fetches the status list, so the decoder can show a
-// credential before that answer is in.
+// Offline validation must not fetch status lists before displaying the credential.
 func TestHandleValidate_OfflineLeavesTheStatusListUnfetched(t *testing.T) {
 	key, err := mock.GenerateKey()
 	if err != nil {
@@ -130,8 +128,8 @@ func TestHandleValidate_OfflineLeavesTheStatusListUnfetched(t *testing.T) {
 	}
 }
 
-// A credential with no status reference has its final answer offline, so the
-// decoder shows it without waiting for anything.
+// A credential without a status reference needs no network lookup for its status
+// result.
 func TestHandleValidate_OfflineAnswersStatusWithoutAReference(t *testing.T) {
 	credential := makeSDJWT(
 		map[string]any{
@@ -155,8 +153,6 @@ func TestHandleValidate_OfflineAnswersStatusWithoutAReference(t *testing.T) {
 	}
 }
 
-// The offline pass never fetches the issuer metadata either. The online pass
-// does.
 func TestHandleValidate_OfflineLeavesTheIssuerMetadataUnfetched(t *testing.T) {
 	key, err := mock.GenerateKey()
 	if err != nil {

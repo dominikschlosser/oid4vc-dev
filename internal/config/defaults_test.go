@@ -29,12 +29,10 @@ func TestBaseDirResolution(t *testing.T) {
 	newDir := filepath.Join(home, ".eudi-dev")
 	legacyDir := filepath.Join(home, ".oid4vc-dev")
 
-	// Fresh system: the new directory wins.
 	if got := BaseDir(); got != newDir {
 		t.Errorf("fresh: expected %s, got %s", newDir, got)
 	}
 
-	// Only the legacy directory exists: it is used.
 	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +40,6 @@ func TestBaseDirResolution(t *testing.T) {
 		t.Errorf("legacy only: expected %s, got %s", legacyDir, got)
 	}
 
-	// Both exist: the new directory wins.
 	if err := os.MkdirAll(newDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +47,6 @@ func TestBaseDirResolution(t *testing.T) {
 		t.Errorf("both: expected %s, got %s", newDir, got)
 	}
 
-	// Env overrides beat everything, the new variable beats the legacy one.
 	t.Setenv("OID4VC_DEV_HOME", "/tmp/legacy-home")
 	if got := BaseDir(); got != "/tmp/legacy-home" {
 		t.Errorf("legacy env: expected /tmp/legacy-home, got %s", got)

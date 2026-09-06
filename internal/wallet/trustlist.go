@@ -35,15 +35,12 @@ type trustListOptions struct {
 	Profile       trustListProfile
 }
 
-// TrustListGroup is one trust-list profile and the issued attestations
-// registered under it.
 type TrustListGroup struct {
 	ID      string
 	Profile trustListProfile
 	Specs   []IssuedAttestationSpec
 }
 
-// TrustListIndexEntry is the JSON index representation exposed by /api/trustlists.
 type TrustListIndexEntry struct {
 	ID                    string                  `json:"id"`
 	Default               bool                    `json:"default"`
@@ -59,9 +56,7 @@ type TrustListIndexEntry struct {
 	URL                   string                  `json:"url,omitempty"`
 }
 
-// GenerateTrustListJWT generates an ETSI TS 119 602 trust list JWT
-// containing the CA certificate as the trust anchor. The trust list is
-// signed with the provided signing key.
+// GenerateTrustListJWT includes the CA as the trust anchor, following ETSI TS 119 602.
 func GenerateTrustListJWT(signingKey *ecdsa.PrivateKey, caCert *x509.Certificate) (string, error) {
 	return generateTrustListJWTWithOptions(signingKey, caCert, trustListOptions{
 		OperatorName: "EUDI Dev Wallet",
@@ -150,9 +145,7 @@ func TrustListGroupsForWallet(w *Wallet) []TrustListGroup {
 	return groups
 }
 
-// walletProviderTrustListProfile describes the wallet in its Wallet Provider
-// role: the entity whose CA anchors the wallet attestation and the key
-// attestations sent to issuers.
+// The wallet provider's CA anchors wallet and key attestations sent to issuers.
 func walletProviderTrustListProfile() trustListProfile {
 	return trustListProfile{
 		LoTEType:                    walletProviderTrustListType,
@@ -167,10 +160,8 @@ func walletProviderTrustListProfile() trustListProfile {
 	}
 }
 
-// withWalletProviderGroup adds the wallet-provider list to a set of
-// credential lists. The wallet attestation exists whether or not the wallet
-// has issued anything, and an issuer looking for its anchor should not have to
-// read a list named "pid". The certificate inside is the same shared CA.
+// Always publish the wallet provider list, even before credential issuance. It uses
+// the shared CA but gives issuers a separate list for verifying attestations.
 func withWalletProviderGroup(groups []TrustListGroup) []TrustListGroup {
 	profile := walletProviderTrustListProfile()
 	id := trustListGroupID(profile)
@@ -192,9 +183,8 @@ func DefaultTrustListGroupForWallet(w *Wallet) (TrustListGroup, bool) {
 			return group, true
 		}
 	}
-	// The wallet-provider list anchors attestations rather than credentials,
-	// so it never becomes the default that `/api/trustlist` serves, however
-	// few other lists exist.
+	// The default list describes credentials, so the wallet provider list must never
+	// become the default.
 	for _, group := range groups {
 		if group.Profile.LoTEType != walletProviderTrustListType {
 			return group, true
@@ -261,9 +251,8 @@ func BuildTrustListIndexEntries(w *Wallet, issuer string) []TrustListIndexEntry 
 	return entries
 }
 
-// trustListDescription says who a list is for, because the id alone does not.
-// "pid" reads like a list about PID credentials only, and nothing about it
-// suggests that an issuer verifying a wallet attestation has its own list.
+// Descriptions distinguish lists used for credentials from the list used for wallet
+// attestations.
 func trustListDescription(group TrustListGroup) string {
 	if group.Profile.LoTEType == walletProviderTrustListType {
 		return "Wallet and key attestations, for issuers"
@@ -271,8 +260,6 @@ func trustListDescription(group TrustListGroup) string {
 	return "Credentials this wallet issues, for verifiers"
 }
 
-// trustListCategory groups lists by what they anchor, so a reader looking for
-// one kind is not reading past the other.
 func trustListCategory(group TrustListGroup) string {
 	if group.Profile.LoTEType == walletProviderTrustListType {
 		return "Wallet providers"
@@ -390,7 +377,7 @@ func generateTrustListJWTWithOptions(signingKey *ecdsa.PrivateKey, caCert *x509.
 		}
 	}
 
-	// Build ETSI trust list payload using the JSON binding wrapper object.
+	// ETSI trust lists use a JSON wrapper object.
 	payload := map[string]any{
 		"LoTE": map[string]any{
 			"ListAndSchemeInformation": schemeInfo,

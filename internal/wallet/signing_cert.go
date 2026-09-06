@@ -27,43 +27,34 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// SigningCertChainForIssuedAttestation returns the signing certificate chain for one
-// issued-attestation profile. The CA stays shared, but the leaf certificate is
-// derived from the trust-list profile so different profiles can present distinct
-// signer certificates.
+// SigningCertChainForIssuedAttestation uses a distinct leaf per profile under the shared
+// CA.
 func (w *Wallet) SigningCertChainForIssuedAttestation(spec IssuedAttestationSpec) ([]*x509.Certificate, error) {
 	return w.SigningCertChainForProfile(trustListProfileFromSpec(spec))
 }
 
-// SigningCertChainForIssuedCredential returns the signing certificate chain
-// for one credential being issued. The leaf's subject countryName follows the
-// credential's issuing_country claim, which ISO/IEC 18013-5 Table B.3 requires
-// them to share.
+// SigningCertChainForIssuedCredential matches the signer's countryName to issuing_country
+// as ISO/IEC 18013-5 Table B.3 requires.
 func (w *Wallet) SigningCertChainForIssuedCredential(spec IssuedAttestationSpec, claims map[string]any) ([]*x509.Certificate, error) {
 	_, chain, err := w.signingMaterialForProfile(trustListProfileFromSpec(spec), IssuingCountryFromClaims(claims))
 	return chain, err
 }
 
-// SigningMaterialForIssuedAttestation returns the signing key together with
-// the chain for one issued-attestation profile, read as one for the same
-// reason DefaultSigningMaterial does.
+// SigningMaterialForIssuedAttestation reads the key and chain together to avoid mixing
+// values across a reset.
 func (w *Wallet) SigningMaterialForIssuedAttestation(spec IssuedAttestationSpec) (*ecdsa.PrivateKey, []*x509.Certificate, error) {
 	return w.signingMaterialForProfile(trustListProfileFromSpec(spec), "")
 }
 
-// SigningCertChainForGroup returns the signing certificate chain for one trust-list group.
 func (w *Wallet) SigningCertChainForGroup(group TrustListGroup) ([]*x509.Certificate, error) {
 	return w.SigningCertChainForProfile(group.Profile)
 }
 
-// SigningCertChainForProfile returns a signing certificate chain for the given trust-list profile.
 func (w *Wallet) SigningCertChainForProfile(profile trustListProfile) ([]*x509.Certificate, error) {
 	_, chain, err := w.signingMaterialForProfile(profile, "")
 	return chain, err
 }
 
-// IssuingCountryFromClaims returns the credential's issuing_country claim when
-// it carries a usable ISO 3166-1 alpha-2 value.
 func IssuingCountryFromClaims(claims map[string]any) string {
 	country, _ := claims["issuing_country"].(string)
 	if len(country) == 2 && country == strings.ToUpper(country) {
@@ -72,11 +63,8 @@ func IssuingCountryFromClaims(claims map[string]any) string {
 	return ""
 }
 
-// signingMaterialForProfile returns the signing key together with a chain
-// whose leaf wraps its public half. Key and chain are captured under one
-// lock: the demo reset replaces the CA key and the chain while requests are
-// in flight, and a leaf signed with one against a CA from the other chains to
-// nothing.
+// Hold one lock while reading the key and chain. A concurrent demo reset could
+// otherwise pair a new key with an old chain.
 func (w *Wallet) signingMaterialForProfile(profile trustListProfile, country string) (*ecdsa.PrivateKey, []*x509.Certificate, error) {
 	if w == nil {
 		return nil, nil, fmt.Errorf("wallet has no issuer certificate chain")
@@ -104,9 +92,8 @@ func (w *Wallet) signingMaterialForProfile(profile trustListProfile, country str
 	return issuerKey, []*x509.Certificate{leafCert, caCert}, nil
 }
 
-// crlDistributionPoints names the wallet's CRL endpoint for a signing leaf.
-// ISO/IEC 18013-5 Table B.3 requires a distribution point URI on document
-// signer certificates.
+// ISO/IEC 18013-5 Table B.3 requires a CRL distribution point URI in document signer
+// certificates.
 func crlDistributionPoints(issuerURL string) []string {
 	issuer := strings.TrimRight(strings.TrimSpace(issuerURL), "/")
 	if issuer == "" {
@@ -115,9 +102,8 @@ func crlDistributionPoints(issuerURL string) []string {
 	return []string{issuer + "/api/crl"}
 }
 
-// TrustAnchorCertificate returns the wallet CA certificate, read under the
-// lock: the demo reset swaps the chain while requests are in flight, and a
-// slice header is not written atomically.
+// TrustAnchorCertificate holds the lock because a reset can replace the chain
+// concurrently. Slice header writes are not atomic.
 func (w *Wallet) TrustAnchorCertificate() *x509.Certificate {
 	if w == nil {
 		return nil
@@ -130,17 +116,13 @@ func (w *Wallet) TrustAnchorCertificate() *x509.Certificate {
 	return w.CertChain[len(w.CertChain)-1]
 }
 
-// DefaultSigningCertChain returns the signing certificate chain used for
-// wallet-wide endpoints that select no trust profile.
 func (w *Wallet) DefaultSigningCertChain() ([]*x509.Certificate, error) {
 	_, chain, err := w.DefaultSigningMaterial()
 	return chain, err
 }
 
-// DefaultSigningMaterial returns the signing key together with the default
-// chain, read as one. Reading them separately can pair a fresh key with a
-// stale chain when a reload or the demo reset lands in between, and nothing
-// verifies a signature made from that pair.
+// DefaultSigningMaterial reads the key and chain together. A reload or demo reset between
+// separate reads could return a pair that cannot produce a verifiable signature.
 func (w *Wallet) DefaultSigningMaterial() (*ecdsa.PrivateKey, []*x509.Certificate, error) {
 	group, ok := DefaultTrustListGroupForWallet(w)
 	if !ok {
@@ -159,13 +141,9 @@ func (w *Wallet) DefaultSigningMaterial() (*ecdsa.PrivateKey, []*x509.Certificat
 	return w.signingMaterialForProfile(group.Profile, "")
 }
 
-// issuerSubjectAltNames are the subject alternative names a signing leaf
-// carries, so a verifier can see that this certificate speaks for this issuer
-// identifier. Both the dNSName and the uniformResourceIdentifier form are
-// written, since a verifier may check either. SD-JWT VC draft-08 and earlier
-// require iss to be named by a SAN of the leaf, and a verifier built against
-// that rule refuses a leaf without them. A host that is an IP address goes
-// into an iPAddress SAN instead.
+// SD-JWT VC draft-08 and earlier require the issuer identifier in the signing leaf's
+// SANs. Include both DNS and URI forms for verifier compatibility. IP hosts use an IP
+// SAN.
 func issuerSubjectAltNames(issuerURL string) (dnsNames []string, ips []net.IP, uris []*url.URL) {
 	raw := strings.TrimRight(strings.TrimSpace(issuerURL), "/")
 	if raw == "" {

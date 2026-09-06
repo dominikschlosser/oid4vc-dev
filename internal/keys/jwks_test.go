@@ -93,7 +93,6 @@ func TestCertificatePEMToJWKS_EC(t *testing.T) {
 		t.Fatal("expected x5t#S256 to be set")
 	}
 
-	// Round-trip: the JWK must parse back to the certificate's public key.
 	keyJSON, _ := json.Marshal(jwk)
 	pub, err := ParseJWK(keyJSON)
 	if err != nil {

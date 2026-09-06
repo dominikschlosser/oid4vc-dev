@@ -50,7 +50,6 @@ func TestGenerateJWT_DefaultClaims(t *testing.T) {
 		t.Fatalf("expected 3 JWT parts, got %d", len(parts))
 	}
 
-	// Parse with sdjwt.Parse (works for plain JWTs too)
 	token, err := sdjwt.Parse(result)
 	if err != nil {
 		t.Fatalf("sdjwt.Parse: %v", err)

@@ -21,12 +21,9 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/oid4vc"
 )
 
-// handleCredentialOfferEndpoint is the wallet's OID4VCI credential offer
-// endpoint. It accepts the same `credential_offer` / `credential_offer_uri`
-// query parameters that would follow an openid-credential-offer:// scheme, so
-// issuers can deliver offers to the wallet's plain web URL. The counterpart
-// of the /authorize endpoint for presentation requests. An optional `tx_code`
-// parameter supplies the pre-authorized code flow transaction code.
+// This web endpoint accepts the same credential_offer and credential_offer_uri
+// parameters as openid-credential-offer:// URLs. tx_code can supply the transaction
+// code for a pre-authorized offer.
 func (s *Server) handleCredentialOfferEndpoint(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	offerParams := url.Values{}

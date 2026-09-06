@@ -1,14 +1,10 @@
-# rate_limit is a plugin (see Dockerfile), so its place in the handler order
-# has to be stated. Before basic_auth, so a flood of /stats guesses is capped
-# too.
+# Order the rate limiting plugin before authentication so it also limits password guesses.
 {
 	order rate_limit before basic_auth
 }
 
 eudi-test.dev {
-	# Usage statistics: a GoAccess report built from the access log below,
-	# served behind basic auth. Credentials come from stats.env
-	# (see deploy.sh stats-password). Remove this block to turn stats off.
+	# Serve the GoAccess report behind authentication configured in stats.env.
 	handle_path /stats* {
 		basic_auth {
 			# Defaults to a hash of a random password nobody knows, so /stats
@@ -25,14 +21,9 @@ eudi-test.dev {
 		reverse_proxy wallet:8085
 	}
 
-	# Access log for the usage report. ip_mask anonymizes at write time:
-	# the last IPv4 octet and the last 80 bits of an IPv6 address are
-	# zeroed, so no full address is ever stored, while GoAccess can still
-	# approximate distinct visitors.
+	# Mask client addresses before writing the log. GoAccess uses the remaining network prefix to estimate visitors.
 	log {
-		# Bounded on disk: at most roll_size x (roll_keep + 1), so ~40 MiB,
-		# and nothing older than a month. The report below only reads the
-		# current file, so a roll also caps how far back stats reach.
+		# Keep the active log and up to three rotated files, about 40 MiB total. Reports read only the active file.
 		output file /var/log/caddy/access.log {
 			roll_size 10MiB
 			roll_keep 3
@@ -55,22 +46,9 @@ eudi-test.dev {
 		}
 	}
 
-	# Rate limiting per client address (caddy-ratelimit, built into the image
-	# by the Dockerfile). A request is counted in every zone that matches it,
-	# and exceeding a zone answers 429 with Retry-After.
-	#
-	# Ceilings against abuse, far above measured use: an idle page is about 14
-	# requests (updates arrive over one event stream) and a busy visitor with
-	# three tabs open, issuing and presenting, produced 36 in a minute. That
-	# leaves room for everyone behind one office or conference address.
+	# Apply limits per client address. Every matching zone counts the request. Exceeding a limit returns 429 with Retry-After. The limits allow shared office addresses and ordinary test traffic.
 	rate_limit {
-		# Endpoints that cost the demo something: they make the wallet fetch a
-		# URL somebody handed it (holding an outbound connection for up to 15
-		# seconds) or grow state that only the next reset clears.
-		#
-		# Two windows on the same set: the minute allows a burst (a test suite
-		# working through a scenario), the hour bounds what a loop left running
-		# can accumulate before the daily reset.
+		# These endpoints fetch external URLs or add wallet state. The minute limit permits short test bursts, while the hourly limit bounds sustained traffic.
 		zone flows_burst {
 			match {
 				method POST
@@ -98,13 +76,7 @@ eudi-test.dev {
 	}
 }
 
-# Conformance host: a strict-mode HAIP wallet the hosted OIDF suite tests for
-# certification (STRICT_TAG in the compose file, ./deploy.sh strict). The
-# public origin is read-only: GET and HEAD pass (the UI, metadata, status
-# list, CRL, trust lists, and the GET /authorize a url_query request is
-# delivered to), every mutating method is refused. The conformance harness
-# drives the management API over an SSH tunnel to the wallet's
-# loopback-published port on this host.
+# The conformance host accepts public GET and HEAD requests, including GET /authorize presentations. Other methods return 403. The harness uses an SSH tunnel for management access.
 strict.eudi-test.dev {
 	@write not method GET HEAD
 	handle @write {
@@ -122,10 +94,7 @@ strict.eudi-test.dev {
 	}
 }
 
-# Preview host: the same wallet on its own release (PREVIEW_TAG in the compose
-# file), where a big change goes live before ./deploy.sh promote moves the main
-# site to it. Caddy provisions its TLS certificate automatically. No usage
-# report here, a single rate-limit ceiling is enough for a staging host.
+# Preview uses its own release and data. deploy.sh promote moves the main site to the tested release. Caddy provisions HTTPS automatically.
 preview.eudi-test.dev {
 	handle {
 		reverse_proxy wallet-preview:8085

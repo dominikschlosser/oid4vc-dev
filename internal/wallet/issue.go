@@ -28,11 +28,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// DefaultIssueExpiry is the credential lifetime used when no expiry is given.
 const DefaultIssueExpiry = 720 * time.Hour
 
-// DefaultMDOCDocType is the doc type / namespace used for mdoc issuance when
-// none is given.
 const DefaultMDOCDocType = "eu.europa.ec.eudi.pid.1"
 
 // IssueOptions describes a credential to issue with the wallet's issuer key
@@ -88,20 +85,15 @@ type IssueOptions struct {
 	// issued credential type. Format, VCT, and DocType are overwritten with
 	// the resolved values.
 	Trust IssuedAttestationSpec
-	// Display sets the credential's §12.2.4 appearance (name, description,
-	// colors, logo and background image). Image fields take a data URI or an
-	// https URI, which is fetched through the policed client and cached. Nil
-	// leaves the credential without display metadata.
+	// Display follows OpenID4VCI §12.2.4. Cache data or HTTPS images with address
+	// checks. Nil supplies no explicit display metadata.
 	Display *IssueDisplay
-	// BatchSize issues this many distinct-key copies of the credential, tied
-	// into one batch so the wallet presents an unused copy each time (EUDI ARF
-	// method C). 0 or 1 issues a single credential. Needs holder binding, so it
-	// is rejected for jwt_vc_json.
+	// Issue copies with distinct holder keys for batch rotation (EUDI ARF method C).
+	// Values below two issue one credential. JWT VC batches are unsupported because
+	// they lack holder binding.
 	BatchSize int
-	// DisplayTemplate names the template whose display the credential wears,
-	// for a form that flattened a template's claims into explicit values. Its
-	// display is the base and an explicit Display is laid over it. Empty falls
-	// back to Template.
+	// Use this template's display when a form supplies claims separately. Explicit
+	// Display fields override it. Empty falls back to Template.
 	DisplayTemplate string
 	// SigningKey and SigningCertChain replace the wallet's issuer key and
 	// certificate chain for this issuance. Set together, and the leaf must
@@ -166,7 +158,6 @@ func (w *Wallet) judgeSigningChainAnchor(format string, chain []*x509.Certificat
 	return nil
 }
 
-// IssueDisplay is the appearance an operator sets for a self-issued credential.
 type IssueDisplay struct {
 	Name            string `json:"name"`
 	Description     string `json:"description"`
@@ -177,11 +168,8 @@ type IssueDisplay struct {
 	BackgroundImage string `json:"background_image"`
 }
 
-// IssueResult is the outcome of IssueCredential.
 type IssueResult struct {
-	// Raw is the encoded credential as printed by the issue commands.
-	Raw string
-	// Credential is the stored credential imported into the wallet.
+	Raw        string
 	Credential *StoredCredential
 	// StatusIdx is the status list index embedded in the credential. It is
 	// only meaningful when StatusRegistered is true.
@@ -189,15 +177,11 @@ type IssueResult struct {
 	// StatusRegistered reports whether the credential was registered on the
 	// wallet's own status list.
 	StatusRegistered bool
-	// TemplatePath is the file the issuance parameters were saved to when
-	// SaveTemplate was set.
-	TemplatePath string
+	TemplatePath     string
 }
 
-// IssueCredential issues a credential with the wallet's issuer key and
-// certificate chain, imports it into the wallet, and registers status and
-// issued-attestation metadata. The caller is responsible for persisting the
-// wallet afterwards.
+// IssueCredential requires the caller to save the wallet to persist the credential, status
+// and type registration.
 func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 	tpl, pidTemplate, err := w.resolveIssueTemplate(opts)
 	if err != nil {
@@ -312,9 +296,6 @@ func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 		issuer = "https://issuer.example"
 	}
 
-	// A bound credential carries the wallet holder key so the wallet can present
-	// it with a key binding. An unbound one carries no holder key at all (a
-	// bearer SD-JWT VC, or a deliberately malformed mdoc, see IssueOptions).
 	var holderPub *ecdsa.PublicKey
 	if !opts.Unbound && w.HolderKey != nil {
 		holderPub = &w.HolderKey.PublicKey
@@ -329,8 +310,6 @@ func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 		}
 	}
 
-	// signCopy issues one credential, holder-bound to holderPub and carrying the
-	// given status index.
 	signCopy := func(holderPub *ecdsa.PublicKey, statusIdx int) (string, error) {
 		// An override chain is embedded as given, so a chain carrying its
 		// root can be issued to test verifier rejection.
@@ -360,9 +339,8 @@ func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 		return "", fmt.Errorf("unsupported format %q", format)
 	}
 
-	// The credential's appearance is a template's, with any explicit fields
-	// laid over it, so choosing a template keeps its art even when the
-	// operator also sets a name or a color.
+	// Override display fields individually so setting a name or color preserves the
+	// template's artwork.
 	displaySource := tpl
 	if opts.DisplayTemplate != "" {
 		dt, err := credtemplate.Load(opts.DisplayTemplate, w.Templates)
@@ -407,9 +385,8 @@ func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 		w.RegisterStatusEntry(imported.ID, statusIdx)
 	}
 
-	// A batch issues the extra copies, each on its own key and (when the wallet
-	// governs the status) its own status index, tied to the primary so the
-	// wallet presents an unused copy each time.
+	// Use a separate holder key and status index for each batch copy so presentations
+	// can rotate without sharing identifiers.
 	if opts.BatchSize >= 2 {
 		group := newCredentialID()
 		w.setBatchFields(imported.ID, group, "")
@@ -484,12 +461,9 @@ func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 	return result, nil
 }
 
-// resolveIssueTemplate loads the template referenced by opts: an explicit
-// Template name or path, or the pre-defined PID template matching the format
-// and the requested PID type when PID is set without explicit claims.
-//
-// resolveIssueTemplate reports pidTemplate for a template it picked itself
-// from opts.PID, which the caller asked for by claim set rather than by name.
+// Select an explicit template or the PID template for the requested type. pidTemplate
+// distinguishes an inferred claim set from a named template, which must match the
+// format.
 func (w *Wallet) resolveIssueTemplate(opts IssueOptions) (tpl *credtemplate.Template, pidTemplate bool, err error) {
 	if name := strings.TrimSpace(opts.Template); name != "" {
 		tpl, err = credtemplate.Load(name, w.Templates)
@@ -507,7 +481,6 @@ func (w *Wallet) resolveIssueTemplate(opts IssueOptions) (tpl *credtemplate.Temp
 	return nil, false, nil
 }
 
-// mergeAlwaysDisclosed combines two always-disclosed lists without duplicates.
 func mergeAlwaysDisclosed(base, extra []string) []string {
 	seen := make(map[string]bool, len(base)+len(extra))
 	var out []string
@@ -524,8 +497,6 @@ func mergeAlwaysDisclosed(base, extra []string) []string {
 	return out
 }
 
-// formatIssueExpiry renders a duration as a compact Go duration string
-// (e.g. "720h" instead of "720h0m0s").
 func formatIssueExpiry(d time.Duration) string {
 	if d%time.Hour == 0 {
 		return fmt.Sprintf("%dh", int64(d/time.Hour))
@@ -581,9 +552,6 @@ func (w *Wallet) resolveIssueStatus(uri *string, idx *int) (string, int, bool, e
 	}
 }
 
-// splitClaimsByNamespace groups mdoc claims by namespace. Keys of the form
-// "namespace:element" go into that namespace, all other keys go into the
-// default namespace.
 func splitClaimsByNamespace(claims map[string]any, defaultNamespace string) map[string]map[string]any {
 	return mock.SplitClaimsByNamespace(claims, defaultNamespace)
 }

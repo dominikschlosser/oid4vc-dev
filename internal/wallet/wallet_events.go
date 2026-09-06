@@ -16,22 +16,18 @@ package wallet
 
 import "time"
 
-// Retention for the consent registry. The registry lives for the process
-// and a shared demo serves anonymous visitors, so it prunes itself: a
-// resolved request stays visible long enough for a late poll, and every
-// request goes eventually (the consent flows time out after five minutes,
-// so an hour-old pending entry has no waiter left).
+// Keep resolved requests long enough for late polling, then prune them. Consent
+// expires after five minutes, so an hour-old pending request has no waiter left.
 const (
 	resolvedConsentRetention = 10 * time.Minute
 	consentRequestMaxAge     = time.Hour
 )
 
-// CreateConsentRequest creates a new consent request and notifies subscribers.
 func (w *Wallet) CreateConsentRequest(req *ConsentRequest) {
 	rt := w.runtimeState()
 	rt.mu.Lock()
 	now := time.Now()
-	// The registry owns the timestamp its retention is measured against.
+	// Use the registry's timestamp for retention.
 	if req.CreatedAt.IsZero() {
 		req.CreatedAt = now
 	}
@@ -56,7 +52,6 @@ func (w *Wallet) CreateConsentRequest(req *ConsentRequest) {
 	}
 }
 
-// GetRequest returns a consent request by ID.
 func (w *Wallet) GetRequest(id string) (*ConsentRequest, bool) {
 	rt := w.runtimeState()
 	rt.mu.RLock()
@@ -65,14 +60,10 @@ func (w *Wallet) GetRequest(id string) (*ConsentRequest, bool) {
 	return req, ok
 }
 
-// statusExpired is what a request nobody answered in time becomes. Telling it
-// apart from "denied" is what lets the wallet say which one happened when it
-// refuses a late answer.
+// Distinguish timeout from denial when reporting why a late answer failed.
 const statusExpired = "expired"
 
-// ResolveRequest atomically transitions a consent request from "pending" to
-// the given status. It returns false if the request was not found or was
-// already resolved.
+// ResolveRequest returns false for missing or resolved requests.
 func (w *Wallet) ResolveRequest(id, status string) (*ConsentRequest, bool) {
 	rt := w.runtimeState()
 	rt.mu.Lock()
@@ -83,20 +74,15 @@ func (w *Wallet) ResolveRequest(id, status string) (*ConsentRequest, bool) {
 	}
 	req.Status = status
 	rt.mu.Unlock()
-	// The request is no longer pending, so every open stream is told to drop a
-	// dialog still showing it (another tab that also opened it, or the tab that
-	// started a flow this one resolved). NotifyStateChanged takes the lock, so
-	// it runs after the unlock above.
+	// Tell open tabs to close resolved dialogs. NotifyStateChanged acquires the lock,
+	// so call it after unlocking.
 	w.NotifyStateChanged()
 	return req, true
 }
 
-// PendingRequestDocsFor lists the pending requests one caller may see: its own,
-// the unowned ones, and one it names by id. The wallet hands that id to a
-// browser in the redirect it answers with, so a browser that keeps no cookie
-// still reaches the request it was redirected for. Marshaled under the
-// registry lock: Status is written under that lock when a request resolves, so
-// the snapshot and the read are ordered.
+// PendingRequestDocsFor includes owned and unowned requests and the redirect request ID
+// for browsers without cookies. Marshal under the registry lock because resolution changes
+// Status under that same lock.
 func (w *Wallet) PendingRequestDocsFor(owners []string, named string) []map[string]any {
 	rt := w.runtimeState()
 	rt.mu.RLock()
@@ -110,8 +96,7 @@ func (w *Wallet) PendingRequestDocsFor(owners []string, named string) []map[stri
 	return docs
 }
 
-// RequestDocFor marshals one consent request as one caller sees it, under the
-// registry lock that PendingRequestDocsFor holds for the same ordering reason.
+// RequestDocFor marshals under the registry lock to avoid racing status changes.
 func (w *Wallet) RequestDocFor(r *ConsentRequest, owners []string) map[string]any {
 	rt := w.runtimeState()
 	rt.mu.RLock()
@@ -119,15 +104,13 @@ func (w *Wallet) RequestDocFor(r *ConsentRequest, owners []string) map[string]an
 	return marshalConsentRequestFor(r, owners)
 }
 
-// marshalConsentRequestFor adds "mine", which is what decides between the
-// dialog and the banner.
+// The UI uses mine to choose between a consent dialog and a banner.
 func marshalConsentRequestFor(r *ConsentRequest, owners []string) map[string]any {
 	doc := MarshalConsentRequest(r)
 	doc["mine"] = ownedBy(owners, r.Owner)
 	return doc
 }
 
-// GetPendingRequests returns all pending consent requests.
 func (w *Wallet) GetPendingRequests() []*ConsentRequest {
 	rt := w.runtimeState()
 	rt.mu.RLock()
@@ -141,8 +124,7 @@ func (w *Wallet) GetPendingRequests() []*ConsentRequest {
 	return out
 }
 
-// AttachedUIs reports how many event streams are open. A wallet with one does
-// not need to open a browser for a request: the tab watching is told.
+// AttachedUIs counts event streams that can show consent without opening another tab.
 func (w *Wallet) AttachedUIs() int {
 	rt := w.runtimeState()
 	rt.mu.RLock()
@@ -150,7 +132,6 @@ func (w *Wallet) AttachedUIs() int {
 	return len(rt.subscribers)
 }
 
-// Subscribe returns a channel for new consent requests and an unsubscribe function.
 func (w *Wallet) Subscribe() (<-chan *ConsentRequest, func()) {
 	ch := make(chan *ConsentRequest, 16)
 	rt := w.runtimeState()
@@ -174,7 +155,6 @@ func (w *Wallet) Subscribe() (<-chan *ConsentRequest, func()) {
 	}
 }
 
-// SubscribeErrors returns a channel for error events and an unsubscribe function.
 func (w *Wallet) SubscribeErrors() (<-chan WalletError, func()) {
 	ch := make(chan WalletError, 16)
 	rt := w.runtimeState()
@@ -198,11 +178,9 @@ func (w *Wallet) SubscribeErrors() (<-chan WalletError, func()) {
 	}
 }
 
-// SubscribeAuthorization returns a channel carrying authorization URLs the user
-// must visit to finish an issuance, plus an unsubscribe function. A local
-// wallet opens one, a hosted wallet hands the URL to the open UI tab. Either
-// way the login happens inside the flow, between the authorization request and
-// the token exchange.
+// SubscribeAuthorization delivers issuer sign-in URLs between authorization and token
+// exchange. Hosted wallets deliver the URL to the existing browser tab. Local wallets can
+// open it directly.
 func (w *Wallet) SubscribeAuthorization() (<-chan AuthorizationPrompt, func()) {
 	ch := make(chan AuthorizationPrompt, 4)
 	rt := w.runtimeState()
@@ -226,9 +204,8 @@ func (w *Wallet) SubscribeAuthorization() (<-chan AuthorizationPrompt, func()) {
 	}
 }
 
-// NotifyAuthorization offers an authorization URL to the open UIs. It reports
-// whether anyone took it, so a wallet with no UI attached can fall back to
-// opening a browser locally.
+// NotifyAuthorization reports whether a UI received the URL so local wallets can open a
+// browser if needed.
 func (w *Wallet) NotifyAuthorization(prompt AuthorizationPrompt) bool {
 	rt := w.runtimeState()
 	rt.mu.Lock()
@@ -249,14 +226,11 @@ func (w *Wallet) NotifyAuthorization(prompt AuthorizationPrompt) bool {
 	return delivered
 }
 
-// NotifyError sends an error event to the subscribers it belongs to and stores
-// it for polling.
 func (w *Wallet) NotifyError(err WalletError) {
 	rt := w.runtimeState()
 	rt.mu.Lock()
 	now := time.Now()
-	// The unowned slot is a key like any other, so the oldest one is tracked
-	// with a flag rather than by an empty name.
+	// The empty key is the unowned slot, so it cannot also mark an unset oldest entry.
 	var oldest string
 	var haveOldest bool
 	for owner, stored := range rt.lastErrors {
@@ -268,7 +242,7 @@ func (w *Wallet) NotifyError(err WalletError) {
 			oldest, haveOldest = owner, true
 		}
 	}
-	// Callers choose the key, so age alone does not bound this.
+	// Caller-selected keys also require a count limit.
 	if _, held := rt.lastErrors[err.Owner]; !held && len(rt.lastErrors) >= maxStoredErrors && haveOldest {
 		delete(rt.lastErrors, oldest)
 	}
@@ -287,7 +261,7 @@ func (w *Wallet) NotifyError(err WalletError) {
 	}
 }
 
-// PeekLastError returns the last error one caller may read, without clearing.
+// PeekLastError leaves the error stored after reading.
 func (w *Wallet) PeekLastError(owners []string) *WalletError {
 	rt := w.runtimeState()
 	rt.mu.RLock()
@@ -301,11 +275,9 @@ func (w *Wallet) PeekLastError(owners []string) *WalletError {
 	return nil
 }
 
-// ClearLastError clears every slot the same caller may read, so an error a
-// caller was shown is one it can dismiss. The unowned slot is cleared too, on
-// a dismissal and when a caller starts something new, so a report nobody named
-// a browser for does not surface later against an unrelated flow. A client
-// with no browser prints its own failure where it was run.
+// ClearLastError clears owned and unowned errors visible to the caller. This lets users
+// dismiss every error they see and prevents a previous unowned failure from appearing
+// during a new flow.
 func (w *Wallet) ClearLastError(owners []string) {
 	rt := w.runtimeState()
 	rt.mu.Lock()
@@ -315,14 +287,12 @@ func (w *Wallet) ClearLastError(owners []string) {
 	}
 }
 
-// errorSlots are the slots a caller may read, its own first. The unowned slot
-// holds what a client that named no browser ran into, which is every client
-// with no browser to name, so it stays readable by all of them.
+// Read the caller's own error first. Unowned errors remain visible to everyone for
+// clients without browser sessions.
 func errorSlots(owners []string) []string {
 	return append(append([]string{}, owners...), "")
 }
 
-// SetNextError sets a one-shot error override for the next presentation request.
 func (w *Wallet) SetNextError(e *NextErrorOverride) {
 	rt := w.runtimeState()
 	rt.mu.Lock()
@@ -330,7 +300,6 @@ func (w *Wallet) SetNextError(e *NextErrorOverride) {
 	rt.nextError = e
 }
 
-// ConsumeNextError returns and clears the next error override, if any.
 func (w *Wallet) ConsumeNextError() *NextErrorOverride {
 	rt := w.runtimeState()
 	rt.mu.Lock()
@@ -340,9 +309,8 @@ func (w *Wallet) ConsumeNextError() *NextErrorOverride {
 	return e
 }
 
-// SubscribeState returns a channel that receives a signal whenever wallet
-// state changed (credentials, status entries, activity log), so open UIs can
-// refresh immediately. The signal carries no payload.
+// SubscribeState sends signals without a payload. Subscribers reload the changed wallet
+// data.
 func (w *Wallet) SubscribeState() (<-chan struct{}, func()) {
 	ch := make(chan struct{}, 1)
 	rt := w.runtimeState()
@@ -359,8 +327,7 @@ func (w *Wallet) SubscribeState() (<-chan struct{}, func()) {
 	}
 }
 
-// NotifyStateChanged signals all state subscribers. Sends never block: the
-// one-slot channel coalesces bursts into a single refresh.
+// NotifyStateChanged uses one buffered slot to combine bursts without blocking senders.
 func (w *Wallet) NotifyStateChanged() {
 	rt := w.runtimeState()
 	rt.mu.Lock()
@@ -377,28 +344,22 @@ func (w *Wallet) NotifyStateChanged() {
 	}
 }
 
-// AuthorizationPrompt is an issuer sign-in the wallet needs a browser to
-// perform. Owner is the browser whose issuance it belongs to, empty when the
-// client that started it named none.
+// AuthorizationPrompt uses Owner to identify the browser handling issuance. Empty means
+// the initiating client supplied no browser ID.
 type AuthorizationPrompt struct {
 	URL   string
 	Owner string
 }
 
-// storedError is the last error one owner ran into, with when it arrived. A
-// caller names its own owner, so the map is keyed by a value callers choose
-// and has to shed what nobody came back for.
+// Prune unread errors because callers select the map keys.
 type storedError struct {
 	err WalletError
 	at  time.Time
 }
 
-// lastErrorRetention is how long an unread error waits for the browser it
-// belongs to. It outlasts a page load and a reconnect, which is all the tab
-// needs to come back and read it.
+// Retain errors long enough for the browser to reload or reconnect.
 const lastErrorRetention = 10 * time.Minute
 
-// maxStoredErrors caps how many slots are held at once, because a caller names
-// its own and can name a new one on every call. Age alone would let a burst
-// grow the map before anything in it expires.
+// A caller can choose a new key on every request. A count limit bounds bursts before
+// entries expire.
 const maxStoredErrors = 64

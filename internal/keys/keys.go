@@ -32,16 +32,9 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/format"
 )
 
-// DIDReference returns the first of the given key identifiers that is a DID,
-// or the empty string when none of them is. Nothing in this toolkit resolves
-// one: HAIP 1.0 §6.1.1 carries an issuer's signing certificate and its trust
-// chain in the x5c header, and SD-JWT VC resolves iss over HTTPS. Callers use
-// the result to report a DID-only key as unresolvable rather than missing.
-//
-// Recognising such a mechanism without implementing it is the rule of
-// [ADR-0013].
-//
-// [ADR-0013]: docs/adr/0013-only-the-eudi-stack-is-supported.md
+// DIDReference identifies unsupported DID keys so callers can distinguish them from
+// missing keys. The toolkit resolves issuer keys through x5c (HAIP 1.0 §6.1.1) or HTTPS
+// issuer metadata (SD-JWT VC). See docs/adr/0013-only-the-eudi-stack-is-supported.md.
 func DIDReference(identifiers ...string) string {
 	for _, identifier := range identifiers {
 		trimmed := strings.TrimSpace(identifier)
@@ -52,7 +45,6 @@ func DIDReference(identifiers ...string) string {
 	return ""
 }
 
-// LoadPublicKey loads a public key from a PEM file or JWK JSON file.
 func LoadPublicKey(path string) (crypto.PublicKey, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -61,7 +53,6 @@ func LoadPublicKey(path string) (crypto.PublicKey, error) {
 	return ParsePublicKey(data)
 }
 
-// LoadPrivateKey loads a private key from a PEM file or JWK JSON file.
 func LoadPrivateKey(path string) (crypto.PrivateKey, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -70,7 +61,6 @@ func LoadPrivateKey(path string) (crypto.PrivateKey, error) {
 	return ParsePrivateKey(data)
 }
 
-// ParsePrivateKey parses a private key from PEM or JWK bytes.
 func ParsePrivateKey(data []byte) (crypto.PrivateKey, error) {
 	block, _ := pem.Decode(data)
 	if block != nil {
@@ -112,7 +102,6 @@ func ParseJWKPrivate(data []byte) (crypto.PrivateKey, error) {
 	}
 }
 
-// ParsePublicKey parses a public key from PEM or JWK bytes.
 func ParsePublicKey(data []byte) (crypto.PublicKey, error) {
 	block, _ := pem.Decode(data)
 	if block != nil {
@@ -152,7 +141,6 @@ func ParseJWKLenient(data []byte) (crypto.PublicKey, bool, error) {
 	}
 	repaired := padECCoordinates(data)
 	if bytes.Equal(repaired, data) {
-		// Nothing to repair, so the refusal above stands.
 		return nil, false, err
 	}
 	key, err = ParseJWK(repaired)
@@ -162,7 +150,6 @@ func ParseJWKLenient(data []byte) (crypto.PublicKey, bool, error) {
 	return key, true, nil
 }
 
-// ecCurveSizes is the byte width each curve's coordinates must have in a JWK.
 var ecCurveSizes = map[string]int{"P-256": 32, "P-384": 48, "P-521": 66}
 
 // padECCoordinates left pads short EC coordinates to the curve width. A

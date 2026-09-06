@@ -2,7 +2,9 @@
 
 This example runs Keycloak as an OpenID4VP verifier that signs users in with their wallet, and issues them a credential during that login. It uses the `keycloak-extension-oid4vp` subject-binding model.
 
-The user holds a PID (a country-independent EUDI PID from `eudi-dev`). On its own, a PID identifies no one to this realm, so the first wallet login asks for a password and then issues a `membership` credential that carries an opaque subject bound to that account. Every later login presents the PID together with the membership credential, and the subject in the membership credential signs the user in without a password.
+The wallet starts with an EUDI PID. On the first login, Keycloak also asks for the account password and issues a membership credential bound to that account.
+
+Later logins present both credentials. Keycloak reads the account subject from the membership credential and signs the user in without another password.
 
 The example starts Keycloak (26.7.2), a local `eudi wallet serve --docker` wallet holding the PID, and a Go relying party. Everything runs locally over HTTP.
 

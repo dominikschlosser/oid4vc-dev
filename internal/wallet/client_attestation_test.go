@@ -158,9 +158,8 @@ func silentAttestationIssuer(t *testing.T, w *Wallet) (*httptest.Server, string,
 	return srv, "openid-credential-offer://?credential_offer=" + url.QueryEscape(string(offerJSON)), &attestedRequests
 }
 
-// TestForceClientAttestation_ReachesSilentIssuer covers the override end to
-// end: off, the wallet correctly sends nothing and the issuer refuses. On, the
-// attestation goes out and the credential is issued.
+// The issuer rejects requests without an attestation. --client-attestation must let
+// the same offer complete.
 func TestForceClientAttestation_ReachesSilentIssuer(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -235,10 +234,8 @@ func TestHAIPDebugAttestsSilentIssuer(t *testing.T) {
 	}
 }
 
-// TestForceClientAttestation_DoesNotDisplacePrivateKeyJWT covers an
-// authorization server that authenticates its clients with private_key_jwt:
-// the client assertion already authenticates the request, so the override must
-// not add an attestation the server never asked for.
+// private_key_jwt already authenticates the client. The override must not add an
+// unnecessary attestation.
 func TestForceClientAttestation_DoesNotDisplacePrivateKeyJWT(t *testing.T) {
 	w := generateTestWallet(t)
 	w.ForceClientAttestation = true
@@ -255,12 +252,8 @@ func TestForceClientAttestation_DoesNotDisplacePrivateKeyJWT(t *testing.T) {
 	}
 }
 
-// TestDetectTokenEndpointAuthMethod covers the choice among the methods an
-// authorization server offers. Signing a wallet attestation is within this
-// wallet's own means, so it is sent wherever the server takes it, and what the
-// server makes of an attester it was never given is the server's decision. A
-// method that asks nothing of the client is used only where nothing better is
-// offered, so a public-client-only server is still usable.
+// Prefer an advertised attestation method over unauthenticated access. The issuer
+// decides whether it trusts the attester.
 func TestDetectTokenEndpointAuthMethod(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

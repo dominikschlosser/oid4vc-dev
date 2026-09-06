@@ -145,8 +145,6 @@ func TestParsePublicKey_InvalidData(t *testing.T) {
 	}
 }
 
-// --- Private key tests ---
-
 func TestParsePrivateKey_PEM_EC(t *testing.T) {
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	der, _ := x509.MarshalECPrivateKey(key)
@@ -223,8 +221,6 @@ func TestLoadPrivateKey_FileNotFound(t *testing.T) {
 		t.Error("expected error for missing file")
 	}
 }
-
-// --- JWK private key tests ---
 
 func TestParseJWKPrivate_EC(t *testing.T) {
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -311,8 +307,6 @@ func TestParseJWKPrivate_InvalidJSON(t *testing.T) {
 	}
 }
 
-// --- JWK public RSA key test ---
-
 func TestParseJWK_RSA(t *testing.T) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	jwk := map[string]any{
@@ -335,8 +329,6 @@ func TestParseJWK_RSA(t *testing.T) {
 	}
 }
 
-// --- Certificate PEM test ---
-
 func TestParsePublicKey_Certificate(t *testing.T) {
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	template := &x509.Certificate{
@@ -354,8 +346,6 @@ func TestParsePublicKey_Certificate(t *testing.T) {
 	}
 }
 
-// --- ParsePrivateKey via JWK (non-PEM input) ---
-
 func TestParsePrivateKey_JWK(t *testing.T) {
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	data := ecPrivateJWK(t, key, "P-256")
@@ -368,8 +358,6 @@ func TestParsePrivateKey_JWK(t *testing.T) {
 		t.Fatalf("expected *ecdsa.PrivateKey, got %T", priv)
 	}
 }
-
-// --- Additional coverage tests ---
 
 func TestParseJWK_EC_P384(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)

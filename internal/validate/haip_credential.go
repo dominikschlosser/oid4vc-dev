@@ -99,8 +99,7 @@ func HAIPCredentialChain(chain []*x509.Certificate) []string {
 	return violations
 }
 
-// SelfSignedCertificate reports whether a certificate is its own issuer, which
-// is what a trust anchor looks like inside a chain that must not carry one.
+// SelfSignedCertificate checks whether a certificate verifies with its own public key.
 func SelfSignedCertificate(cert *x509.Certificate) bool {
 	if cert == nil {
 		return false

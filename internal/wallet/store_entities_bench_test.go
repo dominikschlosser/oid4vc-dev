@@ -28,8 +28,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
-// BenchmarkEntitySaveWithManyCredentials times the save of one new log entry
-// and one new credential on a wallet that already holds many.
 func BenchmarkEntitySaveWithManyCredentials(b *testing.B) {
 	quietLogs(b)
 	store := NewWalletStoreOn(filepath.Join(b.TempDir(), "wallet"), storage.NewMemory())
@@ -43,7 +41,7 @@ func BenchmarkEntitySaveWithManyCredentials(b *testing.B) {
 	if err := store.Save(w); err != nil {
 		b.Fatal(err)
 	}
-	// The credentials to add are built up front, so the loop times the save.
+	// Create credentials before timing so the benchmark measures saving only.
 	pool := New(w.HolderKey, w.IssuerKey, false)
 	for i := 0; i < b.N; i++ {
 		importTestCredential(b, pool, "New")
@@ -58,8 +56,6 @@ func BenchmarkEntitySaveWithManyCredentials(b *testing.B) {
 	}
 }
 
-// BenchmarkEntityLoadOneAddedCredential times bringing a wallet of many
-// credentials up to date after another server added one.
 func BenchmarkEntityLoadOneAddedCredential(b *testing.B) {
 	quietLogs(b)
 	backend := storage.NewMemory()
@@ -98,8 +94,6 @@ func BenchmarkEntityLoadOneAddedCredential(b *testing.B) {
 	}
 }
 
-// BenchmarkServerIssueWithManyCredentials times POST /api/issue on a server
-// whose wallet already holds many credentials.
 func BenchmarkServerIssueWithManyCredentials(b *testing.B) {
 	quietLogs(b)
 	srv := newTestServer(b, false)
@@ -121,9 +115,6 @@ func BenchmarkServerIssueWithManyCredentials(b *testing.B) {
 	}
 }
 
-// BenchmarkServerPresentWithManyCredentials times an auto-accepted
-// presentation to a local verifier on a server whose wallet already holds
-// many credentials of the requested type.
 func BenchmarkServerPresentWithManyCredentials(b *testing.B) {
 	quietLogs(b)
 	srv := newTestServer(b, true)
@@ -172,7 +163,6 @@ func BenchmarkServerPresentWithManyCredentials(b *testing.B) {
 	}
 }
 
-// quietLogs keeps the server's log lines out of the benchmark output.
 func quietLogs(b *testing.B) {
 	previous := log.Writer()
 	log.SetOutput(io.Discard)

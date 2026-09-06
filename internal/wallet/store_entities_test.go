@@ -33,7 +33,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
-// changedSections is store.changedSections with the error failing the test.
 func changedSections(t *testing.T, store *WalletStore, w *Wallet, includeLog bool) []string {
 	t.Helper()
 	changed, err := store.changedSections(w, includeLog)
@@ -63,9 +62,6 @@ func importTestCredential(t testing.TB, w *Wallet, vct string) string {
 	return cred.ID
 }
 
-// On an entity backend every part of the wallet survives a save and a load:
-// credentials in the order they were added, the log in time order, status
-// entries, deferred issuances, issued attestations and the serving URLs.
 func TestEntities_RoundTrip(t *testing.T) {
 	store, backend := entityStore(t)
 	w, err := store.LoadOrCreate()
@@ -114,8 +110,7 @@ func TestEntities_RoundTrip(t *testing.T) {
 	}
 }
 
-// Two servers on one store keep each other's changes: a save writes the
-// entities that changed in that server's wallet and leaves the rest alone.
+// Each server saves only its changed entities so unrelated concurrent changes survive.
 func TestEntities_ConcurrentOpenersKeepEachOthersWrites(t *testing.T) {
 	store, backend := entityStore(t)
 	a, err := store.LoadOrCreate()
@@ -156,8 +151,6 @@ func TestEntities_ConcurrentOpenersKeepEachOthersWrites(t *testing.T) {
 		t.Fatalf("log = %+v", merged.Log)
 	}
 
-	// A removal by one server reaches the store, and a second server that
-	// reloads sees it gone while its own additions stay.
 	a.RemoveCredential(fromA)
 	if err := store.Save(a); err != nil {
 		t.Fatal(err)
@@ -175,8 +168,6 @@ func TestEntities_ConcurrentOpenersKeepEachOthersWrites(t *testing.T) {
 	}
 }
 
-// The status list index comes from a counter shared through the store, so
-// two servers issuing at the same time never hand out the same index.
 func TestEntities_StatusIndicesAreUniqueAcrossOpeners(t *testing.T) {
 	store, backend := entityStore(t)
 	a, err := store.LoadOrCreate()
@@ -218,7 +209,6 @@ func TestEntities_StatusIndicesAreUniqueAcrossOpeners(t *testing.T) {
 	}
 }
 
-// A reset to the baseline leaves no entity behind.
 func TestEntities_ResetClearsTheStore(t *testing.T) {
 	store, backend := entityStore(t)
 	w, err := store.LoadOrCreate()
@@ -248,10 +238,9 @@ func TestEntities_ResetClearsTheStore(t *testing.T) {
 	}
 }
 
-// A save whose snapshot a reload replaced in the meantime leaves the reload's
-// snapshot in place. The reload also replaced the wallet's state, so that
-// snapshot is the one that describes it, and nothing the reload dropped from
-// memory is deleted by the next save.
+// If a concurrent reload replaces the snapshot, retain it. It describes the current
+// in-memory state and prevents the next save from treating reloaded changes as
+// deletions.
 func TestEntities_ReloadDuringSaveKeepsTheReloadedSnapshot(t *testing.T) {
 	store, backend := entityStore(t)
 	w, err := store.LoadOrCreate()
@@ -262,8 +251,8 @@ func TestEntities_ReloadDuringSaveKeepsTheReloadedSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := importTestCredential(t, w, "First")
-	// The reload lands after the save read the wallet and before it
-	// finished: the store's snapshot is what the reload put there.
+	// Simulate a reload after the save captured the wallet but before it finished
+	// writing.
 	other, err := NewWalletStoreOn(store.Dir, backend).LoadOrCreate()
 	if err != nil {
 		t.Fatal(err)
@@ -281,8 +270,6 @@ func TestEntities_ReloadDuringSaveKeepsTheReloadedSnapshot(t *testing.T) {
 	if !w.persisted.is(reloadedSnapshot) {
 		t.Fatal("the save replaced the snapshot the reload put in place")
 	}
-	// The next save has nothing to delete, and the store still holds the
-	// credential the save wrote.
 	if err := store.Save(w); err != nil {
 		t.Fatal(err)
 	}
@@ -291,14 +278,10 @@ func TestEntities_ReloadDuringSaveKeepsTheReloadedSnapshot(t *testing.T) {
 	}
 }
 
-// The index the shared counter hands out is the one the issued credential's
-// status claim carries, so two servers issuing at the same time produce
-// distinct status claims.
 func TestEntities_ServersIssueWithDistinctStatusIndices(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "wallet")
 	backend := storage.NewMemory()
-	// The store is created once up front, as the first server of a
-	// deployment does before the next one starts.
+	// Create shared state before starting the concurrent servers.
 	if _, err := NewWalletStoreOn(dir, backend).LoadOrCreate(); err != nil {
 		t.Fatal(err)
 	}
@@ -338,9 +321,8 @@ func TestEntities_ServersIssueWithDistinctStatusIndices(t *testing.T) {
 	}
 }
 
-// A server sees which sections another opener changed, and none for its own
-// saves, so a presentation on one server costs the others nothing and an
-// issuance costs them the credential section once.
+// A server should reload sections changed by other servers without rereading its own
+// saved changes.
 func TestEntities_ChangedSectionsNameWhatOthersChanged(t *testing.T) {
 	store, backend := entityStore(t)
 	w, err := store.LoadOrCreate()
@@ -396,8 +378,7 @@ func TestEntities_ChangedSectionsNameWhatOthersChanged(t *testing.T) {
 	}
 }
 
-// A save never moves the shared status counter back: a server whose wallet
-// still holds an older counter leaves the store's value in place.
+// A stale server must not reduce the shared status counter.
 func TestEntities_SaveLeavesTheSharedCounterAlone(t *testing.T) {
 	store, backend := entityStore(t)
 	a, err := store.LoadOrCreate()
@@ -430,8 +411,7 @@ func TestEntities_SaveLeavesTheSharedCounterAlone(t *testing.T) {
 	}
 }
 
-// A server whose snapshot is behind the store rewrites a credential another
-// server added under the same key, so the store never lists it twice.
+// Saving an entity already added by another server must not duplicate it.
 func TestEntities_StaleSnapshotRewritesTheSameRow(t *testing.T) {
 	store, backend := entityStore(t)
 	a, err := store.LoadOrCreate()
@@ -454,7 +434,7 @@ func TestEntities_StaleSnapshotRewritesTheSameRow(t *testing.T) {
 	if err := second.Save(b); err != nil {
 		t.Fatal(err)
 	}
-	// b's state is refreshed from the store while its snapshot stays behind.
+	// Refresh b's wallet while retaining its older snapshot.
 	behind := b.persisted
 	fresh, err := NewWalletStoreOn(store.Dir, backend).LoadOrCreate()
 	if err != nil {
@@ -471,7 +451,6 @@ func TestEntities_StaleSnapshotRewritesTheSameRow(t *testing.T) {
 	}
 }
 
-// countingStore counts the credential rows read and the rows written.
 type countingStore struct {
 	storage.Store
 	reads, writes atomic.Int64
@@ -504,9 +483,8 @@ func (c *countingStore) ReadAll(prefix string) (map[string]storage.Blob, error) 
 	return blobs, err
 }
 
-// A credential another server added is loaded on its own: the rows already
-// held keep their parsed form and are not read again, and a change made in
-// memory to one of them is still saved afterwards.
+// Read only new or changed rows. Preserve unsaved changes in unchanged credential
+// objects.
 func TestEntities_LoadReadsOnlyTheRowsThatChanged(t *testing.T) {
 	backend := &countingStore{Store: storage.NewMemory()}
 	dir := filepath.Join(t.TempDir(), "wallet")
@@ -561,8 +539,7 @@ func TestEntities_LoadReadsOnlyTheRowsThatChanged(t *testing.T) {
 	}
 }
 
-// Every logTrimEvery saves the store drops the oldest log rows beyond the
-// cap and marks the log changed, so the other servers reload it.
+// Trimming must update the log revision so other servers see the removed entries.
 func TestEntities_StoredLogIsTrimmed(t *testing.T) {
 	store, backend := entityStore(t)
 	w, err := store.LoadOrCreate()
@@ -604,9 +581,8 @@ func TestEntities_StoredLogIsTrimmed(t *testing.T) {
 	}
 }
 
-// A log entry a server appends is stored on its own and reaches another
-// server's log view, and the server's next full save has nothing to write
-// for it.
+// A direct log append must update the snapshot so a later save does not write it
+// again.
 func TestEntities_AppendedLogEntryIsStoredOnItsOwn(t *testing.T) {
 	backend := &countingStore{Store: storage.NewMemory()}
 	store := NewWalletStoreOn(filepath.Join(t.TempDir(), "wallet"), backend)
@@ -655,8 +631,7 @@ func TestEntities_AppendedLogEntryIsStoredOnItsOwn(t *testing.T) {
 	}
 }
 
-// A credential whose raw form does not parse stays in the wallet, so one
-// bad row never takes the whole wallet down.
+// A malformed credential row must not prevent loading the rest of the wallet.
 func TestEntities_LoadKeepsACredentialItCannotRehydrate(t *testing.T) {
 	store, backend := entityStore(t)
 	w, err := store.LoadOrCreate()
@@ -695,8 +670,6 @@ func TestEntities_LoadKeepsACredentialItCannotRehydrate(t *testing.T) {
 	}
 }
 
-// A served wallet on an entity backend appends each log entry as one row
-// through the log sink and loads the log only for the log views.
 func TestEntities_ServerAppendsLogRowsAndLoadsTheLogOnDemand(t *testing.T) {
 	srv := newTestServer(t, false)
 	backend := &countingStore{Store: storage.NewMemory()}

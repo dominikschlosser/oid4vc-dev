@@ -83,13 +83,11 @@ func TestIssueWithSigningOverride(t *testing.T) {
 		}
 	}
 
-	// Strict mode refuses the same chain.
 	w.ValidationMode = ValidationModeStrict
 	if _, err := w.IssueCredential(opts); err == nil || !strings.Contains(err.Error(), "self-signed root") {
 		t.Errorf("strict mode must refuse a chain carrying its root, got %v", err)
 	}
 
-	// A chain without the root issues without a finding in strict mode too.
 	opts.SigningCertChain = []*x509.Certificate{leaf}
 	if _, err := w.IssueCredential(opts); err != nil {
 		t.Errorf("a rootless chain must issue in strict mode: %v", err)

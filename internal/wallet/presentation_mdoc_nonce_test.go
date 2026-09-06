@@ -26,12 +26,9 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mdoc"
 )
 
-// The presentation carries each selected element from the parsed item's own
-// RawCBOR, not from the raw nameSpaces array by position. The parser can leave
-// that array shorter or reordered (it skips unparseable items and drops
-// repeated element identifiers), so indexing it by the parsed position would
-// disclose the wrong element. Here the raw array is reversed against the parsed
-// order, which a positional selection would get wrong.
+// The parser can skip invalid items and duplicate element identifiers. Selecting by
+// position in the raw array could therefore disclose the wrong element. Reversing the
+// raw array here checks that selection uses each parsed item's RawCBOR.
 func TestCreateMDocPresentationSelectsElementByIdentifier(t *testing.T) {
 	w := generateTestWallet(t)
 
@@ -82,8 +79,6 @@ func TestCreateMDocPresentationSelectsElementByIdentifier(t *testing.T) {
 	}
 }
 
-// mdocMatches builds one match per stored mdoc credential, each under its own
-// credential query id, disclosing everything it holds.
 func mdocMatches(t *testing.T, w *Wallet) []CredentialMatch {
 	t.Helper()
 	var matches []CredentialMatch
@@ -106,11 +101,9 @@ func mdocMatches(t *testing.T, w *Wallet) []CredentialMatch {
 	return matches
 }
 
-// ISO 18013-7 Annex B carries one mdoc generated nonce per response, in the
-// apu of the encrypted response, and the verifier rebuilds every document's
-// session transcript from it. A response holding several mdocs therefore has
-// to sign them all over the same nonce: a nonce generated per document leaves
-// every document but the reported one unverifiable.
+// ISO 18013-7 Annex B carries one generated nonce per response in apu. The verifier
+// uses that nonce to rebuild every document's transcript. All documents must therefore
+// use the same nonce.
 func TestISOResponseSignsEveryMDocOverTheReportedNonce(t *testing.T) {
 	w := pidBaselineWallet(t)
 	w.SessionTranscript = SessionTranscriptISO
@@ -133,8 +126,6 @@ func TestISOResponseSignsEveryMDocOverTheReportedNonce(t *testing.T) {
 		t.Fatal("ISO mode reported no mdoc generated nonce")
 	}
 
-	// What the verifier reconstructs: one transcript, from the one nonce the
-	// response carries.
 	transcript, err := buildSessionTranscriptISO(params.ClientID, params.ResponseURI, params.Nonce, result.MDocNonce)
 	if err != nil {
 		t.Fatalf("rebuilding the session transcript: %v", err)

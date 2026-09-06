@@ -35,7 +35,6 @@ const (
 // The JWT type MUST be statuslist+jwt."
 const TypJWT = "statuslist+jwt"
 
-// Format names reported in a StatusResult.
 const (
 	FormatJWT = "jwt"
 	FormatCWT = "cwt"
@@ -70,7 +69,6 @@ type StatusRef struct {
 	Invalid string `json:"invalid,omitempty"`
 }
 
-// StatusResult contains the revocation check result.
 type StatusResult struct {
 	URI          string `json:"uri"`
 	Index        int    `json:"index"`
@@ -94,7 +92,6 @@ type StatusResult struct {
 	Error    string   `json:"error,omitempty"`
 }
 
-// CheckOptions configures validation behavior for status list checks.
 type CheckOptions struct {
 	// TrustListCerts are the CA certificates the token's chain must validate
 	// against. When empty the key comes from the token itself and the result
@@ -119,7 +116,6 @@ func (o CheckOptions) now() time.Time {
 	return o.Now
 }
 
-// TrustCert holds a raw trust list certificate for chain validation.
 type TrustCert struct {
 	Raw []byte
 }

@@ -22,33 +22,22 @@ import (
 )
 
 const (
-	// DefaultWalletPort is the default port for the wallet HTTP server.
 	DefaultWalletPort = 8085
 
-	// DefaultServePort is the default port for the decode/validate web UI.
 	DefaultServePort = 8080
 
-	// DefaultProxyPort is the default port for the debugging reverse proxy.
 	DefaultProxyPort = 9090
 
-	// DefaultProxyDashboardPort is the default port for the proxy's dashboard,
-	// which serves the recorded traffic to the browser and to `proxy logs`.
 	DefaultProxyDashboardPort = 9091
 
-	// ConsentTimeout is how long the wallet waits for interactive consent before timing out.
 	ConsentTimeout = 5 * time.Minute
 
-	// AuthorizationCallbackWait is how long an authorization code flow waits
-	// for the user to finish signing in at the issuer. The CLI follows the
-	// offer for the same span, so it stops looking when the flow it is
-	// watching has already given up.
+	// The CLI uses the same timeout as the authorization flow so it stops polling when
+	// the wallet stops waiting for sign-in.
 	AuthorizationCallbackWait = 5 * time.Minute
 
-	// SlowRequestTimeout covers the requests that legitimately outlast a normal
-	// round trip: an authorization code flow waits for the user to sign in at
-	// the issuer, and a consent approval waits for the flow behind it. It
-	// bounds the wallet server's response write, the remote CLI client, and
-	// the consent approval wait.
+	// Sign-in and consent can take longer than ordinary HTTP requests. This timeout
+	// covers server response writes, remote CLI requests and consent approval waits.
 	SlowRequestTimeout = 2 * time.Minute
 )
 

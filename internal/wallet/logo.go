@@ -14,7 +14,6 @@
 
 package wallet
 
-// LogoSVG returns the eudi-dev logo the demo issuer serves at its logo route.
 func LogoSVG() []byte {
 	data, err := staticFiles.ReadFile("static/logo.svg")
 	if err != nil {

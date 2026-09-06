@@ -21,8 +21,6 @@ import (
 	"github.com/veraison/go-cose"
 )
 
-// buildIssuerSignedCBOR builds a minimal CBOR-encoded IssuerSigned map
-// with the given namespace items. Each item is Tag-24 wrapped.
 func buildIssuerSignedCBOR(t *testing.T, namespace string, items []map[string]any) []byte {
 	t.Helper()
 

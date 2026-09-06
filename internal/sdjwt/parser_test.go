@@ -22,7 +22,6 @@ import (
 	"testing"
 )
 
-// buildTestSDJWT creates a minimal SD-JWT for testing.
 func buildTestSDJWT(t *testing.T, payload map[string]any, disclosures [][]any) string {
 	t.Helper()
 
@@ -30,7 +29,6 @@ func buildTestSDJWT(t *testing.T, payload map[string]any, disclosures [][]any) s
 	headerJSON, _ := json.Marshal(header)
 	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
 
-	// If payload has _sd, compute real digests from disclosures
 	if _, has := payload["_sd"]; has && len(disclosures) > 0 {
 		var digests []string
 		for _, d := range disclosures {
@@ -68,7 +66,7 @@ func TestParse_BasicSDJWT(t *testing.T) {
 		"iss":     "https://issuer.example",
 		"vct":     "urn:eudi:pid:1",
 		"_sd_alg": "sha-256",
-		"_sd":     nil, // will be computed
+		"_sd":     nil,
 	}
 
 	raw := buildTestSDJWT(t, payload, disclosures)
@@ -289,7 +287,6 @@ func TestParse_ArrayDisclosure(t *testing.T) {
 }
 
 func TestCheckFullyUndisclosedChildren(t *testing.T) {
-	// No warnings for simple disclosures
 	warnings := checkFullyUndisclosedChildren([]Disclosure{
 		{Name: "name", Value: "Max", Digest: "d1"},
 	})
@@ -297,7 +294,6 @@ func TestCheckFullyUndisclosedChildren(t *testing.T) {
 		t.Errorf("expected no warnings, got %v", warnings)
 	}
 
-	// Warning: array with all undisclosed elements
 	warnings = checkFullyUndisclosedChildren([]Disclosure{
 		{
 			Name: "addresses",
@@ -312,7 +308,6 @@ func TestCheckFullyUndisclosedChildren(t *testing.T) {
 		t.Fatalf("expected 1 warning, got %d", len(warnings))
 	}
 
-	// No warning: array with some disclosed elements
 	warnings = checkFullyUndisclosedChildren([]Disclosure{
 		{
 			Name:   "addresses",
@@ -324,7 +319,6 @@ func TestCheckFullyUndisclosedChildren(t *testing.T) {
 		t.Errorf("expected no warnings for partially disclosed array, got %v", warnings)
 	}
 
-	// Warning: map with all undisclosed sub-claims
 	warnings = checkFullyUndisclosedChildren([]Disclosure{
 		{
 			Name: "address",
@@ -338,7 +332,6 @@ func TestCheckFullyUndisclosedChildren(t *testing.T) {
 		t.Fatalf("expected 1 warning for fully undisclosed map, got %d", len(warnings))
 	}
 
-	// No warning: map with visible claims besides _sd
 	warnings = checkFullyUndisclosedChildren([]Disclosure{
 		{
 			Name: "address",
@@ -353,7 +346,6 @@ func TestCheckFullyUndisclosedChildren(t *testing.T) {
 		t.Errorf("expected no warnings for map with visible claims, got %v", warnings)
 	}
 
-	// Array entries are skipped
 	warnings = checkFullyUndisclosedChildren([]Disclosure{
 		{IsArrayEntry: true, Value: []any{map[string]any{"...": "x"}}, Digest: "d1"},
 	})

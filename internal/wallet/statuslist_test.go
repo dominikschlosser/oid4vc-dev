@@ -26,8 +26,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
-// --- Wallet Status Entry Tests ---
-
 func TestSetCredentialStatus(t *testing.T) {
 	w := generateTestWallet(t)
 	w.StatusEntries = map[string]StatusEntry{
@@ -122,8 +120,6 @@ func TestBuildStatusList_MinimumSize(t *testing.T) {
 	}
 }
 
-// --- Credential Generation with Status List ---
-
 func TestGenerateDefaultCredentials_WithStatusList(t *testing.T) {
 	w := generateTestWallet(t)
 	w.BaseURL = "http://localhost:8085"
@@ -166,7 +162,6 @@ func TestGenerateDefaultCredentials_WithStatusList(t *testing.T) {
 		t.Errorf("expected idx=0, got %v", sl["idx"])
 	}
 
-	// Status entries should map to correct credentials
 	for credID, entry := range w.StatusEntries {
 		if entry.Status != 0 {
 			t.Errorf("credential %s: expected status 0, got %d", credID, entry.Status)
@@ -176,7 +171,6 @@ func TestGenerateDefaultCredentials_WithStatusList(t *testing.T) {
 
 func TestGenerateDefaultCredentials_WithoutStatusList(t *testing.T) {
 	w := generateTestWallet(t)
-	// BaseURL not set. Status list disabled
 
 	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
 		t.Fatalf("GenerateDefaultCredentials: %v", err)
@@ -213,17 +207,13 @@ func TestGenerateDefaultCredentials_StatusIndexIncrement(t *testing.T) {
 		t.Errorf("expected counter=2 after first generation, got %d", w.StatusListCounter)
 	}
 
-	// Generate second batch (replaces existing PIDs)
 	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
 		t.Fatalf("second GenerateDefaultCredentials: %v", err)
 	}
-	// Counter should continue incrementing, not reset
 	if w.StatusListCounter != 4 {
 		t.Errorf("expected counter=4 after second generation, got %d", w.StatusListCounter)
 	}
 }
-
-// --- Server Status List API Tests ---
 
 func TestStatusListAPI(t *testing.T) {
 	srv := newTestServer(t, false)
@@ -354,8 +344,6 @@ func TestSetCredentialStatusAPI_InvalidJSON(t *testing.T) {
 	}
 }
 
-// --- Store Persistence Tests ---
-
 func TestWalletStore_StatusEntriesPersistence(t *testing.T) {
 	dir := t.TempDir()
 	store := NewWalletStore(dir)
@@ -395,8 +383,6 @@ func TestWalletStore_StatusEntriesPersistence(t *testing.T) {
 	}
 }
 
-// --- SD-JWT Status Claim Tests ---
-
 func TestGenerateSDJWT_WithStatusList(t *testing.T) {
 	key, _ := mock.GenerateKey()
 
@@ -420,7 +406,7 @@ func TestGenerateSDJWT_WithStatusList(t *testing.T) {
 		t.Fatalf("sdjwt.Parse: %v", err)
 	}
 
-	// status should be in the payload (not selectively disclosed)
+	// status must be available without selective disclosure.
 	status, ok := token.Payload["status"].(map[string]any)
 	if !ok {
 		t.Fatal("expected status in payload")
@@ -463,10 +449,9 @@ func TestGenerateSDJWT_WithoutStatusList(t *testing.T) {
 	}
 }
 
-// A credential that points at the wallet's own status list is one the wallet
-// can revoke, whoever handed it over. The demo issuer runs on the same host
-// and hands out exactly that, and without an entry of its own the wallet
-// would offer no way to flip the bit.
+// Import adopts status entries that reference this wallet's own list, including
+// credentials received from the demo issuer. Without a local entry, the wallet cannot
+// revoke them.
 func TestImportAdoptsOwnStatusListEntry(t *testing.T) {
 	w := generateTestWallet(t)
 	w.BaseURL = "http://localhost:8085"
@@ -509,8 +494,7 @@ func TestImportAdoptsOwnStatusListEntry(t *testing.T) {
 	}
 }
 
-// A wallet without a status list of its own must not claim entries on
-// whatever list a credential happens to reference.
+// A wallet without its own status list cannot manage imported status entries.
 func TestImportAdoptsNothingWithoutAStatusList(t *testing.T) {
 	w := generateTestWallet(t)
 	raw, err := mock.GenerateSDJWT(mock.SDJWTConfig{
@@ -534,11 +518,8 @@ func TestImportAdoptsNothingWithoutAStatusList(t *testing.T) {
 	}
 }
 
-// A credential that points at this wallet's status list has its index adopted
-// on import, so the number is whoever issued the credential. A negative one is
-// dropped rather than stored, since building the bitstring (on every request
-// for the status list) would panic on a negative shift. On a demo instance
-// both importing and reading the list are open.
+// Imported credentials supply their own status index. Reject negative indices before
+// building the list, where a negative shift would panic.
 func TestStatusBitstring_SurvivesANegativeAdoptedIndex(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -558,7 +539,6 @@ func TestStatusBitstring_SurvivesANegativeAdoptedIndex(t *testing.T) {
 		t.Fatal("no bitstring was produced")
 	}
 
-	// The negative entry is dropped outright, and the honest one still lands.
 	if _, ok := w.StatusEntries["hostile"]; ok {
 		t.Error("a negative index was stored")
 	}
@@ -567,8 +547,7 @@ func TestStatusBitstring_SurvivesANegativeAdoptedIndex(t *testing.T) {
 	}
 }
 
-// A status outside the range a status type may take cannot be published, and
-// the answer has to say that rather than report the credential as unknown.
+// Report an invalid status value separately from an unknown credential.
 func TestSetCredentialStatusRejectsAnOutOfRangeValueClearly(t *testing.T) {
 	srv := newTestServer(t, true)
 
@@ -576,8 +555,7 @@ func TestSetCredentialStatusRejectsAnOutOfRangeValueClearly(t *testing.T) {
 	if len(creds) == 0 {
 		t.Fatal("test wallet holds no credentials")
 	}
-	// Registered here rather than searched for, so the case under test always
-	// exists: a skipped test proves nothing about the range check.
+	// Register the credential explicitly so the test always exercises the range check.
 	id := creds[0].ID
 	idx, err := srv.wallet.NextStatusIndex()
 	if err != nil {

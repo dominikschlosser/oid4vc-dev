@@ -24,13 +24,11 @@ import (
 	"testing"
 )
 
-// apiPost is a test helper that posts JSON to /api/decode and returns the recorder.
 func apiPost(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	return apiPostTo(t, "/api/decode", body)
 }
 
-// apiPostTo is a test helper that posts JSON to a given path.
 func apiPostTo(t *testing.T, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
@@ -40,7 +38,6 @@ func apiPostTo(t *testing.T, path, body string) *httptest.ResponseRecorder {
 	return w
 }
 
-// decodeResponse unmarshals the response body into a map.
 func decodeResponse(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
 	t.Helper()
 	var result map[string]any
@@ -121,7 +118,6 @@ func TestHandleDecode_JWTResponseStructure(t *testing.T) {
 
 	result := decodeResponse(t, w)
 
-	// Must include the decoded JWT structure.
 	for _, key := range []string{"format", "header", "payload"} {
 		if _, ok := result[key]; !ok {
 			t.Errorf("missing key %q in response", key)
@@ -307,7 +303,6 @@ func TestHandleDecode_ErrorResponseContentType(t *testing.T) {
 }
 
 func TestHandleDecode_MalformedJWT(t *testing.T) {
-	// Three dots make it look like JWT to format detection, but content is invalid
 	w := apiPost(t, `{"input":"aaa.bbb.ccc"}`)
 
 	if w.Code != http.StatusUnprocessableEntity {
@@ -540,7 +535,7 @@ func TestHandleDecode_JWTWithTimestamps(t *testing.T) {
 	result := decodeResponse(t, w)
 	p := result["payload"].(map[string]any)
 
-	// Timestamps stay numbers, the UI renders hover times from them.
+	// Keep timestamps numeric so the UI can format hover text.
 	if _, ok := p["iat"]; !ok {
 		t.Error("payload should contain iat")
 	}
@@ -584,7 +579,7 @@ func TestHandleDecode_SDJWTResolvedClaims(t *testing.T) {
 		t.Errorf("resolvedClaims.family_name = %v, want Mustermann", resolved["family_name"])
 	}
 
-	// The UI keys disclosure truncation on the digest field.
+	// The UI uses digest to decide how to truncate disclosures.
 	discs := result["disclosures"].([]any)
 	for i, d := range discs {
 		disc := d.(map[string]any)
@@ -598,7 +593,7 @@ func TestHandleDecode_SDJWTResolvedClaims(t *testing.T) {
 }
 
 func TestHandleDecode_JWTIssuerSubjectInPayload(t *testing.T) {
-	// The UI's summary line reads payload.iss and payload.sub.
+	// The summary reads payload.iss and payload.sub.
 	jwt := makeJWT(
 		map[string]any{"alg": "RS256"},
 		map[string]any{
@@ -641,7 +636,6 @@ func TestPrefill_ContentType(t *testing.T) {
 }
 
 func TestHandleMetaAndImprint(t *testing.T) {
-	// Without an imprint: meta says so, /imprint is a 404.
 	mux := NewMuxWithOptions(MuxOptions{Version: "v1.2.3"})
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/meta", nil))
@@ -661,7 +655,6 @@ func TestHandleMetaAndImprint(t *testing.T) {
 		t.Fatalf("GET /imprint without content = %d, want 404", rec.Code)
 	}
 
-	// With an imprint, also mounted under a prefix like the wallet does.
 	page := []byte("<p>Operator: Example Org</p>")
 	mounted := http.StripPrefix("/decoder", NewMuxWithOptions(MuxOptions{ImprintHTML: page}))
 	rec = httptest.NewRecorder()
@@ -676,8 +669,7 @@ func TestHandleMetaAndImprint(t *testing.T) {
 	}
 }
 
-// A decoder link can name a credential the wallet holds instead of carrying
-// it, so the link stays short enough to paste.
+// ID links avoid putting large credentials in URLs.
 func TestCredentialByID(t *testing.T) {
 	mux := NewMuxWithOptions(MuxOptions{
 		CredentialByID: func(id string) (string, bool) {
@@ -706,8 +698,6 @@ func TestCredentialByID(t *testing.T) {
 	}
 }
 
-// A decoder that is not mounted on a wallet answers an id lookup with an
-// error that names the missing wallet.
 func TestCredentialByIDWithoutAWallet(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/credentials/cred-1", nil)
 	w := httptest.NewRecorder()

@@ -1,8 +1,8 @@
 # Hosting a Public Demo
 
-The wallet server can run as a shared public demo (for example `https://eudi-test.dev`). Visitors get the full credential flows (issue, present, decode, delete). Endpoints that control the process or write to the host stay disabled. A working setup is in [`examples/public-demo/`](../examples/public-demo/).
+Run a shared public wallet with the `--demo` profile, as at `https://eudi-test.dev`. Visitors can issue, present, decode and delete test credentials. Process controls and host filesystem endpoints are disabled. See [`examples/public-demo/`](../examples/public-demo/) for a deployment example.
 
-## Demo mode
+## Demo profile
 
 ```bash
 eudi wallet serve --demo --base-url https://eudi-test.dev \
@@ -10,14 +10,35 @@ eudi wallet serve --demo --base-url https://eudi-test.dev \
   --status-list --imprint-file imprint.html
 ```
 
-`--demo` changes the server in five ways. The flags it implies (`--pid`, `--mode debug`, `--haip`, `--vci-version 1.1`) are defaults, so an explicit flag overrides them. `--demo --vci-version 1.0` runs the demo at the published feature level.
+`--demo` enables the defaults described below. Explicit flags can override `--pid`, `--mode debug`, `--haip` and `--vci-version 1.1`. For example, `--demo --vci-version 1.0` selects the published OpenID4VCI feature level.
 
-1. It implies `--pid`, so the server runs headless with a known credential baseline. The baseline comes from the pre-defined PID templates through the ordinary template resolution. A user template saved under the same name (or a `--templates-dir`) decides what the demo seeds and what every reset restores. Browser flows keep interactive consent (visitors approve offer and authorize links in the wallet UI). API submissions auto-accept, so external issuers, verifiers, and CLI clients get a reliable counterparty.
-   A consent request belongs to the browser it came from. The wallet recognises the browser by the `eudi_session` cookie, set on the first response to it. Clients that submit over the API (the OS scheme handler, the CLI) name the page they opened, so their request reaches that page. A request that names no page waits in the bar above the credentials, where every caller can answer it.
-2. It disables the admin endpoints. `POST /api/shutdown`, `PUT/DELETE /api/templates/{name}`, `POST/DELETE /api/next-error`, `PUT /api/config/preferred-format`, `PUT /api/config/auto-accept`, `PUT/DELETE /api/config/conformance` and `DELETE /api/log` return 403. `POST /api/issue` rejects saving templates and visitor-supplied logo or background images (a template's own art still applies). `GET /api/config` omits host paths and the process id.
-3. It blocks outbound requests to internal networks. Visitor-supplied URLs (credential offers, `request_uri`, trust lists, status lists) are fetched from the public internet. Connections to loopback, RFC 1918, link local (including cloud metadata endpoints), CGNAT and unique local addresses are refused at dial time. The check runs on resolved IP addresses, so a hostname that resolves to a private address is refused too. The wallet's own advertised origins are exempt by exact address and port, so it can fetch a `request_uri` or post to a `response_uri` of its own demo verifier.
-4. It checks the EUDI profile in debug mode. `--haip` checks incoming presentations against HAIP 1.0: `response_type=vp_token`, a signed request object delivered through `request_uri` with an `x509_hash:` client id (the SHA-256 of the signing certificate), `direct_post.jwt` or `dc_api.jwt`, DCQL asking only for `mso_mdoc` or `dc+sd-jwt`, both `A128GCM` and `A256GCM` in the verifier's `encrypted_response_enc_values_supported`, and ES256. Over the Digital Credentials API an unsigned request is accepted. There it carries no `client_id` and the platform-reported origin identifies the caller. Issuance is checked too. An offer that uses the authorization code flow needs an authorization server that supports the authorization code flow, offers a pushed authorization request endpoint, and advertises PKCE only with `S256` and DPoP only with `ES256`. A pre-authorized code offer passes the grant type check. In debug mode a violated rule produces a warning in the activity log and the flow continues, so the demo stays usable against non-conforming issuers and verifiers. An issuer that offers only unauthenticated access at its token endpoint gets a warning and the wallet proceeds without client authentication. When self-hosting, `--mode strict` refuses violations and `--haip=false` disables the profile checks. The built-in demo verifier and issuer are HAIP-compliant. The active settings are shown read-only under **Conformance** in the wallet UI header.
-5. It resets the wallet periodically. `--demo-reset` takes an interval (`24h`), a daily wall-clock time (`00:00`), or one with a timezone (`"00:00 Europe/Berlin"`). `0` disables it. A wall-clock schedule fires at the same local time every day (no drift across restarts, DST followed). A reset restores the clean baseline (fresh PID credentials, empty activity log). Keys, certificates and URLs are kept, so trust list and status list URLs stay stable. The UI footer shows the schedule.
+### Baseline and consent
+
+The server starts headlessly with protected PID credentials from the bundled templates. User templates with the same names, including those in `--templates-dir`, override the baseline used at startup and reset.
+
+Browser flows ask for consent. API submissions provide consent directly. Browser sessions keep dialogs associated with the visitor who started the flow. Requests without a browser ID appear in a shared banner where any visitor can answer them.
+
+### Administrative operations
+
+Demo mode returns `403` for shutdown, template writes, error injection, log clearing and changes to format, consent or conformance settings. The issue endpoint also rejects template saving and visitor-supplied images. Template images still apply. Configuration responses omit host paths and the process ID.
+
+### Outbound connections
+
+Visitor URLs are restricted to public network addresses. The wallet checks resolved addresses when connecting and rejects loopback, private, link local, CGNAT and unique local ranges, including cloud metadata endpoints. Its own advertised origins are exempt at their exact address and port so the bundled issuer and verifier can communicate with the wallet.
+
+### Validation
+
+Demo mode checks OpenID4VP and issuance against HAIP 1.0. Violations appear as activity log warnings while debug mode continues the flow. The UI shows the active settings under **Conformance**.
+
+Presentation checks cover request delivery, client identification, response encryption, credential formats and algorithms. Unsigned Digital Credentials API requests use the platform origin to identify the caller. Issuance checks cover the grant, PAR, PKCE, DPoP and client authentication. See [specification support](spec-compliance.md) for individual requirements.
+
+Use `--mode strict` to reject violations or `--haip=false` to disable HAIP checks. Some interoperability advisories remain warnings in strict mode.
+
+### Periodic reset
+
+`--demo-reset` accepts an interval such as `24h`, a daily time such as `00:00`, or a time with a zone such as `"00:00 Europe/Berlin"`. `0` disables resets. Daily schedules follow local time, including daylight saving changes, and retain their schedule across restarts.
+
+A reset replaces the PID baseline and clears the activity log. Keys, certificates and URLs remain stable. The footer shows the reset schedule.
 
 ## Browser hardening
 
@@ -29,7 +50,9 @@ The server serves `/robots.txt` (pages allowed, the API and the protocol endpoin
 
 ## What stays open (accepted risk)
 
-Every wallet server also hosts a demo issuer at `/issuer` and a demo verifier at `/verifier`. The issuer hands out a Demo Event Ticket through a real OpenID4VCI pre-authorized code flow. HAIP §4 permits this, since it only requires an issuer to support the authorization code flow. The issuer offers that flow too (see below), so the client authentication HAIP requires can be tested. The verifier requests and cryptographically verifies presentations of the ticket or the PID through OpenID4VP, following HAIP 1.0. It signs its authorization request (served by reference from `/verifier/request/{id}`), identifies itself with an `x509_hash:` client id derived from its signing certificate, and receives the response encrypted as `direct_post.jwt` with a per-request key. Together they make the demo usable in the browser (issue, then present) and serve as protocol counterparties for external wallets. Offers and verification requests are in-memory and expire after ten minutes. Each verification request accepts exactly one answer.
+Every wallet server includes an issuer at `/issuer` and a verifier at `/verifier`. The issuer offers a Demo Event Ticket through pre-authorized and authorization code flows. The verifier requests the ticket or a PID through OpenID4VP.
+
+The verifier signs requests delivered from `/verifier/request/{id}`, identifies itself with `x509_hash:` and receives encrypted `direct_post.jwt` responses. Each request has its own encryption key and accepts one response. Offers and requests expire after ten minutes and are kept only in memory.
 
 The verifier page has a PID format toggle. By default a PID request asks for the SD-JWT VC or the mdoc and the wallet presents whichever it has. Picking one format asks for that one alone, so a format mismatch becomes visible. The ticket is always an SD-JWT VC.
 
@@ -37,7 +60,7 @@ The issuer page has a status list toggle. With it on, the ticket carries a refer
 
 The wallet UI pages the credential list (ten per page), so a demo with hundreds of credentials between resets stays usable.
 
-The demo seeds four PID credentials: the country-independent EUDI PID (`urn:eudi:pid:1`) and the German PID that extends it (`urn:eudi:pid:de:1`), each as an SD-JWT VC and an mdoc. The two carry different attributes, each following its own rulebook.
+The demo starts with four PID credentials: the country-independent EUDI PID (`urn:eudi:pid:1`) and the German PID that extends it (`urn:eudi:pid:de:1`), each as an SD-JWT VC and an mdoc. The two carry different attributes, each following its own rulebook.
 
 The verifier page offers both through its credential toggle. The PID request names `urn:eudi:pid:1`, which both credentials match, and the wallet presents one of them. The German PID request names `urn:eudi:pid:de:1`, which only the German credential matches. See [credential type inheritance](wallet.md#credential-type-inheritance).
 
@@ -55,7 +78,7 @@ The compose example rate limits per client address in Caddy, the component that 
 | `flows_hour` | 2000 per hour | The same endpoints, so a script left running is capped between resets |
 | `site` | 1200 per minute | Everything else, including the UI and the stats report |
 
-These limits are far above normal use. An idle wallet page is about 14 requests (updates arrive over one long-lived event stream). A busy visitor with three tabs open, issuing and presenting, produced 36 in a minute. A browser, a test suite driving the HTTP API, and everyone behind one office address fit under the limits together. A deployment with another reverse proxy should apply the same limits there.
+The limits allow interactive use while bounding automated traffic. An idle page makes about 14 initial requests, then receives updates through an event stream. Clients behind the same public address share the allowance. Apply equivalent limits if using another reverse proxy.
 
 ## Base URL and issuer URL
 
@@ -73,7 +96,11 @@ Issuers that require registration register exactly those two values. Pass differ
 
 ## The demo issuer as an authorization server
 
-The demo issuer also runs the authorization code flow, with itself as the authorization server. Its metadata (`/.well-known/oauth-authorization-server/issuer`) advertises what HAIP requires: pushed authorization requests required, PKCE S256, DPoP, and the two client authentication methods of [OAuth 2.0 Attestation-Based Client Authentication](https://datatracker.ietf.org/doc/draft-ietf-oauth-attestation-based-client-auth/) draft 10 (`attest_jwt_client_auth` and `attest_jwt_client_auth_dpop`), plus the signing algorithms and proof of possession methods that document requires with them. The endpoints are `/issuer/par`, `/issuer/authorize` and `/issuer/token`. Attestations in the shape of draft-07 (with `iss` in both JWTs), draft-08 and draft-10 (without) are all accepted, per [ADR-0014](adr/0014-pinned-draft-versions-stay-supported-alongside-the-latest.md). A shape that is correct under another supported draft than the one the configured OpenID4VCI version pins is accepted with a warning in the log. The token endpoint requires this client authentication on the pre-authorized code grant too (HAIP 1.0 §4.4.1). `--demo-issuer-client-auth optional` also accepts wallets that send no attestation.
+The demo issuer is also its own authorization server. Its metadata at `/.well-known/oauth-authorization-server/issuer` advertises PAR, PKCE S256, DPoP and ABCA draft-10 methods `attest_jwt_client_auth` and `attest_jwt_client_auth_dpop`. Its endpoints are `/issuer/par`, `/issuer/authorize` and `/issuer/token`.
+
+It accepts the attestation claims defined by ABCA draft-07, draft-08 and draft-10. A valid attestation for a supported draft other than the configured version produces a warning ([ADR-0014](adr/0014-pinned-draft-versions-stay-supported-alongside-the-latest.md)).
+
+Client authentication is required on the token endpoint for both grants (HAIP 1.0 §4.4.1). `--demo-issuer-client-auth optional` also permits clients without an attestation.
 
 The key-proof challenge comes from the Nonce Endpoint defined in OpenID4VCI 1.0 §7. The issuer serves it at `POST /issuer/nonce` and advertises it as `nonce_endpoint` in its Credential Issuer metadata. A proof signed over a stale nonce is answered with `invalid_nonce`, which tells the wallet to fetch a fresh nonce and retry.
 
@@ -89,18 +116,20 @@ The pushed authorization request and the token request must both carry a wallet 
 
 ### Wallets from other providers
 
-An attestation is signed by a wallet provider, and this issuer trusts one CA (the CA of the wallet it runs in). So that other wallets can complete the authorization code flow, an attestation whose certificate does not chain to that CA is verified against its own leaf certificate and marked. The issued ticket carries a `wallet_attestation` claim saying `trusted` (the chain reached the CA), `untrusted` (it did not) or `none` (the client authenticated with nothing). A production issuer resolves the wallet provider's trust list and pins the CA it finds there. For this wallet that list is published at `/api/trustlists/wallet-provider`.
+The demo issuer trusts the shared wallet CA. It also accepts attestations from other providers when their signature verifies against the included leaf certificate. This permits interoperability testing without treating the provider as trusted.
+
+The ticket records the result in `wallet_attestation`: `trusted` for a chain reaching the wallet CA, `untrusted` for another signer, or `none` when authentication was optional and omitted. The wallet provider's trust list is available at `/api/trustlists/wallet-provider`.
 
 A wallet with no attestation is refused. HAIP 1.0 §4.4.1 requires it: "Wallets MUST use, and Issuers MUST require, an OAuth2 Client authentication mechanism at OAuth2 Endpoints that support client authentication". To test such a wallet, start the server with `--demo-issuer-client-auth optional`. The authorization server then also advertises and accepts `none`. An attestation is still verified wherever one is sent, and the ticket records the outcome.
 
 ## What an issuer needs to verify the wallet
 
-On the authorization-code path the wallet authenticates with attestation-based client authentication and sends both headers on the pushed authorization request and on the token request:
+The wallet authenticates PAR and token requests with a wallet attestation. With a separate possession proof, it sends both headers below. When the server advertises combined DPoP proof, the DPoP header replaces the separate attestation PoP header.
 
 - `OAuth-Client-Attestation`, signed by the wallet's issuer key (`sub` is the client id, `cnf.jwk` is the wallet's holder key, and `iss` is the wallet origin, which draft 10 permits). Its `x5c` header carries only the leaf certificate (the self-signed root is stripped).
 - `OAuth-Client-Attestation-PoP`, signed by that holder key. If the authorization server metadata advertises a `challenge_endpoint`, the wallet fetches a challenge first and includes it.
 
-Credential proofs carry a `key-attestation+jwt` from the same signer when the credential configuration sets `key_attestations_required`, in the header of a `jwt` proof or as the `attestation` proof itself, whichever the configuration offers. The attestation claims the `key_storage` and `user_authentication` levels the issuer requires. The demo keeps its keys in plain files, so those levels are claims only (see [SECURITY.md](../SECURITY.md)).
+When the configuration requires key attestations, the credential proof includes `key-attestation+jwt`. It appears in the JWT proof header or as an attestation proof, depending on the offered format. The reported storage and user authentication levels are test claims. The wallet stores keys unencrypted ([SECURITY.md](../SECURITY.md)).
 
 The leaf certificate is included in the attestation. The trust anchor is fetched once:
 
@@ -114,9 +143,11 @@ Pin the CA. It is kept across restarts and the periodic reset, while a leaf is r
 
 ## Imprint
 
-Hosting a public site in the EU requires an imprint naming the operator. Pass `--imprint-file` with an HTML snippet (name, address, contact). It is served at `/imprint` (also under `/decoder/imprint`) wrapped in a page that includes the EU non-affiliation disclaimer, and the UI footer links to it. The standalone decoder (`eudi serve`) accepts the same flag.
+Pass `--imprint-file` with an HTML snippet containing the operator's name, address and contact details. The wallet serves it at `/imprint` and `/decoder/imprint`, adds the EU non-affiliation notice and links it from the footer. The standalone decoder accepts the same flag.
 
-The demo sets one cookie, `eudi_session`. It holds an opaque random value that binds a pending consent request to the browser that started it, so a visitor is only asked to approve their own flows. The activity log stays shared. It is a session cookie (gone when the browser closes), `HttpOnly`, `SameSite=Lax`, and `Secure` for a visitor reached over https. A tab opened by a URL handler or the CLI also keeps that flow's name in `sessionStorage`, which the tab discards when it closes. Under the ePrivacy Directive both are strictly necessary for a service the visitor asked for and need no consent. The demo also keeps a theme preference and a dismissed-banner flag in `localStorage`, functional storage set by the visitor's own choice (no personal data, no tracking, no third parties). Mention all of it in your imprint or privacy notice if you want to.
+The demo uses the `eudi_session` cookie to associate consent requests with a browser. It is an opaque session value with `HttpOnly`, `SameSite=Lax` and, for HTTPS connections, `Secure`. The activity log remains shared.
+
+Pages opened by the CLI or URL handler keep the supplied browser ID in `sessionStorage`. Theme preferences and dismissed banner state use `localStorage`. These values provide UI behavior without third-party tracking. Describe this storage in the deployment's privacy notice.
 
 ## Deploying and updating
 
@@ -144,7 +175,7 @@ ENV
 
 ### Preview host
 
-A big change can go live on a preview host first and then move to the main site. The preview is a second wallet on the same host, served by the same Caddy at its own subdomain (`preview.eudi-test.dev` in the example), with its own data volume and its own release. Point the subdomain's DNS at the same host (a CNAME to the main domain is enough) and add its URL to `deploy.env`.
+Use the preview host to try a release before deploying it to the main site. It runs a second wallet with its own volume and release, behind the same Caddy at a separate subdomain (`preview.eudi-test.dev` in the example). Point the subdomain at the same host and add its URL to `deploy.env`.
 
 ```bash
 # in deploy.env, alongside DEMO_HOST and DEMO_URL:
@@ -160,7 +191,11 @@ PREVIEW_URL=https://preview.demo.example
 
 ### Strict conformance host
 
-The certification target for the OIDF wallet plans is a third wallet on the same host, served at its own subdomain (`strict.eudi-test.dev` in the example). It runs in strict mode with HAIP enforced, auto-accept, and the default PID baseline. The Caddy block allows only GET and HEAD. The public origin serves what the conformance suite and other counterparties consume (issuer metadata, status list, CRL, trust lists, the CA certificate, GET `/authorize` requests) and nobody on the internet can change settings or state. The conformance harness reaches the management API through an SSH tunnel to the wallet's loopback-published port (`127.0.0.1:18086` on the host). Its release is pinned independently with `STRICT_TAG`, and its OID4VCI redirect URI points at the fixed suite alias `oid4vc-dev-vci-strict` on the production conformance service.
+The strict conformance target runs as a third wallet on a separate subdomain, `strict.eudi-test.dev` in the example. It uses strict validation, HAIP, auto-accept and the default PID baseline.
+
+Caddy permits only GET and HEAD from the public internet. This exposes protocol documents and GET `/authorize` requests. The latter can still start presentation flows. The harness accesses other management operations through an SSH tunnel to `127.0.0.1:18086` on the host.
+
+`STRICT_TAG` pins its release independently. Its issuance redirect URI uses the `oid4vc-dev-vci-strict` alias on the production conformance service.
 
 ```bash
 # in deploy.env, alongside DEMO_HOST and DEMO_URL:
@@ -185,7 +220,9 @@ The compose example includes an optional usage report. Caddy writes an access lo
 
 Then open `https://your-domain/stats/`. To turn it off, remove the `handle_path /stats*` block from the Caddyfile and the `stats` service. The anonymized log still counts as processed access data, so word your imprint accordingly.
 
-Interpret the numbers with care. Your own testing counts too, and one page load is about a dozen requests (the assets, the state the UI reads, and the event stream it keeps open). `deploy.sh stats` lists pages and API calls separately, and repeats the API calls that changed something (`POST`, `PUT`, `PATCH`, `DELETE`). Those are the interesting numbers. A write is a visitor issuing, presenting, importing or deleting a credential, from the UI, an external wallet, or a test suite. Distinct visitors are approximated from masked addresses, so everyone behind the same `/24` counts once.
+Your own tests count in the statistics. One page load produces several requests for assets, wallet state and the event stream. `deploy.sh stats` separates page views from API calls and lists writes separately. Writes include issuance, presentation, imports and deletion from both people and automated tests.
+
+Visitor counts are approximate because addresses are masked. Everyone sharing an IPv4 `/24` is counted together.
 
 ### Log bounds
 
@@ -197,7 +234,7 @@ Interpret the numbers with care. Your own testing counts too, and one page load 
 
 - Terminate TLS in a reverse proxy (the example uses Caddy with automatic Let's Encrypt) and forward to the wallet's HTTP port. The wallet derives all advertised URLs from `--base-url`.
 - Persist a volume at `/home/app/.eudi-dev` (the parent of `wallet/`) and set `EUDI_DEV_STORAGE=file` and `EUDI_DEV_SEED=` (the image's default is memory with a public seed). The shared CA is stored one level above the wallet directory, and issuer keys must persist across restarts, otherwise verifiers holding the old trust list fail.
-- Run exactly one replica. The wallet store is a single-writer file.
+- Run one replica for this file-backed deployment.
 - Leave `HTTP_PROXY` and `HTTPS_PROXY` unset in the container. A proxy would bypass the dial time network checks.
 - Self-fetches of the public origin (for example a pasted offer pointing at the demo itself) resolve through public DNS. On typical cloud hosts hairpin NAT makes this work. A compose network alias for the public hostname would resolve to a private address and be blocked.
 - Keep the rate limiting in the proxy. The compose example's Caddyfile ships active `rate_limit` zones (described above).

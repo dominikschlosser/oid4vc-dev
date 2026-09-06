@@ -6,7 +6,9 @@ The wallet accepts a credential offer with [`wallet accept`](presenting.md#walle
 
 ## Sign-in during issuance
 
-An authorization code offer sends the user to the issuer to authenticate. That needs a browser, so the wallet returns the authorization URL (a hosted wallet has no browser of its own). An open UI tab receives the URL over the event stream and navigates to it. An API caller gets `HTTP 202` and the URL, and opens it itself only when no UI tab is handling the flow, so exactly one browser opens it:
+An authorization code offer requires sign-in at the issuer. The wallet returns the authorization URL because a hosted server cannot open a browser itself. An open wallet tab receives the URL through the event stream and navigates to it.
+
+API callers receive `HTTP 202` with the URL. They should open it only when no wallet tab is handling the flow, so the authorization request is used once:
 
 ```json
 {
@@ -16,7 +18,7 @@ An authorization code offer sends the user to the issuer to authenticate. That n
 }
 ```
 
-The flow keeps running. The user signs in, the issuer redirects to the wallet's `/callback`, and the flow finishes the issuance there. `GET /api/offers/{offer_id}` reports how it ended (`authorization_required`, `completed`, `deferred` or `failed`, the last two carrying the same payloads as a direct answer).
+After sign-in, the issuer redirects to `/callback` and the wallet resumes issuance. Poll `GET /api/offers/{offer_id}` for `authorization_required`, `completed`, `deferred` or `failed`. Deferred and failed responses carry the same payloads as a direct response.
 
 The callback is matched by `state` alone, so the sign-in can happen in any browser that can reach the wallet's redirect URI. `eudi wallet accept` uses this. It opens the URL locally, prints it for a headless shell, and polls the offer until it completes.
 
@@ -33,7 +35,7 @@ The credential keeps its id, so a verifier query or a UI selection that referred
 
 A refresh is a token request (`grant_type=refresh_token`) at the endpoint that issued the credential, with the same client authentication. The wallet stores how it authenticated (wallet attestation or `private_key_jwt`, with the audience and the challenge endpoint) alongside the refresh token and rebuilds it per request. The attestation challenge is fetched fresh each time.
 
-The wallet also renews on its own. A background task checks every 30 seconds and renews anything within a minute of expiring (a failed renewal waits ten minutes before the next attempt). A credential that close to expiring is also renewed before it is presented to a verifier, which covers a wallet without a running server. When that renewal fails, the stored credential is presented.
+The server checks for renewal every 30 seconds and renews credentials within a minute of expiry. Failed renewals wait ten minutes before retrying. The wallet also attempts renewal before presenting a credential that close to expiry, including without a running server. If renewal fails, it presents the stored credential.
 
 ## Deferred issuance
 
@@ -62,23 +64,27 @@ eudi wallet deferred check [id]      # ask the issuer now instead of at the next
 eudi wallet deferred abandon <id>    # stop collecting it
 ```
 
-**Check now** asks the issuer straight away, for when the credential is known to be ready or you want to watch the exchange. It reports what came back (the credential, another `issuance_pending`, or a refusal) and postpones the next scheduled attempt by one interval. The UI has the same button on each entry.
+**Check now** polls immediately and reports the result: a credential, `issuance_pending` or a refusal. It schedules the next attempt one interval later. The UI offers the same action.
 
 **Abandon** drops the entry from the schedule. The transaction stays valid at the issuer.
 
-Pending issuances are persisted, so a restarted wallet keeps collecting. A record is dropped when the credential arrives, when the issuer answers with a final error (a rejected token, an unknown transaction), when it is abandoned, or after 24 hours. A one-shot `wallet accept` against the local store reports the deferral, and `wallet serve` collects the credential.
+Deferred issuances are saved in the selected storage backend. With file or Postgres storage, collection resumes after a restart. A record is removed when collection succeeds, the issuer returns a final error, the user abandons it, or 24 hours pass. A local `wallet accept` command reports the deferral. Run `wallet serve` to collect the credential.
 
 ## Wallet attestation
 
 On OID4VCI token requests the wallet authenticates itself with a wallet attestation ([OAuth 2.0 Attestation-Based Client Authentication](https://datatracker.ietf.org/doc/draft-ietf-oauth-attestation-based-client-auth/)), sent as the `OAuth-Client-Attestation` and `OAuth-Client-Attestation-PoP` headers. The attestation is signed by the wallet's own CA and carries only the leaf in `x5c`, so an issuer verifying it needs the CA from `wallet ca-cert` as its trust anchor. The same client authentication applies at every authorization server endpoint the wallet calls: the PAR endpoint, the token endpoint, and the Authorization Challenge Endpoint of interactive authorization (OpenID4VCI 1.1 section 6).
 
-Three drafts of that document are supported ([ADR-0014](../adr/0014-pinned-draft-versions-stay-supported-alongside-the-latest.md)). The outgoing JWTs carry the union of what those drafts define, which is the draft-07 form that OpenID4VCI 1.0 requires (section 14.7): `iss` and `nbf` in both the attestation and its PoP, whatever `--vci-version` is configured. Draft-08 allows claims it does not define (section 5.1 and section 5.2 rule 1), so this one form verifies under every supported draft. The additions of draft-10 are negotiated through server metadata regardless of the configured version. A server that offers only `attest_jwt_client_auth_dpop`, or whose `client_attestation_pop_methods_supported` lists only `dpop_combined`, gets the attestation with the DPoP proof as its possession proof and no dedicated PoP header, plus a warning that the mechanism postdates the configured draft. A challenge served in the `OAuth-Client-Attestation-Challenge` response header, or demanded with the `use_attestation_challenge` error, goes into the next PoP, and the refused request is retried once. The `challenge_endpoint` route is used where the metadata lists one.
+The wallet supports three drafts of the attestation specification ([ADR-0014](../adr/0014-pinned-draft-versions-stay-supported-alongside-the-latest.md)). Outgoing JWTs use the draft-07 claims required by OpenID4VCI 1.0 section 14.7. Both the attestation and its PoP include `iss` and `nbf`, regardless of `--vci-version`. Draft-08 allows these additional claims under sections 5.1 and 5.2 rule 1, so the same JWTs work across the supported drafts.
+
+Draft-10 features are selected through server metadata. If a server offers only `attest_jwt_client_auth_dpop`, or lists only `dpop_combined` in `client_attestation_pop_methods_supported`, the wallet uses DPoP as the possession proof and omits the dedicated PoP header. It warns when this mechanism is newer than the configured draft.
+
+A server can request an attestation challenge through the `OAuth-Client-Attestation-Challenge` response header or the `use_attestation_challenge` error. The wallet includes the challenge in its next PoP and retries once. It also supports the `challenge_endpoint` advertised in metadata.
 
 Under `--haip` the wallet always attests. HAIP 1.0 §4.4.1 requires it of both sides:
 
 > Wallets MUST use, and Issuers MUST require, an OAuth2 Client authentication mechanism at OAuth2 Endpoints that support client authentication (such as the PAR and Token Endpoints).
 
-Two kinds of issuer deviate. In `--mode debug` (which the public demo runs) issuance proceeds in both cases:
+Debug mode, used by the public demo, handles two issuer deviations:
 
 - An issuer that requires an attestation but advertises no client authentication method. Advertising is a SHOULD in §10.1, so the wallet attests anyway and warns about the missing advertisement.
 - An issuer that advertises only unauthenticated access (`none`). The wallet proceeds without client authentication and warns.
@@ -99,7 +105,7 @@ Advertising the method is a SHOULD, so an issuer may require an attestation with
 eudi wallet serve --client-attestation --auto-accept
 ```
 
-Use it when you know the issuer wants an attestation, accepting the correlation risk above. `GET /api/config` reports the setting as `force_client_attestation`. An authorization server that advertises `private_key_jwt` still gets the client assertion.
+Use it for issuers that require an attestation but omit it from their metadata. Reusing the attestation allows those issuers to correlate the wallet. `GET /api/config` reports the setting as `force_client_attestation`. An authorization server that advertises `private_key_jwt` still gets the client assertion.
 
 ## OpenID4VCI feature level
 

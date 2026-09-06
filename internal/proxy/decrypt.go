@@ -30,8 +30,6 @@ func DecryptJWEWithCEK(compact string, cek []byte) ([]byte, error) {
 	return jwe.DecryptWithCEK(compact, cek)
 }
 
-// DecryptJWEWithJWK decrypts a compact JWE addressed to the EC private key in
-// jwkJSON.
 func DecryptJWEWithJWK(compact string, jwkJSON string) ([]byte, error) {
 	key, err := parseECPrivateKeyJWK(jwkJSON)
 	if err != nil {
@@ -40,7 +38,6 @@ func DecryptJWEWithJWK(compact string, jwkJSON string) ([]byte, error) {
 	return jwe.Decrypt(compact, key)
 }
 
-// parseECPrivateKeyJWK parses an EC private key from a JWK JSON string.
 func parseECPrivateKeyJWK(jwkJSON string) (*ecdh.PrivateKey, error) {
 	parsed, err := keys.ParseJWKPrivate([]byte(jwkJSON))
 	if err != nil {

@@ -12,7 +12,7 @@ See `docs/agents/issue-tracker.md`.
 
 ### Domain docs
 
-Single-context repo: the glossary is `CONTEXT.md` at the root, the decision records live in `docs/adr/`.
+Read the glossary in `CONTEXT.md` and relevant decisions in `docs/adr/`.
 See `docs/agents/domain.md`.
 
 ### Comments

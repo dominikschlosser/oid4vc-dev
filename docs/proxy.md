@@ -70,7 +70,7 @@ By default only OID4VP/VCI traffic is shown. Other requests (favicon, health che
 
 ## Reading a running proxy
 
-A proxy in a container, in the background, or on another machine prints to a terminal you cannot see. `eudi proxy logs` reads its traffic from the dashboard:
+Use `eudi proxy logs` to read traffic from a proxy running in a container, in the background or on another machine:
 
 ```bash
 # a proxy on this machine
@@ -83,7 +83,7 @@ eudi proxy logs http://localhost:9091 --follow
 eudi proxy logs https://proxy.internal.example --follow
 ```
 
-The output is the same as the proxy's own output, with decode links pointing at that dashboard. `--follow` keeps printing as traffic arrives and reattaches when the stream ends, until you interrupt it. After a reattachment it re-reads the recorded traffic, so nothing that arrived in between is lost. This also covers a proxy restart. `--json` prints the recorded traffic as JSON and ends, so it cannot be combined with `--follow`.
+Output matches the proxy terminal, with decode links pointing to its dashboard. `--follow` streams new traffic and reconnects after a disconnect or restart. On reconnect, it reads any missed entries still in the proxy's history. `--json` prints the recorded traffic once and cannot be combined with `--follow`.
 
 The argument is the dashboard URL (port 9091 by default). A proxy started without `--all-traffic` records only OID4VP/VCI requests, so only those can be read back.
 

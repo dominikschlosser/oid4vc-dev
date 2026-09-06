@@ -62,7 +62,6 @@ func TestDecodeBase64Std(t *testing.T) {
 }
 
 func TestDecodeHexOrBase64URL(t *testing.T) {
-	// Hex input
 	got, err := DecodeHexOrBase64URL("68656c6c6f")
 	if err != nil {
 		t.Fatal(err)

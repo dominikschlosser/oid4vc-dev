@@ -1,12 +1,13 @@
 # Wallet
 
-A stateful testing wallet with CLI-driven OID4VP/VCI flows, QR scanning, and OS URL scheme registration. Credentials and keys are stored in `~/.eudi-dev/wallet/` (configurable via `--wallet-dir`) and persist across invocations. The same state can live in memory or in a Postgres database (see [Storage backends](#storage-backends)).
+The wallet stores test credentials and presents them through OID4VP. It accepts OID4VCI offers from the CLI, QR codes and links. By default, credentials and keys persist in `~/.eudi-dev/wallet/`. Use `--wallet-dir` to choose another directory, or select [memory or Postgres storage](#storage-backends).
 
-The wallet has two validation modes. Both run the same checks. The mode decides what happens to a finding:
+The wallet has two validation modes. Both run the same checks. The mode decides how validation violations are handled:
+
 - `debug` (default) reports each finding and keeps processing the request. During DCQL evaluation it warns and keeps a credential match when some required claim paths are missing but other requested claims still match
-- `strict` treats the same findings as errors and refuses the request
+- `strict` treats those violations as errors and refuses the request
 
-`--haip` is a separate switch. See [HAIP 1.0 enforcement](wallet/presenting.md#haip-10-enforcement).
+Advisory findings remain warnings in either mode. `--haip` is a separate switch. See [HAIP 1.0 enforcement](wallet/presenting.md#haip-10-enforcement).
 
 For OpenID Foundation conformance work, see [docs/conformance.md](./conformance.md).
 For interaction diagrams of the implemented OID4VP and OID4VCI flows, see [docs/diagrams](./diagrams/README.md).
@@ -133,7 +134,7 @@ All wallet state is stored in `~/.eudi-dev/wallet/` by default:
     └── templates/          # User credential templates (see templates.md)
 ```
 
-A credential's display images (logo, background) are content-addressed files in `assets/`. `wallet.json` holds a reference (`asset:<hash>.<ext>`), so it stays small enough to reparse on every request and each image is stored once. A `data:` URI inside `wallet.json` is still served and moves to `assets/` on the next save.
+Display images are stored once under content-based names in `assets/`. Credentials refer to them as `asset:<hash>.<ext>` to keep wallet state small. Embedded `data:` URIs remain readable and move into asset storage on the next save.
 
 On the file backend the activity log is the top-level `log` field of `wallet.json`. The other backends keep one entry per row (see [Storage backends](#storage-backends)). `wallet logs clean` clears those entries and writes `wallet-log-cleaned-at`. A running wallet server drops in-memory entries older than that marker when it saves. With `--wallet-dir`, both are in that directory.
 
@@ -168,9 +169,11 @@ eudi wallet show --decoded --json <id> # JSON output
 
 ## `wallet logs`
 
-Prints the persisted wallet-side protocol interactions: OID4VP request-object fetches, parsed presentation requests, wallet presentation responses, verifier responses, Browser API responses, OID4VCI credential offers, metadata fetches, token exchanges, credential requests, deferred/notification calls, and imported credentials.
+Shows saved OID4VP and OID4VCI activity, including requests, responses, credential imports, deferred issuance and notifications.
 
-Each entry prints on one line, so the output is easy to scan and pipe. Compact lines carry `event`, `direction`, source, endpoint, method, URL, client ID, issuer, response mode, nonce, status code, and payload-presence flags. The global `-v` / `--verbose` flag expands structured details such as request objects, DCQL queries, wallet metadata, token and credential request payloads, sent VP tokens, actual presented credentials, selected claims, verifier response bodies, received credential responses, and imported credential material. `-f` / `--follow` prints new entries as they are persisted, like `kubectl logs -f`.
+Each entry prints on one line with the event, direction, endpoint, status and other available request details. Use `-v` / `--verbose` to expand the payloads, including DCQL queries, credential requests, presented claims and issuer or verifier responses.
+
+Use `-f` / `--follow` to print new entries as they are saved, like `kubectl logs -f`.
 
 ```bash
 eudi wallet logs              # One line per persisted wallet interaction
@@ -188,7 +191,7 @@ eudi wallet logs --json       # JSON array of log entries
 
 ## Serving the wallet
 
-`wallet serve` runs the persistent HTTP server: the web UI, the OID4VP and OID4VCI endpoints, the trust lists, and the management API. It loads credentials from disk, shows a browser consent dialog for incoming requests, and can register OS URL scheme handlers.
+`wallet serve` runs the web UI, protocol endpoints, trust lists and management API. It loads credentials from the selected storage backend and handles consent for interactive requests. On macOS it can also register URL scheme handlers.
 
 ```bash
 eudi wallet serve                      # web UI on http://localhost:8085
@@ -222,7 +225,7 @@ See [issuing into the wallet](wallet/issuing.md) for sign-in, renewal, deferred 
 
 ## HTTP API
 
-Everything the CLI does locally is also on a running `wallet serve` instance over HTTP (list, show, import, remove, issue, generate PIDs, manage templates, set status, export certificates, introspect, shut down). The API has no authentication and is for local development and isolated test networks.
+A running `wallet serve` exposes credential and template management, issuance, status changes, certificate exports and instance controls over HTTP. The API has no authentication by default and is intended for local development and isolated test networks.
 
 ```bash
 curl http://localhost:8085/api/credentials
@@ -243,19 +246,23 @@ eudi wallet serve --storage memory
 
 ## Storage backends
 
-Everything the wallet keeps (credentials, keys, the shared CA, display assets, user templates, the activity log) goes through one storage layer. `--storage`, or the `EUDI_DEV_STORAGE` environment variable, picks the backend:
+Choose where to store credentials, keys, certificates, assets, templates and the activity log with `--storage` or `EUDI_DEV_STORAGE`:
 
 | Value | State lives in |
 |-------|----------------|
 | `file` (default) | The wallet directory described above. One wallet server per directory. The CLI works beside it |
 | `memory` | The process. One wallet server. It starts empty and forgets everything on exit (the [Docker image](docker.md#storage) default) |
 | `auto` | Files when `--wallet-dir` or `EUDI_DEV_HOME` is given or the state directory holds state, memory otherwise |
-| `postgres://user:pass@host:5432/db` | One table (`eudi_dev_state`) in that database. Several wallet servers pointed at it serve one wallet state |
+| `postgres://user:pass@host:5432/db` | Rows in `eudi_dev_state`. Servers using the same database and wallet prefix share persisted state |
 
-Every backend stores the keys, certificates, assets and templates under the same names. The file backend keeps the wallet itself as `wallet.json`. The memory and Postgres backends keep it as one entry per credential, log entry and status entry, so several servers can change it at once. The wallet directory identifies the wallet on every backend, so a CLI command finds the server serving `~/.eudi-dev/wallet` whichever backend that server uses. `GET /api/config` reports the backend as `storage`. The default wallet is keyed `wallet` in a database wherever the process runs, so a CLI on the host and containers pointed at the same database address the same wallet.
+The file backend stores wallet state in `wallet.json`. Memory and Postgres store entities separately. Postgres uses one table, `eudi_dev_state`, for entities, keys, certificates and revision markers, plus a sequence for write versions. See [the storage design](adr/0016-state-goes-through-one-storage-layer.md) for the schema and concurrency limits.
 
-The flag and the variable apply to every command that opens the wallet, `issue --wallet` and `templates` included.
+The CLI finds running wallets by their wallet directory on every backend. `GET /api/config` reports the backend as `storage`. The default wallet uses the database prefix `wallet`, so host processes and containers using the same database share its persisted state. Browser flows and demo requests remain local to each server.
+
+The flag and environment variable also apply to `issue --wallet` and `templates`. [ADR-0018](adr/0018-postgres-stores-wallet-entities-as-keyed-blobs.md) explains why Postgres uses keyed blobs, with example keys and performance tradeoffs.
 
 ## Seeded keys
 
-`--seed <string>` (or `EUDI_DEV_SEED`) derives the keys the wallet generates (holder, issuer, CA, TLS) from that string. A wallet that stores nothing, such as a container on the memory backend, then serves the same keys and CA on every start. Keys that already exist in the store are used as they are, so a seed changes nothing for an existing wallet. The [Docker image](docker.md#stateless-container) sets the fixed seed `eudi-dev`. `auto` seeds the memory backend with that value and generates random keys on every other backend. An empty value generates random keys. `GET /api/config` reports `seeded_keys`.
+`--seed <string>` or `EUDI_DEV_SEED` derives holder, issuer, CA and TLS keys from a string. With memory storage, this keeps the keys stable across restarts. Existing stored keys take precedence.
+
+The [Docker image](docker.md#stateless-container) uses the public seed `eudi-dev`. The value `auto` uses that seed for memory storage and random keys for other backends. An empty value generates random keys. `GET /api/config` reports `seeded_keys`.

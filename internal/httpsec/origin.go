@@ -20,30 +20,18 @@ import (
 	"strings"
 )
 
-// GuardAPI refuses a request under /api/ that a page on another site sent.
-//
-// These APIs have no authentication on purpose, and localhost is no defence:
-// every page a developer visits can reach it, and a POST carrying text/plain
-// is a CORS simple request, so a page could hand the wallet a presentation
-// request and have credentials posted to a response_uri of its choosing. CORS
-// only stops it reading the reply, which such an attack does not need.
-//
-// The Origin header separates the two callers: a browser attaches it and
-// cannot forge it, while a CLI or test harness sends none and passes through.
-// Only /api/ is guarded, since the protocol endpoints are meant to be reached
-// from elsewhere.
-//
-// ownOrigins names additional origins to treat as this server's own, for a
-// deployment behind a proxy that rewrites the Host.
+// GuardAPI protects unauthenticated local APIs from requests made by foreign browser
+// pages. CORS alone only blocks reading the response, so a malicious page could still
+// trigger a presentation. Reject foreign Origin headers under /api/. CLI tools without
+// Origin remain allowed.  ownOrigins adds public origins for proxies that rewrite Host.
+// Protocol endpoints remain open to external callers.
 func GuardAPI(next http.Handler, ownOrigins ...string) http.Handler {
 	return GuardAPIExcept(next, nil, ownOrigins...)
 }
 
-// GuardAPIExcept is GuardAPI with a list of paths that are cross-origin by
-// contract. One endpoint is: the Digital Credentials API, where a verifier's
-// page calls from its own origin and that origin authenticates an unsigned
-// request. Guarding it would refuse its only caller. Its protection is that
-// origin check plus the consent dialog.
+// GuardAPIExcept allows selected protocol endpoints to receive requests from other
+// origins. The Digital Credentials API identifies unsigned callers by their origin and
+// asks for consent, so the general origin guard must exempt it.
 func GuardAPIExcept(next http.Handler, crossOriginByContract []string, ownOrigins ...string) http.Handler {
 	allowed := hostSet(ownOrigins)
 	exempt := make(map[string]bool, len(crossOriginByContract))
@@ -61,8 +49,6 @@ func GuardAPIExcept(next http.Handler, crossOriginByContract []string, ownOrigin
 	})
 }
 
-// isCrossOrigin reports whether the request carries an Origin naming a site
-// other than the one serving it.
 func isCrossOrigin(r *http.Request, allowed map[string]bool) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -75,16 +61,14 @@ func isCrossOrigin(r *http.Request, allowed map[string]bool) bool {
 		return true
 	}
 	host := strings.ToLower(u.Host)
-	// Host only, not scheme: a TLS terminator in front of the server leaves
-	// it serving http while the browser reports https for the same site.
-	// Nothing an attacker controls can match the host either way.
+	// Compare hosts because a TLS terminator can forward HTTPS requests to this server
+	// over HTTP.
 	if host == strings.ToLower(r.Host) {
 		return false
 	}
 	return !allowed[host]
 }
 
-// hostSet reduces origin URLs to the set of their hosts.
 func hostSet(origins []string) map[string]bool {
 	set := make(map[string]bool, len(origins))
 	for _, raw := range origins {

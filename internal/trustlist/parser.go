@@ -199,7 +199,6 @@ func parseCertificate(b64 string) (*CertInfo, error) {
 	}, nil
 }
 
-// ExtractPublicKeys returns all public keys from the trust list.
 func ExtractPublicKeys(tl *TrustList) []CertInfo {
 	var keys []CertInfo
 	for _, entity := range tl.Entities {

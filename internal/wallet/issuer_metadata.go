@@ -34,7 +34,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// LocalIssuerURL returns the local HTTPS issuer base URL for the given port.
 func LocalIssuerURL(port int, docker bool) string {
 	host := "localhost"
 	if docker {
@@ -43,8 +42,6 @@ func LocalIssuerURL(port int, docker bool) string {
 	return fmt.Sprintf("https://%s:%d", host, port)
 }
 
-// IssuerURLFromBaseURL derives the HTTPS issuer base URL from the same host
-// configuration used for the status list base URL.
 func IssuerURLFromBaseURL(baseURL string, issuerPort int) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil {
@@ -130,9 +127,6 @@ func generateIssuerTLSCertificatePEMWithCA(serverName string, caKey *ecdsa.Priva
 	return issuerTLSCertificatePEM(serverName, key, caKey, caCert)
 }
 
-// issuerTLSCertificatePEM builds the HTTPS certificate for serverName over
-// the given key, signed by the CA when one is given and self-signed
-// otherwise.
 func issuerTLSCertificatePEM(serverName string, key *ecdsa.PrivateKey, caKey *ecdsa.PrivateKey, caCert *x509.Certificate) ([]byte, []byte, error) {
 	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serial, err := rand.Int(rand.Reader, serialLimit)

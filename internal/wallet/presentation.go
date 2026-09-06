@@ -29,7 +29,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
-// PresentationParams holds parameters for VP token creation.
 type PresentationParams struct {
 	Nonce          string
 	ClientID       string
@@ -53,13 +52,11 @@ func isInteractiveAuthorizationResponseMode(mode string) bool {
 	return mode == "ia_post" || mode == "ia_post.jwt"
 }
 
-// VPTokenResult holds the result of VP token creation.
 type VPTokenResult struct {
 	Token     string
 	MDocNonce string // only set for ISO mode mDoc
 }
 
-// CreateVPToken creates a VP token for the given credential match.
 func (w *Wallet) CreateVPToken(match CredentialMatch, params PresentationParams) (VPTokenResult, error) {
 	return w.createVPToken(match, params, "")
 }
@@ -74,9 +71,8 @@ func (w *Wallet) createVPToken(match CredentialMatch, params PresentationParams,
 		return VPTokenResult{}, fmt.Errorf("credential %s not found", match.CredentialID)
 	}
 
-	// Renew on the way out when the credential is about to expire: the
-	// background task only runs on a wallet server. A failed renewal is not
-	// fatal, since the credential in hand may still be accepted.
+	// Try renewal before presentation because headless CLI flows have no background
+	// poller. If renewal fails, the stored credential may still be accepted.
 	if cred.CanRenew() && CredentialNeedsRenewal(cred, time.Now()) {
 		if renewed, err := w.RefreshCredential(cred.ID); err != nil {
 			log.Printf("[VP] renewing %s before presenting it failed, sending the credential as it is: %v", cred.ID, err)
@@ -90,9 +86,7 @@ func (w *Wallet) createVPToken(match CredentialMatch, params PresentationParams,
 		return VPTokenResult{}, err
 	}
 
-	// The signing key is the copy's own key for a batch copy bound to one, and
-	// the wallet holder key otherwise, so a rotated batch copy signs its key
-	// binding with the key it was issued against.
+	// Use the batch copy's key when present, otherwise the wallet holder key.
 	signingKey, err := w.batchSigningKey(cred)
 	if err != nil {
 		return VPTokenResult{}, err
@@ -104,10 +98,8 @@ func (w *Wallet) createVPToken(match CredentialMatch, params PresentationParams,
 	}
 	log.Printf("[VP] Creating VP token: format=%s type=%s claims=%v", cred.Format, typeLabel, match.SelectedKeys)
 
-	// A requested claim the presentation does not disclose as asked is a finding,
-	// grouped into one activity log entry: an array selected without its elements
-	// (disclosed empty), or a claim this credential cannot satisfy (debug mode
-	// presents it anyway).
+	// Group missing claims and empty disclosed arrays in one warning so the user can
+	// see what the presentation omits.
 	var undisclosed []string
 	for _, claim := range match.EmptyArrayClaims {
 		undisclosed = append(undisclosed, fmt.Sprintf("The request selects the array %s but none of its selectively disclosable elements, so it is disclosed as an empty array. The verifier selects the elements by ending the path with null (all) or an index (OpenID4VP 1.0 §7.1).", claim))
@@ -198,8 +190,6 @@ func interactiveAuthorizationAudience(endpoint string) string {
 	return "ia:" + endpoint
 }
 
-// createSDJWTPresentation creates an SD-JWT presentation with selective
-// disclosure and KB-JWT, signing the key binding with signingKey.
 func (w *Wallet) createSDJWTPresentation(cred StoredCredential, selectedKeys []string, nonce, clientID string, signingKey *ecdsa.PrivateKey) (string, error) {
 	parts := strings.Split(cred.Raw, "~")
 	if len(parts) < 1 {
@@ -224,15 +214,11 @@ func (w *Wallet) createSDJWTPresentation(cred StoredCredential, selectedKeys []s
 		if !ok || len(path) == 0 {
 			continue
 		}
-		// Resolve the whole path from the payload root: at each level it
-		// descends a cleartext structural object and matches an SD claim by
-		// name. So a claim under a cleartext parent (address.street_address,
-		// where address is a plain object carrying its children in _sd) is
-		// disclosed the same as a top-level SD claim.
+		// Resolve paths through plain objects as well as disclosures. A selectively
+		// disclosed child may have an always-visible parent.
 		collectPathDisclosureDigests(payload, path, digestMap, includedDigests)
 	}
 
-	// Preserve the original disclosure order from the credential.
 	var selectedDisclosures []string
 	for _, d := range cred.Disclosures {
 		if includedDigests[d.Digest] {
@@ -240,7 +226,6 @@ func (w *Wallet) createSDJWTPresentation(cred StoredCredential, selectedKeys []s
 		}
 	}
 
-	// Build the SD-JWT without KB-JWT: issuer_jwt~disc1~disc2~...~
 	withoutKB := issuerJWT + "~"
 	if len(selectedDisclosures) > 0 {
 		withoutKB += strings.Join(selectedDisclosures, "~") + "~"
@@ -260,18 +245,14 @@ func (w *Wallet) createSDJWTPresentation(cred StoredCredential, selectedKeys []s
 		return "", fmt.Errorf("computing sd_hash: %w", err)
 	}
 
-	// Create Key Binding JWT
 	kbJWT, err := w.createKBJWT(nonce, clientID, sdHashB64, signingKey)
 	if err != nil {
 		return "", fmt.Errorf("creating KB-JWT: %w", err)
 	}
 
-	// Final: issuer_jwt~disc1~disc2~...~kb_jwt
 	return withoutKB + kbJWT, nil
 }
 
-// createKBJWT creates a Key Binding JWT signed with signingKey (the copy's
-// holder key).
 func (w *Wallet) createKBJWT(nonce, audience, sdHash string, signingKey *ecdsa.PrivateKey) (string, error) {
 	header := map[string]any{
 		"alg": "ES256",
@@ -288,30 +269,23 @@ func (w *Wallet) createKBJWT(nonce, audience, sdHash string, signingKey *ecdsa.P
 	return signJWT(header, payload, signingKey)
 }
 
-// signJWT creates and signs a JWT with the given header, payload, and key.
 func signJWT(header, payload map[string]any, key *ecdsa.PrivateKey) (string, error) {
 	return jws.Sign(header, payload, key)
 }
 
-// VPTokenMapResult holds the result of creating VP tokens for all matches.
 type VPTokenMapResult struct {
 	TokenMap  map[string]string
 	MDocNonce string // set if any mDoc credential produced a nonce (ISO mode)
 }
 
-// CreateVPTokenMap creates a vp_token as a JSON object for DCQL responses.
-// Maps query credential ID → presentation string.
 func (w *Wallet) CreateVPTokenMap(matches []CredentialMatch, params PresentationParams) (*VPTokenMapResult, error) {
 	log.Printf("[VP] Creating VP token map: %d credentials, client=%s, response_mode=%s", len(matches), params.ClientID, params.ResponseMode)
 	result := &VPTokenMapResult{
 		TokenMap: make(map[string]string),
 	}
 
-	// ISO 18013-7 Annex B carries one mdoc generated nonce per response, in
-	// the apu of the encrypted response, and every document's session
-	// transcript hashes it. Generating one per document would leave every
-	// document but the reported one unverifiable, so the response settles it
-	// once and hands it to each presentation.
+	// ISO 18013-7 Annex B uses one mdoc nonce per response in apu. Share it across
+	// documents so every session transcript matches the encrypted response.
 	var mdocNonce string
 	if w.SessionTranscript == SessionTranscriptISO {
 		var err error
@@ -329,8 +303,6 @@ func (w *Wallet) CreateVPTokenMap(matches []CredentialMatch, params Presentation
 		if tokenResult.MDocNonce != "" {
 			result.MDocNonce = tokenResult.MDocNonce
 		}
-		// The copy has now been sent, so the next presentation of the batch
-		// prefers a copy used fewer times (a no-op outside a batch).
 		w.recordBatchPresentation(match.CredentialID)
 	}
 
@@ -348,7 +320,6 @@ func (r *VPTokenMapResult) VPToken() map[string][]string {
 	return vpToken
 }
 
-// QueryIDs returns the credential query IDs in the token map.
 func (r *VPTokenMapResult) QueryIDs() []string {
 	return mapKeys(r.TokenMap)
 }
@@ -380,9 +351,6 @@ func buildPlainAuthorizationErrorResponse(errorCode, errorDescription, state str
 	return payload
 }
 
-// BuildAuthorizationResponse constructs the authorization response without
-// submitting it to the verifier. The result can then be delivered via
-// direct_post, fragment, or a Browser API wrapper.
 func (w *Wallet) BuildAuthorizationResponse(vpResult *VPTokenMapResult, idToken, state string, params PresentationParams) (*AuthorizationResponseEnvelope, error) {
 	var vpToken any
 	if vpResult != nil {
@@ -438,8 +406,6 @@ func (w *Wallet) BuildAuthorizationResponse(vpResult *VPTokenMapResult, idToken,
 	}
 }
 
-// BuildAuthorizationErrorResponse constructs an authorization error response
-// without submitting it to the verifier.
 func (w *Wallet) BuildAuthorizationErrorResponse(errorCode, errorDescription, state string, params PresentationParams) (*AuthorizationResponseEnvelope, error) {
 	responseMode := params.ResponseMode
 	if responseMode == "" {
@@ -489,8 +455,6 @@ func (w *Wallet) BuildAuthorizationErrorResponse(errorCode, errorDescription, st
 	}
 }
 
-// SubmitPresentation builds the vp_token, optionally encrypts it, and submits to the verifier.
-// If idToken is non-empty, it is included alongside vp_token in the response.
 func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, idToken, state, responseURI string, params PresentationParams) (*DirectPostResult, error) {
 	response, err := w.BuildAuthorizationResponse(vpResult, idToken, state, params)
 	if err != nil {
@@ -526,7 +490,6 @@ func (w *Wallet) SubmitPresentation(vpResult *VPTokenMapResult, idToken, state, 
 	}
 }
 
-// SubmitAuthorizationError submits an authorization error response to the verifier.
 func (w *Wallet) SubmitAuthorizationError(errorCode, errorDescription, state, responseURI string, params PresentationParams) (*DirectPostResult, error) {
 	response, err := w.BuildAuthorizationErrorResponse(errorCode, errorDescription, state, params)
 	if err != nil {
@@ -551,12 +514,9 @@ func (w *Wallet) SubmitAuthorizationError(errorCode, errorDescription, state, re
 	}
 }
 
-// disclosesEmptyArray reports whether presenting path against cred discloses an
-// array whose selectively disclosable elements the path did not select, so the
-// verifier receives an empty array. This is what the strict presentation of a
-// whole path onto an array of disclosable elements produces. A null or an index
-// at the end of the path selects the elements, so those return false, and so
-// does an array whose elements are not selectively disclosable.
+// A path ending at a selectively disclosed array reveals the array without its
+// elements. Only a trailing null or index selects elements. Arrays with always-visible
+// elements are unaffected.
 func disclosesEmptyArray(cred StoredCredential, path []any) bool {
 	if cred.Format != "dc+sd-jwt" || len(path) == 0 {
 		return false

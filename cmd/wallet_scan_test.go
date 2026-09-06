@@ -23,10 +23,6 @@ import (
 	"testing"
 )
 
-// A scanned or supplied OID4 request must route to the configured remote wallet,
-// exactly like `wallet accept`. Both commands share acceptOID4URI, and the scan
-// command's OID4 branch is a single call to it, so this covers `wallet scan`
-// routing (a scanned request is just an accepted one with a scan step first).
 func TestAcceptOID4URIRoutesToRemote(t *testing.T) {
 	tests := []struct {
 		name     string

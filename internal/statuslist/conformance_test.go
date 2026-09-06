@@ -30,8 +30,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// handcraftedToken signs a status list token from explicit header and payload
-// maps, so a test can leave out or corrupt exactly one member.
+// Build headers and claims explicitly so each test can corrupt one field.
 func handcraftedToken(t *testing.T, key *ecdsa.PrivateKey, header, payload map[string]any) string {
 	t.Helper()
 	full := map[string]any{"alg": "ES256", "typ": TypJWT, "jwk": mock.PublicKeyJWKMap(&key.PublicKey)}
@@ -60,7 +59,6 @@ func zlibLST(t *testing.T, bitstring []byte) string {
 	return format.EncodeBase64URL(compressed)
 }
 
-// serveToken serves a fixed body with a fixed content type and status code.
 func serveToken(t *testing.T, status int, contentType, body string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -80,8 +78,7 @@ func serveToken(t *testing.T, status int, contentType, body string) *httptest.Se
 // answers for any credential.
 func TestCheck_RejectsSubjectThatIsNotTheReferencedURI(t *testing.T) {
 	key := mustGenerateKey(t)
-	// The substituted list says everyone is valid, and it says so about a
-	// different list than the one the credential points at.
+	// The substituted list reports valid status for a different URI.
 	token := handcraftedToken(t, key, nil, map[string]any{
 		"sub":         "https://elsewhere.example/statuslists/9",
 		"iat":         time.Now().Unix(),
@@ -140,8 +137,7 @@ func TestCheck_RejectsBadSignatureWithoutATrustList(t *testing.T) {
 	}
 }
 
-// A token that carries no key material at all cannot be verified by anyone,
-// so it supports no statement about a credential.
+// Without a verification key, the checker cannot establish a credential's status.
 func TestCheck_RejectsTokenWithNoResolvableKey(t *testing.T) {
 	key := mustGenerateKey(t)
 	var srv *httptest.Server
@@ -194,8 +190,8 @@ func TestCheck_NamesADIDItCannotResolve(t *testing.T) {
 	}
 }
 
-// A verified signature that was not anchored anywhere is reported as such, so
-// a caller can tell a self-asserted list from a trusted one.
+// Report whether the signing key is trusted separately from whether the signature
+// verifies.
 func TestCheck_ReportsAnUnanchoredKeyAsAWarning(t *testing.T) {
 	key := mustGenerateKey(t)
 	srv := jwtServer(t, key, 1, make([]byte, 16), nil)
@@ -424,8 +420,7 @@ func TestExtractStatus_DoesNotOverflowOnAHugeIndex(t *testing.T) {
 	}
 }
 
-// The same index arriving through a credential must be refused end to end
-// rather than taking down the party resolving the status.
+// Invalid indices must fail through the public checker without a panic.
 func TestCheck_DoesNotPanicOnAHugeCredentialIndex(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -504,7 +499,6 @@ func TestCheck_WarnsAboutTheContentType(t *testing.T) {
 	}
 }
 
-// A correctly declared content type produces no such warning.
 func TestCheck_DoesNotWarnAboutTheCorrectContentType(t *testing.T) {
 	key := mustGenerateKey(t)
 	srv := jwtServer(t, key, 1, make([]byte, 16), nil)
@@ -585,8 +579,6 @@ func TestStatusName(t *testing.T) {
 	}
 }
 
-// A two-bit list must report SUSPENDED by name all the way out of the
-// checker.
 func TestCheck_ReportsSuspendedByName(t *testing.T) {
 	key := mustGenerateKey(t)
 	bitstring := make([]byte, 16)

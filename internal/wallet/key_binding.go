@@ -37,13 +37,10 @@ type holderBinding struct {
 	Key   *ecdsa.PublicKey
 }
 
-// heldBy reports whether the binding names the given key.
 func (b holderBinding) heldBy(pub *ecdsa.PublicKey) bool {
 	return b.Key != nil && pub != nil && b.Key.Equal(pub)
 }
 
-// credentialHolderBinding reads the holder binding out of a credential in any
-// format the store keeps.
 func credentialHolderBinding(raw string) holderBinding {
 	raw = strings.TrimSpace(raw)
 	if strings.Contains(raw, "~") || strings.Count(raw, ".") == 2 {
@@ -55,8 +52,6 @@ func credentialHolderBinding(raw string) holderBinding {
 	return holderBinding{}
 }
 
-// credentialBindsToKey reports whether the credential's holder binding key
-// equals the given public key.
 func credentialBindsToKey(raw string, pub *ecdsa.PublicKey) bool {
 	return credentialHolderBinding(raw).heldBy(pub)
 }
@@ -111,7 +106,6 @@ func mdocNamesDeviceKey(doc *mdoc.Document) bool {
 	return ok
 }
 
-// confirmationJWK is the cnf.jwk member of a credential payload.
 type confirmationJWK struct {
 	Kty string `json:"kty"`
 	Crv string `json:"crv"`
@@ -119,8 +113,7 @@ type confirmationJWK struct {
 	Y   string `json:"y"`
 }
 
-// publicKey returns the key the JWK describes, or nil for one this wallet
-// could never hold (the holder key is on P-256).
+// Accept only P-256 keys because this wallet cannot hold other curves.
 func (j confirmationJWK) publicKey() *ecdsa.PublicKey {
 	if j.Kty != "EC" || j.Crv != "P-256" || j.X == "" || j.Y == "" {
 		return nil
@@ -140,8 +133,6 @@ func (j confirmationJWK) publicKey() *ecdsa.PublicKey {
 	return pub
 }
 
-// keyBindingNotHeld reports a credential the wallet keeps but cannot present:
-// its issuer bound it to a holder key this wallet does not have.
 func (w *Wallet) keyBindingNotHeld(cred *StoredCredential) bool {
 	if cred == nil {
 		return false
@@ -156,9 +147,8 @@ func (w *Wallet) keyBindingNotHeld(cred *StoredCredential) bool {
 	return binding.Bound && !binding.heldBy(&signingKey.PublicKey)
 }
 
-// noteUnheldKeyBinding records in the activity log that a credential entering
-// the store is bound to a key the wallet does not hold. The log is the one
-// place every arrival path (import, issuance, renewal) is read through.
+// Log unavailable holder keys on import, issuance and renewal so the limitation is
+// visible before presentation.
 func (w *Wallet) noteUnheldKeyBinding(cred *StoredCredential) {
 	if !w.keyBindingNotHeld(cred) {
 		return

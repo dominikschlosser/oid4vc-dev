@@ -60,7 +60,7 @@ Flags shared by all three subcommands:
 | `--always-disclosed` | —               | Claims issued plainly instead of selectively disclosable (dotted paths for nested claims) |
 | `--save-template` | —                  | Save the issued claims and settings as a template with this name |
 | `--wallet` | `false`                   | Import the issued credential into the wallet   |
-| `--batch`  | `0`                       | With `--wallet`: issue this many distinct-key copies, so the wallet presents an unused one each time |
+| `--batch`  | `0`                       | With `--wallet`: issue this many copies with separate holder keys, so the wallet presents an unused one each time |
 | `--unbound` | `false`                  | With `--wallet`: issue without a holder key (a bearer credential with no cnf). The default binds it to the wallet |
 | `--status-list-uri` | —              | Status list URI to embed in credential         |
 | `--status-list-idx` | `0`            | Status list index to embed in credential       |
@@ -102,7 +102,7 @@ The JWT subcommand produces a standard JWT with all claims directly in the paylo
 | `--template`  | —                              | Credential template name or file (see [templates](templates.md)) |
 | `--save-template` | —                          | Save the issued claims and settings as a template with this name |
 | `--wallet`    | `false`                        | Import the issued credential into the wallet   |
-| `--batch`     | `0`                            | With `--wallet`: issue this many distinct-key copies, so the wallet presents an unused one each time |
+| `--batch`     | `0`                            | With `--wallet`: issue this many copies with separate holder keys, so the wallet presents an unused one each time |
 | `--unbound`   | `false`                        | With `--wallet`: issue without an MSO device key (a malformed mdoc for testing verifier rejection). The default binds it to the wallet |
 | `--status-list-uri` | —                       | Status list URI to embed in credential         |
 | `--status-list-idx` | `0`                     | Status list index to embed in credential       |
@@ -119,7 +119,14 @@ Every SD-JWT claim is selectively disclosable by default. `--always-disclosed` (
 
 ## Wallet Registration Metadata
 
-With `--wallet`, the credential is signed with the wallet's issuer key and a trust-profile-specific leaf certificate under the shared wallet CA. `--key` alone replaces the issuer key, and the wallet issues a new leaf certificate for it. `--key` together with `--cert` signs with exactly that key and chain. The trust profile and registration metadata flags are then skipped, and the credential type is registered like that of an imported credential. A chain carrying its self-signed root warns in debug mode and is refused in strict mode. The wallet stores the credential together with an issued-attestation entry for its credential type. The wallet builds these from that entry:
+With `--wallet`, the issuer key and certificate depend on the supplied flags:
+
+- By default, the wallet uses its issuer key and a certificate for the selected trust profile, signed by the shared CA.
+- `--key` supplies another issuer key. The wallet creates a certificate for it under the shared CA.
+- `--key` with `--cert` uses the supplied key and chain. Trust profile and registration metadata flags are skipped, and the credential type is registered as an import.
+
+A supplied chain that includes its self-signed root produces a warning in debug mode and is rejected in strict mode. The wallet stores the credential and registers its type. That registration supplies metadata for:
+
 - `/.well-known/openid-credential-issuer`
 - `/api/registrar/wrp`
 - `/api/trustlist`
@@ -130,12 +137,14 @@ Without explicit status-list flags, `--wallet` registers the credential in the w
 If a wallet server is running for the same wallet directory, `--wallet` issues through its REST API (see [remote control](wallet/http-api.md#automatic-routing-single-writer)). Otherwise the command writes directly into the store and the embedded URLs resolve once `wallet serve` runs.
 
 Trust lists come from the wallet's issued-attestation registry:
+
 - each issued or imported credential type contributes one registry entry
 - entries with the same trust-list profile fields are grouped into one trust list
 - the legacy `/api/trustlist` endpoint serves the PID trust list first
 - `/api/trustlists` lists every group with its ID (`pid`, `local`), a relative `path`, and an optional `advertised_url`
 
 Without trust-metadata flags, the defaults follow the credential type:
+
 - PID attestation types default to the PID trust-list and entitlement profile
 - other attestation types default to `Non_Q_EAA_Provider` plus the local ETSI-shaped trust-list profile
 

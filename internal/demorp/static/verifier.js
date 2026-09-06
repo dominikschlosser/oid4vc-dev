@@ -1,15 +1,12 @@
-// Polling is bounded: it backs off, pauses while the tab is hidden, and
-// stops once the request stops being pending, so an abandoned tab does not
-// poll a dead request forever.
+// Stop polling completed requests and pause hidden tabs to limit traffic from abandoned
+// pages.
 const POLL_MIN = 1500;
 const POLL_MAX = 8000;
 let pollTimer = null;
 let pollDelay = POLL_MIN;
 let pollID = null;
 
-// Escapes for element content and quoted attribute values alike. A
-// textContent round-trip leaves " and ' intact, which is not enough once
-// a value lands inside an attribute.
+// Escape quotes as well as markup because values also appear in attributes.
 function esc(s) {
   return String(s === undefined || s === null ? "" : s)
     .replace(/&/g, "&amp;")
@@ -31,8 +28,7 @@ function renderResult(doc) {
     "Waiting for the wallet…";
   const checks = document.getElementById("checks");
   checks.innerHTML = (doc.checks || []).map((c) => {
-    // A check can pass with something to say: a profile rule the presentation
-    // breaks without breaking the protocol.
+    // A protocol check can pass while reporting a profile warning.
     if (c.ok && c.warning) {
       return `<div class="warn">! ${esc(c.name)}: ${esc(c.warning)}</div>`;
     }
@@ -53,11 +49,8 @@ function renderResult(doc) {
   renderPresentationLink(doc.presentation);
 }
 
-// The decoder opens whatever arrived, key binding JWT or device auth
-// included, which is the part a claims table cannot show. It is offered
-// whether the presentation verified or not: a failed one is the interesting
-// case. The presentation is not a credential in any wallet, so the link has
-// to carry it rather than name it by id.
+// Include the complete presentation in the decoder link. It is not stored as a wallet
+// credential.
 function renderPresentationLink(presentation) {
   const box = document.getElementById("presentation-box");
   const label = document.getElementById("presentation-label");
@@ -85,7 +78,6 @@ function stopPolling() {
 }
 
 async function poll(id) {
-  // Nobody is looking: keep the timer, skip the request.
   if (document.hidden) {
     schedulePoll(id);
     return;
@@ -109,7 +101,7 @@ async function poll(id) {
       stopPolling();
     }
   } catch (e) {
-    schedulePoll(id); // transient network error, try again later
+    schedulePoll(id);
   }
 }
 
@@ -119,7 +111,6 @@ function startPolling(id) {
   poll(id);
 }
 
-// Coming back to a backgrounded tab should feel immediate again.
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && pollID) {
     pollDelay = POLL_MIN;
@@ -128,8 +119,7 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-// What each PID format choice asks of the wallet. The ticket only exists as
-// an SD-JWT VC, so the choice applies to the PID alone.
+// Only PID requests offer a format choice. The demo ticket is SD-JWT only.
 const FORMAT_HINTS = {
   both: "The request asks for either format and the wallet answers with the one it holds.",
   "sd-jwt": "The request asks for the SD-JWT VC PID only. A wallet holding only the mdoc cannot answer it.",
@@ -137,7 +127,6 @@ const FORMAT_HINTS = {
 };
 
 let pidFormat = "both";
-// Which credential the request asks for.
 let credential = "ticket";
 
 for (const option of document.querySelectorAll("#credential-toggle .toggle-option")) {
@@ -148,8 +137,6 @@ for (const option of document.querySelectorAll("#credential-toggle .toggle-optio
       other.classList.toggle("selected", selected);
       other.setAttribute("aria-checked", String(selected));
     }
-    // A PID request takes a format, the custom builder takes its own panel,
-    // and the ticket takes neither.
     const showsFormat = credential === "pid" || credential === "pid-de";
     document.getElementById("format-row").hidden = !showsFormat;
     document.getElementById("format-hint").hidden = !showsFormat;
@@ -157,9 +144,7 @@ for (const option of document.querySelectorAll("#credential-toggle .toggle-optio
   });
 }
 
-// What each client id scheme does to a custom request. The x509 prefixes carry
-// the signing certificate in a signed request object, the others leave it
-// unsigned (OpenID4VP 1.0 §5.9).
+// The X.509 prefixes require a signed request object (OpenID4VP 1.0 §5.9).
 const SCHEME_HINTS = {
   x509_hash: "The request object is signed and delivered behind request_uri.",
   x509_san_dns: "The request object is signed. The client id names a DNS SAN of the signing certificate, which must also match the response host.",
@@ -177,15 +162,12 @@ for (const option of document.querySelectorAll("#scheme-toggle .toggle-option"))
       other.setAttribute("aria-checked", String(selected));
     }
     document.getElementById("scheme-hint").textContent = SCHEME_HINTS[clientIDScheme];
-    // Only the pre-registered scheme takes a bare client id. The others derive
-    // it from the certificate or the response endpoint.
     document.getElementById("client-id-row").hidden = clientIDScheme !== "pre-registered";
   });
 }
 
-// parsePath turns a dotted path with optional array brackets into a DCQL claims
-// path (OpenID4VP 1.0 §7.1): a string selects a member, [*] every array
-// element (encoded as null), [n] one element by index.
+// DCQL paths use strings for object members, null for every array element and numbers for
+// array indices (OpenID4VP 1.0 §7.1).
 function parsePath(text) {
   const path = [];
   for (const segment of text.split(".")) {
@@ -270,10 +252,8 @@ function addCredential(seed) {
 }
 
 document.getElementById("add-credential").addEventListener("click", () => addCredential());
-// Seed a PID query whose nationalities path shows the empty-array behavior.
 addCredential({ format: "dc+sd-jwt", type: "urn:eudi:pid:1", claims: ["given_name", "nationalities"] });
 
-// customRequestBody reads the builder form into the request body the API takes.
 function customRequestBody() {
   const credentials = [];
   for (const cred of document.querySelectorAll("#credentials-list .cred")) {
@@ -353,12 +333,9 @@ document.getElementById("create-request").addEventListener("click", async () => 
   startPolling(doc.id);
   });
 
-// Returning from the wallet redirect: show that request's result.
 const resultID = new URLSearchParams(location.search).get("result");
 if (resultID) startPolling(resultID);
 
-// The imprint is the wallet's, and it is only served when the operator
-// configured one, so the link appears only then.
 fetch("../api/config")
   .then((resp) => resp.json())
   .then((config) => {

@@ -21,10 +21,8 @@ import (
 	"testing"
 )
 
-// TestIssuerDisplayMetadata pins the appearance the demo issuer declares per
-// §12.2.4: the eudi-dev logo on both the issuer and the ticket configuration,
-// and a color pair on the ticket, so a wallet exercising display metadata has
-// something to render against out of the box.
+// OpenID4VCI §12.2.4 display metadata gives external wallets a logo and ticket colors
+// to render.
 func TestIssuerDisplayMetadata(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 	handler := d.IssuerHandler()
@@ -70,7 +68,6 @@ func TestIssuerDisplayMetadata(t *testing.T) {
 		t.Errorf("ticket logo uri = %q", uri)
 	}
 
-	// The logo the metadata points at is served by the issuer itself.
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/logo.svg", nil))
 	if rec.Code != http.StatusOK {

@@ -32,10 +32,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// A wallet built to OpenID4VCI 1.0 never reads c_nonce from the token
-// response. Without a Nonce Endpoint such a wallet has nowhere to get the
-// challenge it must sign, so every credential request it makes is refused for
-// a nonce mismatch it cannot do anything about.
+// OpenID4VCI 1.0 wallets fetch c_nonce from the Nonce Endpoint. Omitting that endpoint
+// leaves them unable to create a valid proof.
 func TestIssuerMetadataAdvertisesTheNonceEndpoint(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 
@@ -56,10 +54,8 @@ func TestIssuerMetadataAdvertisesTheNonceEndpoint(t *testing.T) {
 	}
 }
 
-// OpenID4VCI 1.0 §12.2.4 keeps the display data and the claims of a
-// configuration inside credential_metadata. A wallet built to 1.0 looks
-// nowhere else, so an issuer that puts them at the top level shows the user a
-// consent dialog with no credential name and no claims.
+// OpenID4VCI 1.0 §12.2.4 puts display and claims inside credential_metadata. Wallets
+// need that structure to populate consent dialogs.
 func TestIssuerMetadataPutsDisplayAndClaimsUnderCredentialMetadata(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 
@@ -107,9 +103,6 @@ func TestIssuerMetadataPutsDisplayAndClaimsUnderCredentialMetadata(t *testing.T)
 		name, _ := path[0].(string)
 		described[name] = true
 	}
-	// Every claim the ticket can carry, so a wallet reading only this document
-	// knows what it is being offered. wallet_attestation is among them and
-	// appears on the authorization code path.
 	for _, name := range []string{"event", "tier", "seat", "given_name", "family_name", "wallet_attestation"} {
 		if !described[name] {
 			t.Errorf("credential_metadata describes no %s claim: %v", name, claims)
@@ -145,7 +138,8 @@ func TestNonceEndpoint(t *testing.T) {
 	if _, present := resp["c_nonce_expires_in"]; present {
 		t.Errorf("nonce response carries c_nonce_expires_in, which §7.2 does not define: %v", resp)
 	}
-	// A challenge a cache could hand to somebody else is not a challenge.
+	// Disable caching so another client cannot receive the same challenge from a
+	// cache.
 	if store := rec.Header().Get("Cache-Control"); !strings.Contains(store, "no-store") {
 		t.Errorf("Cache-Control = %q, want no-store", store)
 	}
@@ -178,8 +172,7 @@ func TestNonceIssuedRejectsAnExpiredNonce(t *testing.T) {
 	}
 }
 
-// proofOptions is what a key proof carries, so a test can bend exactly one
-// element of Appendix F.1 and leave the rest correct.
+// Vary one Appendix F.1 proof field at a time to isolate each validation rule.
 type proofOptions struct {
 	audience  string
 	nonce     string
@@ -442,7 +435,6 @@ func TestVerifyProofJWTRejectsBadProofs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// The header names one key, the signature is made with another.
 		compact, err := jws.Sign(map[string]any{
 			"alg": "ES256",
 			"typ": "openid4vci-proof+jwt",

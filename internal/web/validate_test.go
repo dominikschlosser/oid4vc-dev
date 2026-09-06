@@ -26,7 +26,7 @@ func TestRelativeTimeGo(t *testing.T) {
 	tests := []struct {
 		name     string
 		t        time.Time
-		wantPart string // substring that must appear
+		wantPart string
 		future   bool
 	}{
 		{"1 minute ago", now.Add(-30 * time.Second), "1 minute", false},

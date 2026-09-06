@@ -16,8 +16,6 @@ package wallet
 
 import "testing"
 
-// credentialByFormat returns the wallet's stored credential of the given
-// format, failing the test when none is present.
 func credentialByFormat(t *testing.T, w *Wallet, format string) StoredCredential {
 	t.Helper()
 	for _, c := range w.GetCredentials() {
@@ -29,9 +27,6 @@ func credentialByFormat(t *testing.T, w *Wallet, format string) StoredCredential
 	return StoredCredential{}
 }
 
-// An SD-JWT the wallet issued to its own holder key reports its issuer by the
-// iss claim, a signature that is self-consistent against the embedded x5c leaf,
-// a binding to this wallet, and the number of selective-disclosure entries.
 func TestCredentialSummarySDJWTTrustFields(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 	cred := credentialByFormat(t, w, "dc+sd-jwt")
@@ -68,8 +63,6 @@ func TestCredentialSummarySDJWTTrustFields(t *testing.T) {
 	}
 }
 
-// An mdoc names its issuer by the document signer leaf certificate and reports
-// the algorithm that signed it.
 func TestCredentialSummaryMDocTrustFields(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 	cred := credentialByFormat(t, w, "mso_mdoc")
@@ -95,8 +88,6 @@ func TestCredentialSummaryMDocTrustFields(t *testing.T) {
 	}
 }
 
-// A credential the issuer bound to no holder key reports a holder binding of
-// none: there is no key for the wallet to be missing.
 func TestCredentialSummaryHolderBindingNone(t *testing.T) {
 	w := generateTestWallet(t)
 	imported, err := w.ImportCredential(sdJWTBoundTo(t, w, nil))
@@ -109,8 +100,8 @@ func TestCredentialSummaryHolderBindingNone(t *testing.T) {
 	}
 }
 
-// A credential bound to a key this wallet does not hold reports other_key: it
-// can be decoded and shown, but the wallet cannot sign a presentation of it.
+// A credential bound to an unavailable key can be decoded but cannot be presented by
+// this wallet.
 func TestCredentialSummaryHolderBindingOtherKey(t *testing.T) {
 	w := generateTestWallet(t)
 	imported, err := w.ImportCredential(sdJWTBoundTo(t, w, foreignHolderKey(t)))

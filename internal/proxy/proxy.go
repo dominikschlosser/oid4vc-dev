@@ -37,7 +37,6 @@ const (
 	proxyDebugJWEKeyContextKey proxyContextKey = "proxy-debug-jwe-key"
 )
 
-// Config holds the configuration for the debugging reverse proxy.
 type Config struct {
 	TargetURL     *url.URL
 	ProxyPort     int
@@ -46,7 +45,6 @@ type Config struct {
 	AllTraffic    bool // show all traffic including non-OID4VP/VCI requests
 }
 
-// Server is the OID4VP/VCI debugging reverse proxy.
 type Server struct {
 	config   Config
 	store    *Store
@@ -57,7 +55,6 @@ type Server struct {
 	scanner  *OutputScanner // optional: scans subprocess stdout for keys/credentials
 }
 
-// NewServer creates a new debugging reverse proxy server.
 func NewServer(cfg Config, writer EntryWriter) *Server {
 	s := &Server{
 		config:   cfg,
@@ -109,13 +106,10 @@ func NewServer(cfg Config, writer EntryWriter) *Server {
 	return s
 }
 
-// SetScanner sets the output scanner for detecting keys/credentials from
-// a proxied service's stdout.
 func (s *Server) SetScanner(scanner *OutputScanner) {
 	s.scanner = scanner
 }
 
-// Store returns the traffic store for use by the dashboard.
 func (s *Server) Store() *Store {
 	return s.store
 }
@@ -128,7 +122,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// (e.g. when behind another reverse proxy).
 	origURL := originalURL(r)
 
-	// Capture request body
 	var reqBody string
 	if r.Body != nil {
 		bodyBytes, err := io.ReadAll(r.Body)
@@ -190,7 +183,6 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 	origURL, _ := resp.Request.Context().Value(proxyOriginalURLContextKey).(string)
 	debugJWEKey, _ := resp.Request.Context().Value(proxyDebugJWEKeyContextKey).(string)
 
-	// Read response body
 	var respBody string
 	if resp.Body != nil {
 		var reader io.ReadCloser
@@ -218,7 +210,6 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 		} else {
 			respBody = string(bodyBytes)
 
-			// Rewrite URLs in response
 			contentType := resp.Header.Get("Content-Type")
 			rewritten := s.rewriter.RewriteBody(respBody, contentType)
 			s.rewriter.RewriteHeaders(resp.Header)
@@ -231,18 +222,15 @@ func (s *Server) modifyResponse(resp *http.Response) error {
 
 	duration := time.Since(start)
 
-	// Use the original URL (before Director rewrite) for display
 	displayURL := origURL
 	if displayURL == "" {
 		displayURL = resp.Request.URL.String()
 	}
 
-	// Fall back to scanner-detected CEK if no debug header was present
 	if debugJWEKey == "" && s.scanner != nil {
 		debugJWEKey = s.scanner.LastCEK()
 	}
 
-	// Fall back to scanner-detected JWK private key for ECDH-ES decryption
 	var debugJWK string
 	if s.scanner != nil {
 		debugJWK = s.scanner.LastJWK()

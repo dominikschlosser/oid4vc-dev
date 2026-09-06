@@ -38,7 +38,6 @@ var preferredCredentialResponseEncryptionAlgs = []string{"ECDH-ES"}
 var preferredCredentialResponseEncryptionEncs = []string{"A128GCM", "A256GCM", "A128CBC-HS256"}
 var preferredCredentialRequestEncryptionEncs = []string{"A256GCM", "A128GCM", "A128CBC-HS256"}
 
-// HTTPClient is the interface used for HTTP requests during issuance flows.
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
@@ -56,16 +55,12 @@ func doIssuanceRequest(req *http.Request) (*http.Response, error) {
 	return httpClient.Do(req)
 }
 
-// metadataFetchAttempts is how many times a metadata document is asked for
-// before the wallet gives up.
 const metadataFetchAttempts = 3
 
-// metadataRetryDelay spaces the attempts out.
 var metadataRetryDelay = 500 * time.Millisecond
 
-// fetchMetadataDocument performs a metadata GET, retrying only a failed
-// transport or a 5xx. A 404 is an answer, and every other 4xx is about the
-// request rather than the moment it was made.
+// Retry transport failures and 5xx responses. A 4xx response describes a request error
+// and is not retried.
 func fetchMetadataDocument(newRequest func() (*http.Request, error)) (*http.Response, error) {
 	var lastErr error
 	for attempt := 1; attempt <= metadataFetchAttempts; attempt++ {
@@ -93,7 +88,6 @@ func fetchMetadataDocument(newRequest func() (*http.Request, error)) (*http.Resp
 	return nil, lastErr
 }
 
-// IssuanceResult captures the result of an OID4VCI flow.
 type IssuanceResult struct {
 	CredentialID       string `json:"credential_id"`
 	Format             string `json:"format"`
@@ -101,20 +95,17 @@ type IssuanceResult struct {
 	VerificationStatus string `json:"verification_status,omitempty"`
 	VerificationDetail string `json:"verification_detail,omitempty"`
 	Error              string `json:"error,omitempty"`
-	// Pending marks an issuance the issuer deferred. The credential is not in
-	// the wallet yet and nothing went wrong: TransactionID identifies the
-	// deferred issuance and RetryInterval is how often the wallet retries it.
+	// Pending means the issuer deferred the credential. TransactionID identifies it
+	// and RetryInterval sets the collection schedule.
 	Pending       bool   `json:"pending,omitempty"`
 	TransactionID string `json:"transaction_id,omitempty"`
 	RetryInterval string `json:"retry_interval,omitempty"`
-	// Imported is the credential this flow stored. The server keeps it so it
-	// can put the credential back if a concurrent store reload dropped it
-	// before the save, which an authorization code flow invites: it stays
-	// open across the user's login while the UI keeps polling.
+	// Keep the imported credential so the server can restore it if a concurrent reload
+	// drops it before saving. Browser sign-in leaves time for UI polling to trigger
+	// such reloads.
 	Imported *StoredCredential `json:"-"`
 }
 
-// OfferOptions carries what the caller settled before the flow started.
 type OfferOptions struct {
 	// PresentationConsented says the caller has already consented on the
 	// user's behalf, so a presentation the issuer asks for mid-flow
@@ -176,8 +167,6 @@ func (w *Wallet) resolveOffer(offerURI string, approved *oid4vc.CredentialOffer)
 	return offer, nil
 }
 
-// keepApprovedOffer continues an approved issuance with the offer the consent
-// dialog resolved, when reading the URI again did not produce a usable one.
 func (w *Wallet) keepApprovedOffer(offerURI string, approved *oid4vc.CredentialOffer, cause error) (*oid4vc.CredentialOffer, error) {
 	if approved == nil {
 		return nil, fmt.Errorf("parsing credential offer: %w", cause)
@@ -192,10 +181,8 @@ func (w *Wallet) keepApprovedOffer(offerURI string, approved *oid4vc.CredentialO
 	return approved, nil
 }
 
-// sameCredentialOffer reports whether two reads of one URI offer the same
-// thing: the credentials of that issuer are what the user was asked about.
-// The grants are not compared, since an issuer may hand out a fresh
-// pre-authorized code for every read of the same offer.
+// Compare issuer and credential configurations with the approved offer. Grants may
+// change because issuers can generate a fresh pre-authorized code on each fetch.
 func sameCredentialOffer(approved, offered *oid4vc.CredentialOffer) bool {
 	if approved.CredentialIssuer != offered.CredentialIssuer {
 		return false
@@ -203,8 +190,6 @@ func sameCredentialOffer(approved, offered *oid4vc.CredentialOffer) bool {
 	return slices.Equal(approved.CredentialConfigurationIDs, offered.CredentialConfigurationIDs)
 }
 
-// offerSummary names an offer the way a warning has to: whose it is and what
-// it holds.
 func offerSummary(offer *oid4vc.CredentialOffer) string {
 	issuer := strings.TrimSpace(offer.CredentialIssuer)
 	if issuer == "" {
@@ -223,8 +208,6 @@ func (w *Wallet) ProcessCredentialOffer(offerURI string) (*IssuanceResult, error
 	return w.ProcessCredentialOfferWithOptions(offerURI, OfferOptions{})
 }
 
-// ProcessCredentialOfferWithOptions is ProcessCredentialOffer with what the
-// caller already settled.
 func (w *Wallet) ProcessCredentialOfferWithOptions(offerURI string, opts OfferOptions) (_ *IssuanceResult, err error) {
 	offer, err := w.resolveOffer(offerURI, opts.ResolvedOffer)
 	if err != nil {
@@ -238,9 +221,8 @@ func (w *Wallet) ProcessCredentialOfferWithOptions(offerURI string, opts OfferOp
 		"grants":                       offer.Grants,
 	})
 
-	// Any error that ends the flow after the offer was received is recorded, so
-	// the activity log names why issuance did not finish. The steps after the
-	// credential response log no detail of their own.
+	// Record terminal errors so the activity log explains why issuance stopped,
+	// including failures after the credential response.
 	defer func() {
 		if err != nil {
 			w.addProtocolLog("issuance", "issuance_failed",
@@ -271,8 +253,8 @@ func (w *Wallet) ProcessCredentialOfferWithOptions(offerURI string, opts OfferOp
 		return nil, err
 	}
 	oauthMeta, oauthErr := w.fetchLoggedMetadata(oauthMetadataFetch(authServer))
-	// Checked before the grant is spent, so a server that cannot take it is
-	// named while the offer is still redeemable somewhere else.
+	// Check support before consuming the grant so the offer can still be used with
+	// another wallet.
 	grantType := preAuthorizedCodeGrant
 	if offer.Grants.PreAuthorizedCode == "" {
 		grantType = "authorization_code"
@@ -293,9 +275,8 @@ func (w *Wallet) ProcessCredentialOfferWithOptions(offerURI string, opts OfferOp
 		return nil, err
 	}
 
-	// The profile decides how many checks run, the mode decides what a
-	// violation does: strict refuses the offer, debug reports every violation
-	// and collects the credential anyway.
+	// HAIP selects checks. Strict mode rejects findings and debug mode logs them
+	// before continuing.
 	if w.RequireHAIP {
 		if violations := ValidateHAIPIssuanceCompliance(offer, oauthMeta); len(violations) > 0 {
 			if err := w.reportHAIPViolations("Credential offer", offer.CredentialIssuer, violations); err != nil {
@@ -344,8 +325,7 @@ func (w *Wallet) ProcessCredentialOfferWithOptions(offerURI string, opts OfferOp
 	if txCode != "" {
 		tokenForm.Set("tx_code", txCode)
 	}
-	// The wallet attestation and the DPoP proof travel as headers, so the
-	// log names them next to the form.
+	// Include authentication headers in the log alongside the token request form.
 	attestor := w.attestorFor(clientAuth)
 	w.addProtocolLog("issuance", "token_request", fmt.Sprintf("Request token from %s", tokenEndpoint), true, map[string]any{
 		"direction":           "outbound",
@@ -485,8 +465,7 @@ func (w *Wallet) ProcessCredentialOfferWithOptions(offerURI string, opts OfferOp
 		return nil, err
 	}
 
-	// The profile decides whether this runs, the mode decides what it does,
-	// as with the offer above.
+	// Use the same validation mode for the received credential as for the offer.
 	if w.RequireHAIP {
 		if violations := w.haipCredentialViolations(credential); len(violations) > 0 {
 			if err := w.reportHAIPViolations("Credential", offer.CredentialIssuer, violations); err != nil {
@@ -552,8 +531,6 @@ func verifyImportedJWTMetadataSignature(raw string) (string, string) {
 	return "fail", "Signature invalid"
 }
 
-// metadataFetch describes one well-known metadata document to fetch and how
-// to name it in the activity log.
 type metadataFetch struct {
 	event         string // log event prefix, e.g. "issuer_metadata"
 	fetchLabel    string // reads as "Fetch <fetchLabel> from <issuer>"
@@ -563,9 +540,6 @@ type metadataFetch struct {
 	fetch         func(string) (map[string]any, error)
 }
 
-// fetchLoggedMetadata fetches a metadata document and records the request and
-// whichever response it produced. The error is returned for the caller to
-// decide on.
 func (w *Wallet) fetchLoggedMetadata(f metadataFetch) (map[string]any, error) {
 	url, _ := wellKnownURL(f.issuer, f.wellKnown)
 	w.addProtocolLog("issuance", f.event+"_request", fmt.Sprintf("Fetch %s from %s", f.fetchLabel, f.issuer), true, map[string]any{
@@ -592,7 +566,6 @@ func (w *Wallet) fetchLoggedMetadata(f metadataFetch) (map[string]any, error) {
 	return metadata, err
 }
 
-// fetchIssuerMetadata fetches the OpenID Credential Issuer metadata.
 func fetchIssuerMetadata(issuer string) (map[string]any, error) {
 	metadataURL, err := wellKnownURL(issuer, "openid-credential-issuer")
 	if err != nil {
@@ -770,8 +743,6 @@ func verifySignedIssuerMetadata(token *sdjwt.Token, issuer string) error {
 	return nil
 }
 
-// signedIssuerMetadataChain returns the certificates of a signed metadata x5c
-// chain, leaf first.
 func signedIssuerMetadataChain(token *sdjwt.Token) ([]*x509.Certificate, error) {
 	x5cRaw, ok := token.Header["x5c"]
 	if !ok {
@@ -916,13 +887,9 @@ func selectAuthorizationServer(metadata map[string]any, offer *oid4vc.Credential
 	return "", fmt.Errorf("credential offer names authorization server %q, which the issuer metadata of %s does not list", hint, issuer)
 }
 
-// grantTypesSupported lists the grant_types_supported entries of an
-// authorization server's metadata, and says whether the server stated any.
-//
-// A server that states none has said nothing. RFC 8414 §2 gives the parameter
-// a default of "authorization_code" and "implicit", which predates the
-// pre-authorized code grant, so applying it would report every issuer that
-// omits it.
+// Do not apply RFC 8414's old authorization_code and implicit defaults to
+// pre-authorized issuance. If grant_types_supported is absent, infer no
+// incompatibility.
 func grantTypesSupported(oauthMeta map[string]any) ([]string, bool) {
 	raw, ok := oauthMeta["grant_types_supported"].([]any)
 	if !ok {
@@ -964,8 +931,6 @@ func (w *Wallet) checkAuthorizationServerGrant(authServer string, oauthMeta map[
 	return nil
 }
 
-// oauthMetadataFetch describes the authorization server metadata document of
-// one server for fetchLoggedMetadata.
 func oauthMetadataFetch(issuer string) metadataFetch {
 	return metadataFetch{
 		event:         "oauth_metadata",
@@ -1119,7 +1084,6 @@ func resolveCredentialFormat(metadata map[string]any, configID string) string {
 	return f
 }
 
-// createProofJWT creates an OID4VCI proof of possession JWT.
 func createProofJWT(holderKey *ecdsa.PrivateKey, audience, clientID, cNonce string, extraHeader map[string]any) (string, error) {
 	jwkJSON := mock.PublicKeyJWK(&holderKey.PublicKey)
 	var jwk map[string]any
@@ -1362,9 +1326,7 @@ func credentialRequestEncryptionRequired(raw map[string]any) bool {
 	return required
 }
 
-// reportHAIPViolations records the findings as one activity log entry: a
-// single finding stands alone, several are grouped under a spec-citing
-// summary. Strict mode gets the error back, debug nil.
+// Group HAIP findings in one activity entry. Return an error only in strict mode.
 func (w *Wallet) reportHAIPViolations(subject, issuer string, violations []string) error {
 	detail := fmt.Sprintf("%s (%d findings, see details)", specCitedSummary(subject, violations), len(violations))
 	if len(violations) == 1 {
@@ -1414,10 +1376,8 @@ func (w *Wallet) issuanceChallenge(metadata, tokenResp map[string]any, issuer st
 	return cNonce, nil
 }
 
-// credentialRequestAttempt is one credential request in every detail it takes
-// to send it again. §8.3.1.2 answers a stale challenge with invalid_nonce and
-// expects another attempt, and the retry has to reproduce the request down to
-// the proof keys it is bound to.
+// Keep request inputs, including proof keys, so invalid_nonce can retry the same
+// request with a fresh challenge (§8.3.1.2).
 type credentialRequestAttempt struct {
 	metadata                  map[string]any
 	endpoint                  string
@@ -1479,9 +1439,8 @@ func (w *Wallet) buildCredentialProofs(a credentialRequestAttempt, cNonce string
 	return credentialProofs{Type: "jwt", Values: proofs}, nil
 }
 
-// requestCredentialWithNonceRetry sends a credential request and, on
-// invalid_nonce, fetches a fresh challenge and sends it once more (§8.3.1.2).
-// One retry only: a second rejection is the issuer disagreeing with itself.
+// Retry invalid_nonce once with a fresh challenge (§8.3.1.2). Return a second
+// rejection instead of looping.
 func (w *Wallet) requestCredentialWithNonceRetry(a credentialRequestAttempt, proofs credentialProofs) (map[string]any, error) {
 	credResp, err := w.sendCredentialRequest(a, proofs)
 	if err == nil || !isInvalidNonceError(err) {
@@ -1573,8 +1532,7 @@ func credentialResponseLogDetails(endpoint string, response map[string]any, err 
 	return details
 }
 
-// txCodeHintSuffix repeats what the offer says about the code, so the message
-// names the length and input mode the user is looking for.
+// Include the required code length and input mode in the error.
 func txCodeHintSuffix(txCode map[string]any) string {
 	if description, _ := txCode["description"].(string); strings.TrimSpace(description) != "" {
 		return " (" + strings.TrimSpace(description) + ")"

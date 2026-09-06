@@ -20,9 +20,7 @@ import (
 	"testing"
 )
 
-// The values are the worked example of OpenID4VCI 1.1 Appendix A.2.5, so this
-// checks the encoding against the draft itself rather than against what this
-// wallet happens to produce.
+// The expected bytes come from the worked example in OpenID4VCI 1.1 Appendix A.2.5.
 const (
 	iaeExampleEndpoint = "https://example.com/iae"
 	iaeExampleNonce    = "exc7gBkxjx1rdc9udRrveKvSsJIq80avlXeLHhGwqtA"
@@ -90,9 +88,8 @@ func TestBuildSessionTranscriptOID4VCIIAEOmitsTheThumbprintForIAPost(t *testing.
 	}
 }
 
-// The ISO transcript mode is a setting for OpenID4VP presentations. A
-// presentation made during Interactive Authorization has one handover defined
-// for it, so the setting must not change what is signed.
+// Interactive Authorization defines its own handover. The wallet's ISO transcript
+// setting only applies to OpenID4VP presentations.
 func TestInteractiveAuthorizationTranscriptIgnoresTheSessionTranscriptMode(t *testing.T) {
 	params := PresentationParams{
 		ResponseMode:                     "ia_post",
@@ -119,9 +116,8 @@ func TestInteractiveAuthorizationTranscriptIgnoresTheSessionTranscriptMode(t *te
 	}
 }
 
-// Without the endpoint there is nothing to bind the presentation to, and a
-// transcript built over an empty string would be one an authorization server
-// cannot reproduce. Failing here is better than signing it.
+// The challenge endpoint is required to bind the presentation to the authorization
+// request.
 func TestBuildSessionTranscriptOID4VCIIAERefusesAnEmptyEndpoint(t *testing.T) {
 	if _, err := buildSessionTranscriptOID4VCIIAE("  ", iaeExampleNonce, nil); err == nil {
 		t.Fatal("built a transcript without an authorization challenge endpoint")
@@ -143,7 +139,6 @@ func TestSDJWTAudienceForInteractiveAuthorization(t *testing.T) {
 		t.Errorf("aud = %q, want an ia: prefix", audience)
 	}
 
-	// Every other flow is untouched.
 	plain := sdJWTAudience(PresentationParams{
 		ResponseMode: "direct_post",
 		ClientID:     "x509_hash:verifier",

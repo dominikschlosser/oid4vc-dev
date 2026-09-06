@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// The HTTPS listener that serves issuer metadata, its certificate, and
-// the renewal that keeps a long running wallet from serving an expired one.
-
 package wallet
 
 import (
@@ -28,37 +25,28 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/config"
 )
 
-// SetIssuerTLSCertificate sets the certificate used by the wallet's HTTPS endpoints.
 func (s *Server) SetIssuerTLSCertificate(cert tls.Certificate) {
 	s.issuerTLSCert = &cert
 }
 
-// SetIssuerListenPort overrides the local port of the built-in HTTPS issuer
-// listener, which NewServer derives from the wallet's IssuerURL. Pass a
-// negative port to disable the listener entirely. Used when an external TLS
-// terminator serves the issuer origin (IssuerURL equals the base URL), where
-// the derived port would otherwise be 443.
+// SetIssuerListenPort accepts a negative port to disable TLS when an external server
+// terminates it. Otherwise NewServer derives the port from IssuerURL.
 func (s *Server) SetIssuerListenPort(port int) {
 	s.issuerPort = port
 }
 
-// setIssuerTLSCertificate replaces the certificate served on the HTTPS
-// listener.
 func (s *Server) setIssuerTLSCertificate(cert tls.Certificate) {
 	s.tlsMu.Lock()
 	defer s.tlsMu.Unlock()
 	s.issuerTLSCert = &cert
 }
 
-// currentIssuerTLSCertificate is the certificate to answer a handshake with.
 func (s *Server) currentIssuerTLSCertificate() *tls.Certificate {
 	s.tlsMu.RLock()
 	defer s.tlsMu.RUnlock()
 	return s.issuerTLSCert
 }
 
-// renewIssuerTLSCertificateIfNeeded re-issues the HTTPS leaf as it approaches
-// expiry, on the same reasoning as the signing leaf.
 func (s *Server) renewIssuerTLSCertificateIfNeeded(now time.Time) {
 	current := s.currentIssuerTLSCertificate()
 	if current == nil || len(current.Certificate) == 0 {
@@ -81,10 +69,8 @@ func (s *Server) renewIssuerTLSCertificateIfNeeded(now time.Time) {
 	s.log("  Renewed:       HTTPS certificate")
 }
 
-// signingKeyExpiry is what the wallet publishes as the expiry of its signing
-// key. It follows the signing certificate rather than a value computed once at
-// startup: a wallet that runs for months would otherwise advertise a key that
-// expired on its first day.
+// Read the current signing certificate's expiry so renewal updates the published
+// value.
 func (s *Server) signingKeyExpiry() time.Time {
 	if expiry := s.wallet.SigningCertificateExpiry(); !expiry.IsZero() {
 		return expiry
@@ -123,17 +109,14 @@ func (s *Server) startIssuerTLSServer() error {
 
 	go func() {
 		tlsListener := tls.NewListener(ln, &tls.Config{
-			// Resolved per handshake so a renewal reaches clients without a
-			// restart. A wallet outlives a certificate, and a listener holding
-			// the one it started with would serve an expired leaf forever.
+			// Read the certificate for each handshake so renewal takes effect without
+			// restarting the listener.
 			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 				return s.currentIssuerTLSCertificate(), nil
 			},
 			MinVersion: tls.VersionTLS12,
-			// For TLS 1.2, only the AEAD ECDHE suites RFC 9325 (BCP 195)
-			// recommends. The certificate is ECDSA, so its suites are what a
-			// handshake can pick. TLS 1.3 suites are not configurable and are
-			// all recommended.
+			// RFC 9325 recommends these AEAD ECDHE suites for TLS 1.2 with ECDSA
+			// certificates. Go fixes the TLS 1.3 suite list.
 			CipherSuites: []uint16{
 				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,

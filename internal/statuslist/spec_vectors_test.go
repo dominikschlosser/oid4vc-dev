@@ -39,8 +39,7 @@ type specVector struct {
 	// encoding of the vector (Section 4.2).
 	LST string `json:"lst"`
 	// CBOR is the hex of the CBOR encoding of the same list (Section 4.3).
-	CBOR string `json:"cbor"`
-	// Statuses maps a decimal index to the status value the vector states.
+	CBOR     string         `json:"cbor"`
 	Statuses map[string]int `json:"statuses"`
 }
 

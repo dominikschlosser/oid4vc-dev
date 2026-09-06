@@ -31,7 +31,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// cwtServer serves a CWT Status List Token over the given bitstring.
 func cwtServer(t *testing.T, key *ecdsa.PrivateKey, bits int, bitstring []byte, chain []*x509.Certificate) *httptest.Server {
 	t.Helper()
 	return statusListServer(t, func(uri string) (string, []byte) {
@@ -306,8 +305,6 @@ func TestCWTRoundTrip_EveryWidth(t *testing.T) {
 	}
 }
 
-// signCWTWithType builds a COSE_Sign1 status list token with an arbitrary (or
-// absent) type header.
 func signCWTWithType(t *testing.T, key *ecdsa.PrivateKey, uri string, typ any) []byte {
 	t.Helper()
 	compressed, err := compressBitstring(make([]byte, 16))

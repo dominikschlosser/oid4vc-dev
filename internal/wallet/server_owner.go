@@ -23,23 +23,19 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/config"
 )
 
-// sessionCookieName identifies a browser to a wallet several people reach. It
-// authenticates nobody (ADR-0002), and docs/public-demo.md covers it under the
-// demo's imprint.
+// Identifies the browser that owns a request. It does not authenticate users
+// (ADR-0002). See docs/public-demo.md for the demo's cookie notice.
 const sessionCookieName = "eudi_session"
 
-// OwnerHeader names the browser a client submits on behalf of. The URL handler
-// and the CLI put the same value in the page URL they open and on the call
-// they make, which is what ties the two acts together.
+// OwnerHeader carries the same browser ID as the page URL opened by the client. This
+// associates the submitted request with that page.
 const OwnerHeader = config.OwnerHeader
 
-// ownerParam carries it where a header cannot go: the URL a client opens, and
-// the event stream.
+// The page URL and event stream carry the browser ID as a query parameter.
 const ownerParam = "owner"
 
-// newBrowserSession creates a session and sets it on the response. Only the
-// handlers that serve a browser call it: a caller that drops the cookie would
-// own requests it can never ask for again.
+// Only browser handlers create sessions. API clients that discard cookies could
+// otherwise create requests they cannot retrieve.
 func newBrowserSession(w http.ResponseWriter, r *http.Request, secure bool) string {
 	if existing := browserSession(r); existing != "" {
 		return existing
@@ -49,7 +45,7 @@ func newBrowserSession(w http.ResponseWriter, r *http.Request, secure bool) stri
 		return ""
 	}
 	id := base64.RawURLEncoding.EncodeToString(raw)
-	//nolint:gosec // G124: Secure is set for TLS connections; the wallet also serves plain http on localhost, so it cannot be unconditional.
+	//nolint:gosec // G124: Secure is set for TLS. Localhost also supports plain HTTP, which cannot use secure cookies.
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    id,
@@ -72,7 +68,6 @@ func browserSession(r *http.Request) string {
 	return cookie.Value
 }
 
-// namedOwner reads the browser a client names on the call it makes.
 func namedOwner(r *http.Request) string {
 	if r == nil {
 		return ""
@@ -80,8 +75,7 @@ func namedOwner(r *http.Request) string {
 	return boundedOwner(r.Header.Get(OwnerHeader))
 }
 
-// maxOwnerLength is as long as a name from any client this project ships. A
-// caller chooses the value, and it ends up as a map key, so it is bounded.
+// Bound caller-supplied IDs because they become map keys.
 const maxOwnerLength = 128
 
 func boundedOwner(value string) string {
@@ -92,8 +86,8 @@ func boundedOwner(value string) string {
 	return value
 }
 
-// presentedOwner is what a caller offers as its own, including the query,
-// which is how the event stream carries it: EventSource sets no headers.
+// EventSource cannot set custom headers, so the event stream also accepts the owner in
+// its query.
 func presentedOwner(r *http.Request) string {
 	if token := namedOwner(r); token != "" {
 		return token
@@ -104,20 +98,19 @@ func presentedOwner(r *http.Request) string {
 	return boundedOwner(r.URL.Query().Get(ownerParam))
 }
 
-// requestOwner is the owner to stamp on a request this call creates. A named
-// browser wins, because a client submitting for one holds no cookie from it.
+// Prefer the explicit browser ID. Clients submitting for a browser do not have its
+// session cookie.
 func requestOwner(r *http.Request) string {
-	// The header only. /authorize and /credential-offer are addressed by the
-	// verifier or the issuer, so a query parameter on them is the
-	// counterparty's word about whose browser this is.
+	// Only accept the header here. Issuers and verifiers construct protocol URLs and
+	// must not select the browser that owns the resulting request.
 	if token := namedOwner(r); token != "" {
 		return token
 	}
 	return browserSession(r)
 }
 
-// callerOwners is everything a caller may answer for. A page the URL handler
-// opened holds both its own session and the owner that handler named.
+// A page opened by a client can have both its own session cookie and the browser ID
+// from the client.
 func callerOwners(r *http.Request) []string {
 	var owners []string
 	if session := browserSession(r); session != "" {
@@ -129,11 +122,8 @@ func callerOwners(r *http.Request) []string {
 	return owners
 }
 
-// ownsRequest reports whether a caller may see and answer a consent request.
-// An unowned one stays visible to everybody, so a single-user wallet and a
-// client that names no owner keep working. Naming the id counts too: the
-// wallet handed it to this browser in the redirect, and one that keeps no
-// cookie has nothing else to show for it.
+// Unowned requests remain visible to all callers for compatibility. A redirected
+// browser can also access the request by its ID if cookies are unavailable.
 func ownsRequest(owners []string, req *ConsentRequest, named string) bool {
 	if req == nil {
 		return false
@@ -150,10 +140,8 @@ func ownedBy(owners []string, want string) bool {
 	return false
 }
 
-// browserSecure reports whether this browser reached the wallet over https. A
-// reverse proxy terminates TLS and forwards plain http, so it says so in
-// X-Forwarded-Proto. Marking the cookie Secure for a browser that is not on
-// https would lose it, and with it every request that browser started.
+// Use X-Forwarded-Proto when a proxy terminates TLS. Setting Secure for plain HTTP
+// would prevent the browser from keeping the session cookie.
 func (s *Server) browserSecure(r *http.Request) bool {
 	if r == nil {
 		return false
@@ -168,7 +156,6 @@ func (s *Server) browserSecure(r *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(proto), "https")
 }
 
-// withBrowserSession gives the UI a session before it submits anything.
 func (s *Server) withBrowserSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isPageRequest(r) {
@@ -185,8 +172,7 @@ func isPageRequest(r *http.Request) bool {
 	return r.URL.Path == "/" || r.URL.Path == "/index.html"
 }
 
-// namedRequest is the request a caller names by id, which the wallet put in
-// the URL it redirected that browser to.
+// The wallet includes the request ID in the browser's redirect URL.
 func namedRequest(r *http.Request) string {
 	if r == nil {
 		return ""
@@ -194,8 +180,8 @@ func namedRequest(r *http.Request) string {
 	return r.URL.Query().Get("request")
 }
 
-// approvingOwner is the browser a presentation asked for mid-issuance belongs
-// to. An offer that named none takes the browser that approved it.
+// Presentations requested during issuance belong to the offer's browser. For unowned
+// offers, use the browser that approved consent.
 func approvingOwner(offerOwner, approverOwner string) string {
 	if offerOwner != "" {
 		return offerOwner

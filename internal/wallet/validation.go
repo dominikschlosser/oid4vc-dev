@@ -22,12 +22,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/oid4vc"
 )
 
-// ValidateAuthorizationRequest evaluates request syntax, verifier metadata and
-// request-object checks.
-//
-// The two switches are separate: requireHAIP decides how many checks run, the
-// mode decides what a finding does (strict stops, debug reports and carries
-// on).
+// ValidateAuthorizationRequest adds profile checks when requireHAIP is set. The validation
+// mode decides whether findings stop the flow or become warnings.
 func ValidateAuthorizationRequest(mode ValidationMode, requireHAIP bool, params *AuthorizationRequestParams) ([]string, error) {
 	if err := validateAuthorizationRequestSyntax(params); err != nil {
 		return nil, fmt.Errorf("authorization request validation failed: %w", err)
@@ -64,8 +60,8 @@ func ValidateAuthorizationRequest(mode ValidationMode, requireHAIP bool, params 
 	return validatePresentationRequestCore(mode, requireHAIP, clientID, reqObj, responseURI, requestOrigin, params, reqPayload)
 }
 
-// ValidatePresentationRequest evaluates client_id, request-object metadata, and signature checks.
-// In debug mode findings are returned as warnings. In strict mode any finding is fatal.
+// ValidatePresentationRequest returns violations as warnings in debug mode. Strict mode
+// rejects violations. Advisories remain warnings in both modes.
 func ValidatePresentationRequest(mode ValidationMode, clientID string, reqObj *oid4vc.RequestObjectJWT, responseURI string) ([]string, error) {
 	return validatePresentationRequestCore(mode, false, clientID, reqObj, responseURI, "", nil, nil)
 }
@@ -93,13 +89,11 @@ func validatePresentationRequestCore(mode ValidationMode, requireHAIP bool, clie
 		return nil, fmt.Errorf("authorization request validation failed: %s", strings.Join(findings, ", "))
 	}
 
-	// An advisory is a warning in every mode.
 	return append(findings, advisories...), nil
 }
 
-// authorizationFindings collects what an authorization request gets wrong
-// against OpenID4VP 1.0. Findings are gathered in every mode. Only what
-// happens to them differs.
+// Collect the same OID4VP 1.0 findings in every mode. The caller decides whether to
+// reject or warn.
 func authorizationFindings(params *AuthorizationRequestParams, payload map[string]any) []string {
 	if params == nil {
 		return nil
@@ -130,9 +124,8 @@ func authorizationFindings(params *AuthorizationRequestParams, payload map[strin
 			findings = append(findings, "OID4VP 1.0 §5.1: a vp_token request must carry either dcql_query or scope")
 		}
 	}
-	// §6.1 makes format, meta and the syntax of a credential query id
-	// normative, and a query that breaks them is a request the Verifier got
-	// wrong rather than a credential the wallet lacks.
+	// Invalid format, meta or query ID fields violate §6.1. Report a request error
+	// rather than a missing credential.
 	findings = append(findings, DCQLQueryFindings(params.DCQLQuery)...)
 	// §5.1: "Wallets that do not support this parameter MUST reject requests
 	// that contain it."
@@ -151,8 +144,6 @@ func authorizationFindings(params *AuthorizationRequestParams, payload map[strin
 	return findings
 }
 
-// specCitedSummary names each specification the findings cite, read off
-// their citation prefixes.
 func specCitedSummary(subject string, findings []string) string {
 	var specs []string
 	for _, spec := range []string{"OID4VP 1.0", "OID4VCI 1.0", "HAIP 1.0"} {
@@ -173,9 +164,7 @@ func requestRequiresNonce(responseType string) bool {
 	return responseType == "" || ResponseTypeRequiresVP(responseType) || ResponseTypeContains(responseType, "id_token")
 }
 
-// unsignedInteractiveAuthorizationRequest reports whether this is an
-// openid4vp_request that arrived as parameters rather than as a signed Request
-// Object (OpenID4VCI 1.1 §6.2.1.1).
+// OpenID4VCI 1.1 §6.2.1.1 allows openid4vp_request as unsigned parameters.
 func unsignedInteractiveAuthorizationRequest(params *AuthorizationRequestParams) bool {
 	return isInteractiveAuthorizationResponseMode(params.ResponseMode) && params.RequestObject == nil
 }
@@ -184,11 +173,8 @@ func responseModeUsesDirectPost(responseMode string) bool {
 	return responseMode == "direct_post" || responseMode == "direct_post.jwt"
 }
 
-// hasKnownClientIDPrefix reports whether a Client Identifier is one this
-// wallet can make sense of. OID4VP 1.0 §5.9.2: "If a : character is not
-// present in the Client Identifier, the Wallet MUST treat the Client
-// Identifier as referencing a pre-registered client", so a bare identifier is
-// legal and only an unrecognised prefix is reported.
+// OID4VP 1.0 §5.9.2 treats identifiers without a colon as pre-registered clients.
+// Report only unknown prefixes.
 func hasKnownClientIDPrefix(clientID string) bool {
 	if !strings.Contains(clientID, ":") {
 		return true
@@ -295,10 +281,8 @@ func validateResponseMode(responseMode, responseURI, redirectURI string) error {
 	return nil
 }
 
-// validateAbsoluteURI checks a URI the wallet will send a browser to. Absolute
-// is not enough: url.Parse reports javascript: and data: as absolute, so a
-// verifier could answer with {"redirect_uri":"javascript:..."} and get script
-// execution on the wallet's origin. Only http and https pass.
+// Only HTTP and HTTPS redirects are safe here. url.Parse also calls javascript: and
+// data: absolute, but navigating to them could execute script on the wallet's origin.
 func validateAbsoluteURI(field, raw string) error {
 	if raw == "" {
 		return nil

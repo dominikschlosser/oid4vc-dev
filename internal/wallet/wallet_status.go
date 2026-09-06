@@ -19,10 +19,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/statuslist"
 )
 
-// SetCredentialStatus sets the status value for a credential. Section 7 of
-// draft-ietf-oauth-status-list bounds it: "Status Types MUST have a numeric
-// value between 0 and 255." A value outside that has no encoding in any
-// allowed width, so it is refused rather than truncated when published.
+// SetCredentialStatus accepts values from 0 through 255 as draft-ietf-oauth-status-list §7
+// requires. Reject values that cannot be encoded.
 func (w *Wallet) SetCredentialStatus(credID string, status int) (StatusEntry, bool) {
 	if status < 0 || status > 255 {
 		return StatusEntry{}, false
@@ -30,9 +28,8 @@ func (w *Wallet) SetCredentialStatus(credID string, status int) (StatusEntry, bo
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// A batch revokes as one credential. Its copies each carry their own status
-	// index (never a shared one, so two presentations stay unlinkable), so the
-	// logical credential is revoked only when every copy's index is flipped.
+	// Each batch copy has a distinct status index. Revoke every copy to revoke the
+	// logical credential.
 	group := ""
 	for _, c := range w.Credentials {
 		if c.ID == credID {
@@ -77,11 +74,8 @@ func (w *Wallet) SetCredentialStatus(credID string, status int) (StatusEntry, bo
 	return entry, true
 }
 
-// BuildStatusList builds the published status list: the bits per entry and the
-// packed bitstring. The width follows the largest status value held, as
-// section 7 requires ("The Status Issuer MUST choose an adequate bits value
-// [...] to describe the required Status Types"). Fixed at one bit, a
-// SUSPENDED credential would be published as INVALID.
+// BuildStatusList allocates enough bits for every stored status value, as §7 requires. A
+// fixed one-bit list cannot represent SUSPENDED correctly.
 func (w *Wallet) BuildStatusList() (int, []byte) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -94,19 +88,15 @@ func (w *Wallet) BuildStatusList() (int, []byte) {
 	}
 	bits, err := statuslist.BitsForStatus(maxStatus)
 	if err != nil {
-		// SetCredentialStatus refuses anything outside 0..255, so a stored
-		// value that does not fit came from a hand-edited wallet file. The
-		// list falls back to the widest width the specification allows.
+		// The API rejects values outside 0..255. If stored state contains one anyway,
+		// use the widest permitted entry width.
 		bits = 8
 	}
 
 	entries := w.StatusListCounter
 	numBytes := (entries*bits + 7) / 8
-	// A floor of 16 bytes, which is this wallet's choice rather than a
-	// requirement: the specification sets no minimum size. A list only as
-	// long as the credentials issued so far would shrink to a couple of
-	// bytes on a fresh wallet, and a one-entry list identifies the
-	// credential that reads it.
+	// The 16-byte minimum is a wallet choice. The specification sets no minimum, but a
+	// list with only one entry would identify the credential being checked.
 	if numBytes < 16 {
 		numBytes = 16
 	}
@@ -117,11 +107,8 @@ func (w *Wallet) BuildStatusList() (int, []byte) {
 		if entry.Status == 0 {
 			continue
 		}
-		// A negative index passes a bounds check written as "less than the
-		// length" and then raises "negative shift amount". The index is
-		// adopted from an imported credential's own status claim, so the
-		// number is whoever issued it, and this bitstring is served to anyone
-		// who asks for the status list.
+		// Imported indices are untrusted. A negative index can pass an upper-bound
+		// check and panic during a bit shift.
 		if entry.Index < 0 || entry.Index >= capacity {
 			continue
 		}
@@ -133,8 +120,7 @@ func (w *Wallet) BuildStatusList() (int, []byte) {
 	return bits, bitstring
 }
 
-// NextStatusIndex reserves the next status list index: from the store's
-// shared counter on a backend that has one, from the wallet's own counter
+// NextStatusIndex uses the shared backend counter when available and the local counter
 // otherwise.
 func (w *Wallet) NextStatusIndex() (int, error) {
 	w.mu.RLock()
@@ -150,9 +136,7 @@ func (w *Wallet) NextStatusIndex() (int, error) {
 	return idx, nil
 }
 
-// registerStatusEntry records a status entry for a credential. A negative
-// index is dropped: import adopts the index from the credential's own status
-// claim, so the number comes from whoever issued it.
+// Reject negative indices because imported credentials supply them.
 func (w *Wallet) registerStatusEntry(credID string, idx int) {
 	if idx < 0 {
 		return
@@ -165,12 +149,10 @@ func (w *Wallet) registerStatusEntry(credID string, idx int) {
 	w.StatusEntries[credID] = StatusEntry{Index: idx, Status: 0}
 }
 
-// RegisterStatusEntry records a wallet-managed status list entry for a credential.
 func (w *Wallet) RegisterStatusEntry(credID string, idx int) {
 	w.registerStatusEntry(credID, idx)
 }
 
-// StatusEntryFor returns the wallet's own status list entry for a credential.
 func (w *Wallet) StatusEntryFor(credID string) (StatusEntry, bool) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -178,9 +160,7 @@ func (w *Wallet) StatusEntryFor(credID string) (StatusEntry, bool) {
 	return entry, ok
 }
 
-// CredentialStatusRef extracts the status list reference embedded in a
-// credential: the status claim for SD-JWT and JWT VC, the MSO status for
-// mdoc.
+// CredentialStatusRef reads JWT status claims or mdoc MSO status. mdoc uses MSO status.
 func CredentialStatusRef(c StoredCredential) *statuslist.StatusRef {
 	switch c.Format {
 	case "mso_mdoc":
@@ -194,10 +174,7 @@ func CredentialStatusRef(c StoredCredential) *statuslist.StatusRef {
 	}
 }
 
-// CredentialStatusInfo returns the status metadata included in credential
-// summaries: the embedded status list reference plus, when the wallet manages
-// the entry on its own status list, the current status value. It returns nil
-// for credentials without any status list reference or entry.
+// CredentialStatusInfo returns nil without a status reference or managed entry.
 func (w *Wallet) CredentialStatusInfo(c StoredCredential) map[string]any {
 	ref := CredentialStatusRef(c)
 	entry, managed := w.StatusEntryFor(c.ID)
@@ -207,9 +184,8 @@ func (w *Wallet) CredentialStatusInfo(c StoredCredential) map[string]any {
 	info := map[string]any{"managed": managed}
 	if ref != nil {
 		if ref.Invalid != "" {
-			// A status_list object that does not meet section 6.2 is a broken
-			// credential. Reporting the parts of it that happened to parse
-			// would read like a working reference.
+			// Report malformed status_list objects as invalid. Partially parsed fields
+			// could look like a usable reference.
 			info["error"] = ref.Invalid
 		} else {
 			info["uri"] = ref.URI
@@ -223,15 +199,13 @@ func (w *Wallet) CredentialStatusInfo(c StoredCredential) map[string]any {
 	return info
 }
 
-// CredentialSummaryWithStatus is CredentialSummary plus the wallet-aware
-// status metadata.
 func (w *Wallet) CredentialSummaryWithStatus(c StoredCredential) map[string]any {
 	summary := CredentialSummary(c)
 	if info := w.CredentialStatusInfo(c); info != nil {
 		summary["status"] = info
 	}
-	// Only a credential this wallet cannot sign for says so, so a listing
-	// stays quiet about the ordinary case.
+	// Report missing signing capability only when the wallet cannot present the
+	// credential.
 	if w.keyBindingNotHeld(&c) {
 		summary["key_binding_not_held"] = true
 	}
@@ -239,10 +213,8 @@ func (w *Wallet) CredentialSummaryWithStatus(c StoredCredential) map[string]any 
 	return summary
 }
 
-// CredentialSummaryWithBatch is the summary the credential list and the get
-// endpoint return: the status summary plus the batch copy count, so a batch
-// reads the same on every path. The plain status summary omits the count, so
-// an issue or import response does not gain it.
+// CredentialSummaryWithBatch adds batch counts for list and detail responses. Issue and
+// import responses use the plain status summary.
 func (w *Wallet) CredentialSummaryWithBatch(c StoredCredential) map[string]any {
 	summary := w.CredentialSummaryWithStatus(c)
 	if c.BatchGroup != "" {

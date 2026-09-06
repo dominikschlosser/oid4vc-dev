@@ -239,9 +239,7 @@ func TestGenerateStatusListJWT_WithoutCertChain(t *testing.T) {
 	}
 }
 
-// The trust anchor must not be shipped inside x5c: a relying party holds it
-// out of band, and a chain carrying its own root proves nothing. HAIP 6.1
-// rejects a status list token whose chain includes it.
+// HAIP 6.1 excludes the trust anchor from x5c. Relying parties obtain it separately.
 func TestGenerateStatusListJWTExcludesTrustAnchorFromX5C(t *testing.T) {
 	caKey, err := mock.GenerateKey()
 	if err != nil {
@@ -309,8 +307,7 @@ func decodeJWTHeader(t *testing.T, jwt string) map[string]any {
 	return header
 }
 
-// The embedded jwk must be the same key the x5c leaf certifies, or the token
-// tells two different stories about who signed it.
+// The embedded jwk must match the key certified by the x5c leaf.
 func TestGenerateStatusListJWTEmbedsSigningKeyMatchingX5C(t *testing.T) {
 	caKey, err := mock.GenerateKey()
 	if err != nil {

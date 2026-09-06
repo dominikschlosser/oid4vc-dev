@@ -39,13 +39,8 @@ func renewalIssuerMetadata(issuer string) map[string]any {
 	}
 }
 
-// A renewed credential keeps its id: a verifier query, a UI selection and the
-// activity log all refer to credentials by id, so a new entry would read as
-// the old one being deleted and an unrelated one appearing.
-//
-// The renewal is also an ordinary credential request, so the issuer here holds
-// it to what §8.2 requires: a key proof carrying a challenge from the Nonce
-// Endpoint. A renewal that never fetched one is refused.
+// Keep the credential ID during renewal so existing references still resolve. Fetch a
+// fresh Nonce Endpoint challenge for the proof required by OpenID4VCI §8.2.
 func TestRefreshCredentialKeepsTheIdentity(t *testing.T) {
 	w := generateTestWallet(t)
 	original := generateTestCredential(t, w)
@@ -165,9 +160,7 @@ func TestRefreshCredentialRefusesWithoutARefreshToken(t *testing.T) {
 	}
 }
 
-// The automatic sweep renews what is near expiry and leaves the rest alone,
-// and one credential failing must not stop the others: the task would
-// otherwise be abandoned over a single issuer being unreachable.
+// One failed renewal must not stop the sweep from trying other credentials.
 func TestRenewExpiringCredentialsSweep(t *testing.T) {
 	w := generateTestWallet(t)
 
@@ -186,7 +179,6 @@ func TestRenewExpiringCredentialsSweep(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Both can be renewed, but only one is close enough to expiry.
 	unreachable := CredentialRenewal{
 		Issuer: "https://issuer.example", TokenEndpoint: "https://127.0.0.1:1/token",
 		CredentialEndpoint: "https://127.0.0.1:1/credential",
@@ -200,23 +192,20 @@ func TestRenewExpiringCredentialsSweep(t *testing.T) {
 		t.Fatalf("the sweep reported failure over one credential: %v", err)
 	}
 
-	// The unreachable issuer failed, so the credential is held off rather than
-	// retried on the next sweep half a minute later.
+	// Back off after failure instead of retrying at the next 30-second sweep.
 	if server.renewalDue(expiring.Credential.ID, now) {
 		t.Error("a credential whose renewal just failed is due again immediately")
 	}
 	if !server.renewalDue(expiring.Credential.ID, now.Add(renewalRetryAfter+time.Second)) {
 		t.Error("a failed renewal is never retried")
 	}
-	// The one nowhere near expiry was never attempted, so it has no backoff.
 	if !server.renewalDue(fresh.Credential.ID, now) {
 		t.Error("a credential far from expiry was attempted")
 	}
 }
 
-// A credential about to expire is renewed on the way out. The background task
-// only runs on a wallet server, so one that lapses between two presentations
-// would otherwise be sent for the verifier to reject.
+// Check renewal before presentation too, because the background poller runs only with
+// wallet serve.
 func TestPresentingRenewsACredentialAboutToExpire(t *testing.T) {
 	w := generateTestWallet(t)
 	replacement := generateTestCredential(t, w)
@@ -272,10 +261,8 @@ func TestPresentingRenewsACredentialAboutToExpire(t *testing.T) {
 	}
 }
 
-// An issuer that required client authentication at issuance requires it on
-// every later token request too, and a refresh is a token request. The flow
-// that discovered the requirement is long gone by then, so what it learned
-// travels with the credential.
+// Persist client authentication settings for later refresh requests, after the
+// original issuance flow has ended.
 func TestRefreshCredentialAuthenticatesTheClient(t *testing.T) {
 	w := generateTestWallet(t)
 	w.IssuerURL = "https://wallet.example"
@@ -403,9 +390,7 @@ func TestRefreshCredentialAuthenticatesTheClient(t *testing.T) {
 	})
 }
 
-// What the issuance flow keeps with the credential is read off the
-// authorization server's metadata, so it has to be read the same way a
-// request would.
+// Read stored authentication settings from the same metadata used to build requests.
 func TestResolveClientAuthentication(t *testing.T) {
 	w := generateTestWallet(t)
 	ctx := clientAuthContext{
@@ -435,8 +420,6 @@ func TestResolveClientAuthentication(t *testing.T) {
 		t.Fatalf("a private_key_jwt issuer resolved to %+v", auth)
 	}
 
-	// An issuer that asks for nothing, with a wallet that is not enforcing
-	// the profile, gets a plain request.
 	plain := clientAuthContext{clientID: ctx.clientID, tokenEndpoint: ctx.tokenEndpoint, oauthMeta: map[string]any{}}
 	if auth := w.resolveClientAuthentication("", plain); auth != nil {
 		t.Errorf("an issuer that asked for nothing resolved to %+v", auth)
@@ -475,8 +458,7 @@ func TestResolveClientAuthentication(t *testing.T) {
 	}
 }
 
-// A refused token request reads as what the server said: the line that
-// explains the refusal, rather than a repeat of the status code over the raw
+// Report the issuer's OAuth error description without repeating the status and raw
 // body.
 func TestRefreshReportsWhatTheIssuerSaid(t *testing.T) {
 	w := generateTestWallet(t)
@@ -513,7 +495,7 @@ func TestRefreshReportsWhatTheIssuerSaid(t *testing.T) {
 	}
 }
 
-// An error response without the OAuth fields is still reported, body and all.
+// Keep the response body when no OAuth error fields are available.
 func TestRefreshReportsANonOAuthRefusal(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
@@ -540,8 +522,6 @@ func TestRefreshReportsANonOAuthRefusal(t *testing.T) {
 	}
 }
 
-// proofNonce reads the nonce claim out of a key proof, so a test issuer can
-// refuse a proof that carries the wrong challenge the way a real one does.
 func proofNonce(raw any) string {
 	compact, _ := raw.(string)
 	parts := strings.Split(compact, ".")

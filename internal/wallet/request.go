@@ -22,13 +22,10 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/oid4vc"
 )
 
-// ParseAuthorizationRequest parses an OID4VP authorization request from a URI or query params.
 func ParseAuthorizationRequest(raw string) (*oid4vc.AuthorizationRequest, error) {
 	return ParseAuthorizationRequestWithOptions(raw, oid4vc.ParseOptions{})
 }
 
-// ParseAuthorizationRequestWithOptions is like ParseAuthorizationRequest but accepts
-// ParseOptions for custom behavior (e.g. request_uri_method=post with wallet_metadata).
 func ParseAuthorizationRequestWithOptions(raw string, opts oid4vc.ParseOptions) (*oid4vc.AuthorizationRequest, error) {
 	raw = strings.TrimSpace(raw)
 
@@ -49,9 +46,7 @@ func ParseAuthorizationRequestWithOptions(raw string, opts oid4vc.ParseOptions) 
 	return authReq, nil
 }
 
-// ParseAuthorizationRequestFromParams parses an authorization request from URL query parameters.
 func ParseAuthorizationRequestFromParams(params url.Values) (*oid4vc.AuthorizationRequest, error) {
-	// Build a synthetic URI for the oid4vc parser
 	u := url.URL{
 		Scheme:   "openid4vp",
 		Host:     "authorize",
@@ -60,7 +55,6 @@ func ParseAuthorizationRequestFromParams(params url.Values) (*oid4vc.Authorizati
 	return ParseAuthorizationRequest(u.String())
 }
 
-// GetResponseURI returns the URI where the VP response should be posted.
 func GetResponseURI(authReq *oid4vc.AuthorizationRequest) string {
 	if authReq.ResponseURI != "" {
 		return authReq.ResponseURI
@@ -68,7 +62,6 @@ func GetResponseURI(authReq *oid4vc.AuthorizationRequest) string {
 	return authReq.RedirectURI
 }
 
-// GetResponseMode returns the response mode from the auth request.
 func GetResponseMode(authReq *oid4vc.AuthorizationRequest) string {
 	if authReq.ResponseMode != "" {
 		return authReq.ResponseMode

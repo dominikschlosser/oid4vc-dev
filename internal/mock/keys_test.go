@@ -148,7 +148,6 @@ func TestPrivateKeyJWK_RoundTripParse(t *testing.T) {
 	}
 }
 
-// mustCertPair generates a CA and a leaf for the certificate profile tests.
 func mustCertPair(t *testing.T, opts LeafCertOptions) (*x509.Certificate, *x509.Certificate) {
 	t.Helper()
 	caKey, err := GenerateKey()
@@ -289,8 +288,6 @@ func TestGenerateLeafCert_DocumentSignerProfile(t *testing.T) {
 	}
 }
 
-// TestGenerateLeafCert_CountryFollowsOption checks that the subject country
-// can be set to the credential's issuing country.
 func TestGenerateLeafCert_CountryFollowsOption(t *testing.T) {
 	_, leaf := mustCertPair(t, LeafCertOptions{Country: "DE"})
 	if got := leaf.Subject.Country; len(got) != 1 || got[0] != "DE" {

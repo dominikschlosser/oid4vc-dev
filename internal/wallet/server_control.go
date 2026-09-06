@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Diagnostics and control: version, configuration, activity log, the last
-// error, scripted failures and shutdown.
-
 package wallet
 
 import (
@@ -29,9 +26,8 @@ import (
 	"time"
 )
 
-// processBuildID identifies the code this process is running: the SHA-256 of
-// the executable, hashed once at startup. Comparing it against the binary on
-// disk detects a server that outlived a rebuild.
+// Hash the running executable once at startup. Comparing it with the file on disk
+// detects a server running an older build.
 var processBuildID = sync.OnceValue(func() string {
 	path, err := os.Executable()
 	if err != nil {
@@ -49,8 +45,7 @@ var processBuildID = sync.OnceValue(func() string {
 	return hex.EncodeToString(h.Sum(nil))
 })
 
-// SetImprint serves the given pre-rendered imprint page at /imprint and
-// makes /api/config advertise it so the UI shows the footer link.
+// SetImprint advertises the configured page to the UI through the config endpoint.
 func (s *Server) SetImprint(page []byte) {
 	s.imprintHTML = page
 }
@@ -64,9 +59,8 @@ func (s *Server) handleImprint(w http.ResponseWriter, r *http.Request) {
 	w.Write(s.imprintHTML)
 }
 
-// handleSecurityTxt serves the RFC 9116 contact file. Reports go to the
-// project, whoever hosts the wallet. Expires must lie under a year ahead, so
-// it is computed per request.
+// RFC 9116 requires Expires to be less than a year away. Compute it per request.
+// Security reports go to the project regardless of who hosts the wallet.
 func handleSecurityTxt(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintf(w, "Contact: https://github.com/dominikschlosser/eudi-dev/issues\n"+
@@ -86,19 +80,15 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, doc)
 }
 
-// SetVersion sets the human-readable release version reported by
-// /api/version and /api/config. The version lives in the cmd package, so the
-// serve command injects it.
+// SetVersion receives the release version from the serve command.
 func (s *Server) SetVersion(version string) {
 	s.version = version
 }
 
-// demoLogLimit caps what demo mode serves, since a shared wallet accumulates
-// entries from every visitor and the UI only needs the recent tail. It bounds
-// the response, not the log: maxLogEntries bounds what is kept.
+// Demo responses include only recent log entries. maxLogEntries separately limits the
+// stored log.
 const demoLogLimit = 50
 
-// handleLog returns the activity log.
 func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 	log := s.wallet.GetLog()
 	if s.demo != nil && len(log) > demoLogLimit {
@@ -107,8 +97,7 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, log)
 }
 
-// handleClearLog removes all activity log entries. On an entity backend the
-// clean marker also drops the entries other servers appended.
+// The entity backend's clear marker also removes entries appended by other servers.
 func (s *Server) handleClearLog(w http.ResponseWriter, r *http.Request) {
 	if store := s.store.Load(); store != nil && store.entityMode() {
 		if err := store.writeLogCleanMarker(time.Now()); err != nil {
@@ -120,7 +109,6 @@ func (s *Server) handleClearLog(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleLastError returns the last error, if any.
 func (s *Server) handleLastError(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store, private")
 	w.Header().Set("Vary", "Cookie, "+OwnerHeader)
@@ -132,15 +120,11 @@ func (s *Server) handleLastError(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, err)
 }
 
-// handleClearLastError clears the last UI error.
 func (s *Server) handleClearLastError(w http.ResponseWriter, r *http.Request) {
 	s.wallet.ClearLastError(callerOwners(r))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
 }
 
-// handleGetConfig returns the wallet instance's full introspection document.
-// Remote controllers use it to learn everything about an instance: identity
-// (pid, port, build), storage locations, URLs, and runtime behavior.
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	walletDir, storageKind, seeded := "", "", false
 	if store := s.currentStore(); store != nil {
@@ -149,8 +133,8 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		seeded = store.Seeded()
 	}
 	templatesDir := s.wallet.Templates.String()
-	// Snapshot the runtime-mutable conformance fields together under the lock.
-	// A local PUT /api/config/conformance can be changing them concurrently.
+	// Read conformance settings together under the lock because PUT
+	// /api/config/conformance can change them concurrently.
 	mode, requireHAIP, requireEncrypted := s.wallet.ConformanceSettings()
 	config := map[string]any{
 		"port":                  s.port,
@@ -169,24 +153,21 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		"auto_accept":           s.wallet.AutoAccept,
 		"session_transcript":    string(s.wallet.SessionTranscript),
 		"require_haip":          requireHAIP,
-		// Presentations and issuance are gated by the same flag, but they are
-		// reported separately: a client should be able to tell which half it
-		// is being held to without inferring it.
+		// Report issuance and presentation settings separately even though they use
+		// the same flag.
 		"require_haip_issuance":     requireHAIP,
 		"require_encrypted_request": requireEncrypted,
 		"force_client_attestation":  s.wallet.ForceClientAttestation,
 		"adhoc_display_images":      s.wallet.AdhocDisplayImages,
 		"credential_count":          len(s.wallet.GetCredentials()),
-		// False when an external TLS terminator serves the issuer origin: the
-		// built-in HTTPS listener is disabled then, and the wallet's
-		// self-signed leaf certificate is never presented on the wire.
+		// False when an external TLS terminator serves the issuer URL. In that case
+		// the built-in listener and its certificate are unused.
 		"tls_listener": s.issuerPort > 0,
 	}
 	if demo := s.demoConfig(); demo != nil {
 		config["demo"] = demo
 	} else {
-		// Host paths and the pid identify the process on its machine. They
-		// are for local remote-control tooling, not anonymous demo visitors.
+		// Demo visitors do not need the host's filesystem paths or process ID.
 		config["pid"] = os.Getpid()
 		config["wallet_dir"] = walletDir
 		config["templates_dir"] = templatesDir
@@ -194,9 +175,8 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, config)
 }
 
-// handleShutdown asks the wallet server process to exit. Like the rest of
-// the management API it is unauthenticated (testing tool only). The response
-// is sent before the process exits.
+// Send the response before shutting down. This management endpoint has no
+// authentication, like the rest of the testing API.
 func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	s.log("  Shutdown requested via API")
 	writeJSON(w, http.StatusOK, map[string]any{"shutting_down": true, "pid": os.Getpid()})
@@ -210,7 +190,6 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-// handleSetNextError sets a one-shot error override.
 func (s *Server) handleSetNextError(w http.ResponseWriter, r *http.Request) {
 	var body NextErrorOverride
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -221,13 +200,11 @@ func (s *Server) handleSetNextError(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
-// handleClearNextError clears the error override without consuming.
 func (s *Server) handleClearNextError(w http.ResponseWriter, r *http.Request) {
 	s.wallet.SetNextError(nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleSetPreferredFormat sets the global credential format preference.
 func (s *Server) handleSetPreferredFormat(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Format string `json:"format"`
@@ -242,10 +219,8 @@ func (s *Server) handleSetPreferredFormat(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]string{"format": body.Format})
 }
 
-// handleSetAutoAccept flips auto-accept at runtime. The change is
-// process-level like the conformance settings: it holds until the process
-// restarts and applies to every flow reaching this wallet. Refused in demo
-// mode, where a shared instance keeps its consent rules.
+// Runtime auto-accept applies to every flow until restart. Demo mode fixes its consent
+// settings and rejects this change.
 func (s *Server) handleSetAutoAccept(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Enabled bool `json:"enabled"`
@@ -260,11 +235,8 @@ func (s *Server) handleSetAutoAccept(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"auto_accept": body.Enabled})
 }
 
-// handleSetConformance changes the wallet's runtime conformance settings
-// (validation mode, HAIP, encrypted requests). On a local wallet every flow
-// (the UI, the macOS URL-scheme handler and the CLI) hits this same wallet, so
-// the change reaches all of them. Refused in demo mode, where the settings are
-// shared and fixed (HAIP in debug mode).
+// Runtime conformance settings apply to every flow using this server. Demo mode keeps
+// HAIP with debug validation and rejects changes.
 func (s *Server) handleSetConformance(w http.ResponseWriter, r *http.Request) {
 	if s.demo != nil {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "conformance settings are fixed in public demo mode (run the wallet locally to change them)"})
@@ -328,8 +300,7 @@ func (s *Server) handleSetConformance(w http.ResponseWriter, r *http.Request) {
 	s.writeConformanceConfig(w)
 }
 
-// handleResetConformance restores the conformance settings the wallet started
-// with. Refused in demo mode, like handleSetConformance.
+// Demo mode rejects changes to conformance settings, including resets.
 func (s *Server) handleResetConformance(w http.ResponseWriter, r *http.Request) {
 	if s.demo != nil {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "conformance settings are fixed in public demo mode"})
@@ -346,8 +317,8 @@ func (s *Server) handleResetConformance(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) writeConformanceConfig(w http.ResponseWriter) {
-	// Direct field reads: already inside the lock, so calling the locking
-	// accessor here would self-deadlock (RWMutex is not reentrant).
+	// The lock is already held. Calling a locking accessor here would deadlock because
+	// RWMutex is not reentrant.
 	s.wallet.mu.RLock()
 	vciVersion := s.wallet.VCIVersion
 	if vciVersion == "" {

@@ -21,10 +21,7 @@ import (
 	"time"
 )
 
-// RefreshCredential asks a credential's issuer for a fresh copy with the
-// refresh token from issuance. The credential keeps its id: queries, UI
-// selections and the activity log all refer to credentials by id, so a new
-// entry would read as a deletion plus an unrelated arrival.
+// RefreshCredential preserves the ID used by queries, UI selections and logs.
 func (w *Wallet) RefreshCredential(id string) (*StoredCredential, error) {
 	cred, ok := w.GetCredential(id)
 	if !ok {
@@ -143,8 +140,6 @@ func (w *Wallet) RefreshCredential(id string) (*StoredCredential, error) {
 	return renewed, nil
 }
 
-// RefreshCredential renews a credential and persists the result. The wallet
-// does the exchange. The server owns the store and the log the operator sees.
 func (s *Server) RefreshCredential(id string) (*StoredCredential, error) {
 	renewed, err := s.wallet.RefreshCredential(id)
 	if err != nil {
@@ -155,12 +150,9 @@ func (s *Server) RefreshCredential(id string) (*StoredCredential, error) {
 	return renewed, nil
 }
 
-// ReplaceCredential swaps a credential's contents for a freshly issued copy,
-// keeping its id, its protection and its place in the list.
 func (w *Wallet) ReplaceCredential(id, raw string, renewal *CredentialRenewal) (*StoredCredential, error) {
-	// Imported first so the new copy is parsed exactly the way any other
-	// credential is, then moved onto the existing entry and the appended one
-	// dropped.
+	// Import first to reuse credential parsing, then replace the existing entry while
+	// keeping its ID.
 	imported, err := w.ImportCredential(raw)
 	if err != nil {
 		return nil, fmt.Errorf("parsing the renewed credential: %w", err)
@@ -197,10 +189,9 @@ func (w *Wallet) ReplaceCredential(id, raw string, renewal *CredentialRenewal) (
 		fresh.Protected = w.Credentials[i].Protected
 		fresh.Renewal = renewal
 		fresh.Display = w.Credentials[i].Display
-		// The renewed copy keeps its place in its batch, so it still lists,
-		// presents, deletes and revokes as one credential. The renewal proves
-		// possession with the wallet holder key, so the renewed copy is bound to
-		// that key (an empty per-copy key), whatever the old copy carried.
+		// Preserve batch membership so listing, presentation, deletion and revocation
+		// still treat it as one credential. Renewal uses the wallet holder key, so
+		// clear any old per-copy key.
 		fresh.BatchGroup = w.Credentials[i].BatchGroup
 		fresh.Uses = w.Credentials[i].Uses
 		fresh.LastPresentedAt = w.Credentials[i].LastPresentedAt
@@ -237,7 +228,6 @@ func (s *Server) renewExpiringCredentials(now time.Time) error {
 	return nil
 }
 
-// renewalDue reports whether a credential may be tried again yet.
 func (s *Server) renewalDue(credentialID string, now time.Time) bool {
 	s.renewalMu.Lock()
 	defer s.renewalMu.Unlock()

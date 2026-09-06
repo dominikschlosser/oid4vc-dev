@@ -38,7 +38,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
-// SessionTranscriptMode controls how the mDoc session transcript is constructed.
 type SessionTranscriptMode string
 
 const (
@@ -53,19 +52,17 @@ const (
 	SessionTranscriptOID4VP SessionTranscriptMode = "oid4vp"
 )
 
-// StatusEntry tracks the status list index and current status for a credential.
 type StatusEntry struct {
 	Index  int `json:"index"`
 	Status int `json:"status"` // 0=valid, 1=revoked
 }
 
-// NextErrorOverride is a one-shot error override for the next presentation request.
+// NextErrorOverride applies to the next presentation request only.
 type NextErrorOverride struct {
 	Error            string `json:"error"`
 	ErrorDescription string `json:"error_description"`
 }
 
-// Wallet holds credentials, keys, and manages presentation consent flows.
 type Wallet struct {
 	HolderKey               *ecdsa.PrivateKey
 	IssuerKey               *ecdsa.PrivateKey
@@ -75,76 +72,61 @@ type Wallet struct {
 	AutoAccept              bool
 	SessionTranscript       SessionTranscriptMode // "oid4vp" (default) or "iso"
 	PreferredFormat         string                // "" (no preference), "dc+sd-jwt", or "mso_mdoc"
-	RequireEncryptedRequest bool                  // when true, rejects a request_uri response that is not a JWE (the encryption key is advertised regardless)
-	RequestEncryptionKey    *ecdsa.PrivateKey     // key for decrypting encrypted request objects
-	RequireHAIP             bool                  // when true, enforce HAIP 1.0 compliance checks
-	// KeyAttestationLevel is what the key attestation claims about its key
-	// storage (see ParseKeyAttestationLevel). Runtime-mutable like the
-	// conformance settings, read through KeyAttestationLevelSetting.
+	RequireEncryptedRequest bool                  // Rejects unencrypted request_uri responses. The wallet advertises its encryption
+	// key even when this is false.
+	RequestEncryptionKey *ecdsa.PrivateKey
+	RequireHAIP          bool
+	// Read runtime changes through KeyAttestationLevelSetting. See
+	// ParseKeyAttestationLevel for supported claims about key storage.
 	KeyAttestationLevel string `json:"-"`
-	// VCIVersion is the OpenID4VCI feature level the wallet uses as a client.
-	// "1.0" (the default) is the published final version, "1.1" also uses what
-	// the 1.1 draft adds where an issuer offers it.
+	// Defaults to 1.0. Version 1.1 enables supported draft features when the issuer
+	// advertises them.
 	VCIVersion VCIVersion `json:"-"`
-	// ForceClientAttestation sends the wallet attestation on OID4VCI token
-	// requests even where the server does not advertise attest_jwt_client_auth
-	// (advertising it is only a SHOULD). Off by default: an attestation reused
-	// across issuers is a correlation handle.
+	// Sends the wallet attestation even without advertised support. Disabled by
+	// default because reusing an attestation can link activity across issuers.
 	ForceClientAttestation bool
-	// AdhocDisplayImages keeps an http(s) display logo or background URL from
-	// an issuer's metadata as that URL, so the card fetches it on demand. Off
-	// by default: the image is fetched through the policed client and stored
-	// as an asset. A data URI and a template's own art are embedded either way.
+	// Keep HTTPS image URLs for browser fetching on demand. HTTP images, data URIs and
+	// template images are stored. By default images pass through the restricted HTTP
+	// client and become stored assets.
 	AdhocDisplayImages bool           `json:"-"`
 	ValidationMode     ValidationMode `json:"-"`
 	Credentials        []StoredCredential
-	// DeferredIssuances are credentials an issuer deferred, kept until the
-	// wallet manages to collect them.
-	DeferredIssuances []DeferredIssuance
-	StatusEntries     map[string]StatusEntry // credential ID → status entry
-	StatusListCounter int                    // next available status list index
-	BaseURL           string                 // base URL for status list endpoint
-	IssuerURL         string                 // HTTPS issuer URL for JWT VC issuer metadata/JWKS
-	VCIClientID       string                 `json:"-"`
-	VCIRedirectURI    string                 `json:"-"`
-	// ServingOrigin is the origin the running server answers on, set by the
-	// serve command and never persisted. It stands in for BaseURL when no
-	// --base-url was given, so the wallet can tell that its own /callback is
-	// reachable.
+	DeferredIssuances  []DeferredIssuance
+	StatusEntries      map[string]StatusEntry
+	StatusListCounter  int
+	BaseURL            string
+	IssuerURL          string
+	VCIClientID        string `json:"-"`
+	VCIRedirectURI     string `json:"-"`
+	// The current server origin is never persisted. It provides a callback URL when
+	// BaseURL is unset.
 	ServingOrigin string `json:"-"`
-	// Templates is where the wallet's user templates live. The zero value
-	// selects the default directory.
+	// The zero value uses the default template directory.
 	Templates credtemplate.Location `json:"-"`
 	Log       []LogEntry
 	mu        sync.RWMutex
-	// persisted is the snapshot of what the store last loaded or saved, on a
-	// backend that keeps the wallet as entities, and revisions the loaded
-	// section revisions. Nil on the file backend.
+	// Entity backends track the last loaded or saved snapshot and section revisions.
+	// File storage leaves these nil.
 	persisted stateSnapshot
 	revisions map[string]storage.Stamp
-	// savedCredentials are the credentials as last stored and entitySeqs the
-	// positions of the ordered rows, both by row key. A save marshals a
-	// credential only when it differs from its stored form.
+	// Track stored credential values and row positions. Saves serialize a credential
+	// only when it changed.
 	savedCredentials map[string]StoredCredential
 	entitySeqs       map[string]int
-	// allocateStatusIndex hands out status list indices from the shared
-	// counter of an entity-backed store. Nil means StatusListCounter is used
-	// as it is.
+	// Entity backends allocate status indices from a shared counter. When nil, use the
+	// wallet's local StatusListCounter.
 	allocateStatusIndex func(*Wallet) (int, error)
 	logSink             func(LogEntry)
-	// credentialSink forwards imports to the wallet a clone was made from.
+	// Forwards imports from a clone to the original wallet.
 	credentialSink func(StoredCredential)
-	// batchPresentedSink forwards a batch copy's use to the wallet a clone was
-	// made from, so a presentation run on a clone still advances the rotation.
+	// Forwards batch use from a clone so the original wallet advances its rotation.
 	batchPresentedSink func(id string)
 	runtime            *WalletRuntime
-	// batchDirty records that a batch copy's use count changed and the store
-	// entry should be saved, so the rotation survives a restart.
+	// Marks batch use counts for saving so rotation survives restart.
 	batchDirty bool
 }
 
-// takeBatchStateDirty reports whether a batch copy has been presented since the
-// last call and clears the flag, so the caller persists the wallet once.
+// Clears the dirty flag after reporting it so the caller saves batch state once.
 func (w *Wallet) takeBatchStateDirty() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -153,8 +135,8 @@ func (w *Wallet) takeBatchStateDirty() bool {
 	return dirty
 }
 
-// WalletRuntime is the in-memory flow state shared by wallet instances backed
-// by the same store directory.
+// WalletRuntime shares flow state between wallets using the same store directory in this
+// process.
 type WalletRuntime struct {
 	mu                sync.RWMutex
 	requests          map[string]*ConsentRequest
@@ -192,8 +174,7 @@ func (w *Wallet) runtimeState() *WalletRuntime {
 	return w.runtime
 }
 
-// StatusListURL returns the preferred status list URL for generated credentials.
-// It prefers the wallet's HTTPS issuer endpoint when available.
+// StatusListURL prefers the HTTPS issuer endpoint when available.
 func (w *Wallet) StatusListURL() string {
 	if w == nil {
 		return ""
@@ -207,7 +188,6 @@ func (w *Wallet) StatusListURL() string {
 	return ""
 }
 
-// StatusListIssuer returns the issuer value used in generated status list JWTs.
 func (w *Wallet) StatusListIssuer() string {
 	if w == nil {
 		return ""
@@ -218,9 +198,8 @@ func (w *Wallet) StatusListIssuer() string {
 	return strings.TrimRight(w.BaseURL, "/")
 }
 
-// EnsureRequestEncryptionKey generates a request-object encryption key if the
-// wallet has none, so it can always advertise one in wallet_metadata and accept
-// an encrypted Request Object. The key is ephemeral (per wallet instance).
+// EnsureRequestEncryptionKey generates a key for this wallet instance without persisting
+// it.
 func (w *Wallet) EnsureRequestEncryptionKey() error {
 	if w == nil || w.RequestEncryptionKey != nil {
 		return nil
@@ -233,64 +212,47 @@ func (w *Wallet) EnsureRequestEncryptionKey() error {
 	return nil
 }
 
-// WalletError is an error event that can be displayed in the UI.
 type WalletError struct {
 	Message string `json:"message"`
 	Detail  string `json:"detail,omitempty"`
-	// Owner is the browser whose flow raised this, empty when no client named
-	// one. Not serialised, for the reason ConsentRequest.Owner is not.
+	// Never serialize the owner because another caller could use it to claim the flow.
 	Owner string `json:"-"`
 }
 
-// StoredCredential is a credential stored in the wallet.
 type StoredCredential struct {
 	ID      string         `json:"id"`
-	Format  string         `json:"format"`        // "dc+sd-jwt", "mso_mdoc", or "jwt_vc_json"
-	Raw     string         `json:"raw"`           // original credential string
-	Claims  map[string]any `json:"claims"`        // decoded claims for display/matching
-	VCT     string         `json:"vct,omitempty"` // SD-JWT vct
+	Format  string         `json:"format"` // "dc+sd-jwt", "mso_mdoc", or "jwt_vc_json"
+	Raw     string         `json:"raw"`
+	Claims  map[string]any `json:"claims"`
+	VCT     string         `json:"vct,omitempty"`
 	DocType string         `json:"doctype,omitempty"`
-	// Protected marks baseline credentials that the UI, the API and the CLI
-	// must not delete or revoke. It exists for shared deployments, where a
-	// visitor emptying the wallet would break it for everyone. Only direct
-	// access to wallet.json can set or clear it.
+	// Protects shared baseline credentials from deletion or revocation through the UI,
+	// API and CLI. Changing this flag requires direct access to stored state.
 	Protected bool `json:"protected,omitempty"`
-	// Renewal is what re-requesting this credential from its issuer needs,
-	// kept only when the issuer handed over a refresh token. Everything here
-	// is stored in the clear like the rest of the wallet (ADR-0003).
+	// Saved only when the issuer provides a refresh token. Renewal secrets are stored
+	// unencrypted like the rest of the wallet (ADR-0003).
 	Renewal *CredentialRenewal `json:"renewal,omitempty"`
-	// Display is the appearance the issuer declared for this credential
-	// (§12.2.4), or the wallet's own appearance on a generated one.
+	// The issuer's declared appearance (§12.2.4), or the template's appearance for
+	// locally generated credentials.
 	Display *CredentialDisplay `json:"display,omitempty"`
-	// BatchGroup ties together the copies issued in one batch. The wallet keeps
-	// several copies of one credential, each bound to a different key, and
-	// presents an unused copy each time so a verifier cannot link two
-	// presentations of the same credential (EUDI ARF Annex 2 Topic 10 method C,
-	// ISSU_51-54). Empty on a credential issued singly.
+	// Groups copies issued together with distinct binding keys. Rotating copies
+	// reduces linking through repeated use of the same credential (EUDI ARF Annex 2
+	// Topic 10 method C, ISSU_51-54). Empty for single issuance.
 	BatchGroup string `json:"batch_group,omitempty"`
-	// BindingKeyPEM is the holder key this copy is bound to when it is not the
-	// wallet holder key. A batch binds each copy to a distinct key, so every
-	// copy but the one bound to the wallet holder key carries its own key here.
-	// Empty means the copy presents with the wallet holder key (a credential
-	// issued singly, and the holder-key copy of a batch).
+	// The private holder key for this copy. Empty means use the wallet's holder key.
+	// Batch copies can each use a different key.
 	BindingKeyPEM string `json:"binding_key,omitempty"`
-	// Uses counts how many times this copy has been presented. The batch presents
-	// a random copy among those used the fewest times, which shows each copy once
-	// in a random order and then resets and cycles again, reusing them, once they
-	// have all been used (EUDI ARF method C, ISSU_52).
-	Uses int `json:"uses,omitempty"`
-	// LastPresentedAt is when this copy was last sent, for display.
+	// Present a random copy among those with the lowest use count. After every copy
+	// has been used, the batch cycles through them again (EUDI ARF method C, ISSU_52).
+	Uses            int                `json:"uses,omitempty"`
 	LastPresentedAt time.Time          `json:"last_presented_at,omitempty"`
 	Disclosures     []sdjwt.Disclosure `json:"-"`
-	// issuedAt is the credential's issuance time as parsed from Raw, so the
-	// newest-first ordering does not parse the credential again.
+	// Cache the parsed issuance time for sorting.
 	issuedAt   time.Time
 	NameSpaces map[string][]mdoc.IssuerSignedItem `json:"-"`
 }
 
-// batchSigningKey returns the private key this copy presents with: its own
-// per-copy key when the batch bound it to one, or the wallet holder key when it
-// carries none.
+// An empty per-copy key falls back to the wallet's holder key.
 func (w *Wallet) batchSigningKey(cred StoredCredential) (*ecdsa.PrivateKey, error) {
 	if cred.BindingKeyPEM == "" {
 		return w.HolderKeyPair(), nil
@@ -302,9 +264,7 @@ func (w *Wallet) batchSigningKey(cred StoredCredential) (*ecdsa.PrivateKey, erro
 	return key, nil
 }
 
-// CredentialRenewal is the issuer context a credential can be re-requested
-// with. The flow that obtained the credential is long gone by the time it
-// nears expiry, so what that flow knew has to travel with the credential.
+// CredentialRenewal preserves issuer context needed after the original issuance flow ends.
 type CredentialRenewal struct {
 	Issuer             string `json:"issuer"`
 	TokenEndpoint      string `json:"token_endpoint"`
@@ -313,62 +273,46 @@ type CredentialRenewal struct {
 	ClientID           string `json:"client_id,omitempty"`
 	RefreshToken       string `json:"refresh_token"`
 	UseDPoP            bool   `json:"use_dpop,omitempty"`
-	// ClientAuth is how the issuance authenticated this client, when it had
-	// to. A refresh is another token request at the same endpoint, held to
-	// the same rule.
+	// Refresh requests use the same client authentication as the original token
+	// request.
 	ClientAuth *ClientAuthentication `json:"client_auth,omitempty"`
 }
 
-// Client authentication methods a token request can be held to.
 const (
 	ClientAuthAttestation   = "attestation"
 	ClientAuthPrivateKeyJWT = "private_key_jwt"
 )
 
-// ClientAuthentication is what authenticating to an authorization server
-// again needs once the flow that first did it is gone. An issuer that
-// required client authentication at issuance requires it on every later token
-// request too, a refresh included, and by then nothing is left holding the
-// metadata that said so.
+// ClientAuthentication preserves the method and metadata needed for later token requests,
+// including refresh.
 type ClientAuthentication struct {
 	Method   string `json:"method"`
 	ClientID string `json:"client_id,omitempty"`
-	// Audience is the authorization server identifier the attestation PoP or
-	// the client assertion is addressed to, as the flow resolved it.
+	// The authorization server identifier used as the proof or assertion audience.
 	Audience string `json:"audience,omitempty"`
-	// ChallengeEndpoint hands out the challenge an attestation PoP carries. A
-	// server that requires one rejects a stale challenge, so it is fetched
-	// per request rather than stored.
+	// Fetch a new challenge for each request because a stored challenge may expire.
 	ChallengeEndpoint string `json:"challenge_endpoint,omitempty"`
-	// ABCADraft is the attestation-based client authentication draft whose
-	// shape the attestation and PoP carry, resolved from the wallet's
-	// OpenID4VCI version when this authentication was first decided so a
-	// later refresh emits what the issuance did. 0 on a record without it,
-	// which follows the wallet's current version.
+	// Preserve the ABCA draft chosen at issuance so refresh uses the same claim
+	// structure. Zero uses the wallet's current version for older records.
 	ABCADraft int `json:"abca_draft,omitempty"`
-	// CombinedPoP says the server takes the DPoP proof as the possession
-	// proof for the attestation (draft-10 §5.2, dpop_combined), so requests
-	// carry the OAuth-Client-Attestation header alone.
+	// With dpop_combined, the DPoP proof also proves possession for the attestation.
+	// Send only OAuth-Client-Attestation (ABCA draft-10 §5.2).
 	CombinedPoP bool `json:"combined_pop,omitempty"`
 }
 
-// CanRenew reports whether a credential carries what re-requesting it needs.
 func (c StoredCredential) CanRenew() bool {
 	return c.Renewal != nil && c.Renewal.RefreshToken != "" &&
 		c.Renewal.TokenEndpoint != "" && c.Renewal.CredentialEndpoint != ""
 }
 
-// Consent request types. ConsentTypeIssuancePresentation is a presentation an
-// issuer asked for during an issuance (OpenID4VCI 1.1 §6): it is answered like
-// a presentation, but it belongs to the flow that triggered it rather than to
-// whoever happens to have the wallet open.
+// ConsentTypeIssuancePresentation belongs to the issuance flow that requested it
+// (OpenID4VCI 1.1 §6). It uses presentation consent handling.
 const (
 	ConsentTypePresentation         = "presentation"
 	ConsentTypeIssuance             = "issuance"
 	ConsentTypeIssuancePresentation = "issuance_presentation"
 )
 
-// ConsentRequest represents a pending presentation or issuance consent.
 type ConsentRequest struct {
 	ID           string                       `json:"id"`
 	Type         string                       `json:"type"` // presentation, issuance, or issuance_presentation
@@ -377,47 +321,35 @@ type ConsentRequest struct {
 	MatchedCreds []CredentialMatch            `json:"matched_credentials"`
 	Status       string                       `json:"status"` // "pending", "approved", "denied", "expired"
 	ResultCh     chan ConsentResult           `json:"-"`
-	SubmissionCh chan SubmissionResult        `json:"-"` // result of VP submission after approval
+	SubmissionCh chan SubmissionResult        `json:"-"`
 	CreatedAt    time.Time                    `json:"created_at"`
 	ClientID     string                       `json:"client_id"`
 	OfferConfigs []string                     `json:"offer_configs,omitempty"`
-	// OfferDetails describes what the issuer is offering, for the consent UI.
-	OfferDetails *IssuanceOfferDetails `json:"offer_details,omitempty"`
-	Nonce        string                `json:"nonce,omitempty"`
-	ResponseURI  string                `json:"response_uri,omitempty"`
-	DCQLQuery    map[string]any        `json:"dcql_query,omitempty"`
-	// Purposes are the purposes the verifier registered for this data
-	// request, read from the registration certificates in verifier_info and
-	// shown in the consent dialog.
+	OfferDetails *IssuanceOfferDetails        `json:"offer_details,omitempty"`
+	Nonce        string                       `json:"nonce,omitempty"`
+	ResponseURI  string                       `json:"response_uri,omitempty"`
+	DCQLQuery    map[string]any               `json:"dcql_query,omitempty"`
+	// Registered purposes read from verifier_info certificates for the consent dialog.
 	Purposes []string `json:"purposes,omitempty"`
-	// CredentialOptions are the alternatives the consent dialog can offer
-	// in its Edit view. MatchedCreds stays the auto-selection.
+	// Alternatives for the Edit view. MatchedCreds retains the automatic selection.
 	CredentialOptions *ConsentCredentialOptions `json:"credential_options,omitempty"`
-	// Owner is the browser this request belongs to, empty when no client named
-	// one. Not serialised: a caller that read it back could claim the request.
+	// Never serialize the owner because another caller could use it to claim the
+	// request. Empty means the request is unowned.
 	Owner string `json:"-"`
-	// ResolvedOffer is the credential offer this dialog describes, resolved
-	// when the request was prepared. Approving it runs the offer from the
-	// URI again, and this is what that falls back to when the issuer does
-	// not serve the offer a second time.
+	// Keep the offer shown at consent in case its URL cannot be fetched again after
+	// approval.
 	ResolvedOffer *oid4vc.CredentialOffer `json:"-"`
-	// ClientAuthSigned reports how a presentation request authenticated
-	// itself, computed when this request was created (no network call) and
-	// read back by MarshalConsentRequest. It is true only when a request
-	// object was present and its signature verified against the key material
-	// the request itself carries (self-consistent, with no trust anchor). It
-	// never means the verifier was checked against a trust list.
+	// True when the Request Object signature verifies against its supplied key
+	// material. This checks signature consistency without establishing trust in the
+	// verifier. Computed when the request is created.
 	ClientAuthSigned bool `json:"-"`
-	// ClientAuthDetail says why the request could not be verified, or notes
-	// that it was unsigned. Empty when ClientAuthSigned is true.
+	// Empty when ClientAuthSigned is true. Otherwise explains why verification was
+	// unavailable or failed.
 	ClientAuthDetail string `json:"-"`
-	// ClientName is the self-asserted verifier name from the request's
-	// client_metadata (client_metadata.client_name), empty when the request
-	// carried none. It is unverified.
+	// The unverified name from client_metadata.client_name. Empty if absent.
 	ClientName string `json:"-"`
 }
 
-// CredentialMatch links a credential to a DCQL query credential ID.
 type CredentialMatch struct {
 	QueryID      string         `json:"query_id"`
 	CredentialID string         `json:"credential_id"`
@@ -425,108 +357,80 @@ type CredentialMatch struct {
 	VCT          string         `json:"vct,omitempty"`
 	DocType      string         `json:"doctype,omitempty"`
 	Claims       map[string]any `json:"claims"`
-	SelectedKeys []string       `json:"selected_keys"` // exact claim selectors to disclose
-	// UntrustedAuthority marks a credential the request's trusted_authorities did
-	// not match, offered anyway in debug mode. The consent dialog flags it so a
-	// developer sees the constraint a conformant wallet would have enforced.
+	SelectedKeys []string       `json:"selected_keys"`
+	// Debug mode can offer credentials that fail trusted_authorities matching. The
+	// consent dialog flags this violation.
 	UntrustedAuthority bool `json:"untrusted_authority,omitempty"`
-	// EmptyArrayClaims are the requested claim paths that select an array of
-	// selectively disclosable elements without selecting the elements. Presenting
-	// them discloses an empty array, so the consent dialog and the activity log
-	// warn that the verifier has to request the elements with a null or an index.
+	// Selecting an array without its selectively disclosed elements produces an empty
+	// array. Warn so the verifier can request elements with null or an index.
 	EmptyArrayClaims []string `json:"empty_array_claims,omitempty"`
-	// MissingClaims are the requested claim paths this credential cannot satisfy
-	// (a claim it does not carry, or an array index out of range). Strict mode
-	// refuses such a request, but debug mode offers the credential on its
-	// satisfiable claims and the consent dialog shows these as not disclosed. A
-	// credential that satisfies every claim is preferred over one that does not.
+	// Debug mode can offer partial matches and shows missing claims as undisclosed.
+	// Strict mode requires all claims. Complete matches take precedence over partial
+	// matches.
 	MissingClaims []string `json:"missing_claims,omitempty"`
 }
 
-// ConsentCredentialOptions carries every way the wallet could answer a
-// presentation request, for the consent dialog's Edit view. The first
-// satisfiable option of every set and the first candidate of every query are
-// the wallet's own choice, so an approval that changes nothing presents what
-// auto-accept presents.
+// ConsentCredentialOptions defaults to the first set option and first candidate for each
+// query. Unchanged consent therefore presents the same credentials as auto-accept.
 type ConsentCredentialOptions struct {
-	// Sets mirrors the request's credential_sets: one entry per set the
-	// wallet can satisfy, holding its satisfiable options in the order the
-	// wallet prefers them. Empty for a request without credential_sets,
-	// where every query below is required.
-	Sets []ConsentSetOptions `json:"sets,omitempty"`
-	// Queries holds the matching credentials per credential query id.
+	// Lists satisfiable credential_sets options in preference order. Without
+	// credential_sets, every query is required.
+	Sets    []ConsentSetOptions   `json:"sets,omitempty"`
 	Queries []ConsentQueryOptions `json:"queries"`
 }
 
-// ConsentSetOptions is one credential_sets entry as the consent dialog
-// offers it.
 type ConsentSetOptions struct {
-	// Options are the satisfiable options, each a list of credential query
-	// ids that answer the set together.
+	// Each option lists the query IDs that jointly satisfy the set.
 	Options [][]string `json:"options"`
-	// Optional marks a set the user may skip entirely (required: false).
+	// required: false lets the user skip the entire set.
 	Optional bool `json:"optional,omitempty"`
 }
 
-// ConsentQueryOptions lists the credentials that match one credential query.
 type ConsentQueryOptions struct {
 	ID         string            `json:"id"`
 	Candidates []CredentialMatch `json:"candidates"`
 }
 
-// ConsentResult is returned by the consent flow.
 type ConsentResult struct {
 	Approved       bool
-	SelectedClaims map[string][]string // credential ID → claim names
-	// Picks names the credential that answers a query id, chosen in the
-	// consent dialog. A query without an entry keeps the wallet's choice.
+	SelectedClaims map[string][]string
+	// A query omitted from Picks retains the wallet's default credential.
 	Picks map[string]string
-	// SetChoices holds the chosen option index per consent set, -1 skipping
-	// an optional set. A missing entry keeps the wallet's choice.
+	// -1 skips an optional set. Missing entries retain the wallet's default option.
 	SetChoices []int
-	// Owner is the browser that answered, so a presentation the issuer asks
-	// for mid-flow reaches whoever approved the offer.
+	// Presentations requested during issuance go to the browser that approved the
+	// offer.
 	Owner string
-	// TxCode is the transaction code the user typed for an issuance offer
-	// that requires one. It arrives with the approval because the offer is
-	// what says a code is needed, and the user only sees that in the dialog.
+	// Entered in the consent dialog after the offer declares that a transaction code
+	// is required.
 	TxCode string
 }
 
-// SubmissionResult is the outcome of VP token submission after consent
-// approval, or of the issuance an approved credential offer started.
 type SubmissionResult struct {
 	RedirectURI string `json:"redirect_uri,omitempty"`
 	Error       string `json:"error,omitempty"`
 	StatusCode  int    `json:"status_code,omitempty"`
-	// Pending marks an issuance the issuer deferred. The dialog has to tell
-	// that apart from a failure: the credential is not ready yet, and the
-	// wallet keeps collecting it in the background.
+	// Deferred issuance is still pending. The wallet continues collecting in the
+	// background.
 	Pending       bool   `json:"pending,omitempty"`
 	TransactionID string `json:"transaction_id,omitempty"`
 	RetryInterval string `json:"retry_interval,omitempty"`
 }
 
-// LogEntry records a wallet action.
 type LogEntry struct {
 	Time   time.Time `json:"time"`
 	Action string    `json:"action"`
 	Detail string    `json:"detail"`
-	// Success is the pass/fail of the action. Severity carries a third state a
-	// bool cannot: a spec violation the wallet noted but did not treat as a
-	// failure. An empty Severity means the entry is a plain success or failure
-	// read from Success. "warning" marks a violation that only warned.
+	// An empty Severity uses Success alone. warning records a violation that did not
+	// fail the action.
 	Success  bool           `json:"success"`
 	Severity string         `json:"severity,omitempty"`
 	Details  map[string]any `json:"details,omitempty"`
 }
 
-// severityWarning marks a log entry that records a spec violation the wallet
-// reported without failing the flow (debug mode, and the demo).
 const severityWarning = "warning"
 
-// New creates a new wallet with the given options.
-// It generates a CA key and certificate chain (CA → leaf) for realistic x5c chains.
+// New creates a CA and signing leaf to provide an x5c chain for testing.
 func New(holderKey, issuerKey *ecdsa.PrivateKey, autoAccept bool) *Wallet {
 	w := &Wallet{
 		HolderKey:      holderKey,
@@ -561,8 +465,7 @@ func New(holderKey, issuerKey *ecdsa.PrivateKey, autoAccept bool) *Wallet {
 	return w
 }
 
-// SetCertificateAuthority replaces the wallet's certificate chain with one rooted
-// in the provided CA, while keeping the existing issuer signing key.
+// SetCertificateAuthority preserves the issuer key while replacing its CA and chain.
 func (w *Wallet) SetCertificateAuthority(caKey *ecdsa.PrivateKey, caCert *x509.Certificate) error {
 	if w == nil || w.IssuerKey == nil || caKey == nil || caCert == nil {
 		return fmt.Errorf("wallet CA configuration requires issuer key, CA key, and CA certificate")
@@ -573,10 +476,9 @@ func (w *Wallet) SetCertificateAuthority(caKey *ecdsa.PrivateKey, caCert *x509.C
 	if err != nil {
 		return fmt.Errorf("generating issuer leaf certificate: %w", err)
 	}
-	// Under the lock because the demo reset renews this while requests are
-	// being served. A slice header is not written atomically, so an unguarded
-	// swap can hand a reader a length from one chain and a pointer from
-	// another. Generating the leaf above stays outside it.
+	// Protect the chain swap because slice header writes are not atomic. Concurrent
+	// readers must not combine a pointer and length from different chains. Generate
+	// the leaf outside the lock.
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.CAKey = caKey
@@ -584,9 +486,8 @@ func (w *Wallet) SetCertificateAuthority(caKey *ecdsa.PrivateKey, caCert *x509.C
 	return nil
 }
 
-// RefreshSigningCertificate re-issues the wallet's signing leaf from its own
-// CA. The CA and the issuer key stay as they are, so the trust anchor and the
-// published key do not move.
+// RefreshSigningCertificate retains the CA and issuer key to preserve published trust
+// material.
 func (w *Wallet) RefreshSigningCertificate() error {
 	if w == nil || w.CAKey == nil || len(w.CertChain) < 2 {
 		return nil
@@ -594,8 +495,7 @@ func (w *Wallet) RefreshSigningCertificate() error {
 	return w.SetCertificateAuthority(w.CAKey, w.CertChain[len(w.CertChain)-1])
 }
 
-// SigningCertificateExpiry is when the wallet's signing leaf stops being
-// valid, or the zero time when it has no chain.
+// SigningCertificateExpiry returns the zero time when no chain exists.
 func (w *Wallet) SigningCertificateExpiry() time.Time {
 	if w == nil || len(w.CertChain) == 0 || w.CertChain[0] == nil {
 		return time.Time{}
@@ -603,14 +503,10 @@ func (w *Wallet) SigningCertificateExpiry() time.Time {
 	return w.CertChain[0].NotAfter
 }
 
-// signingCertificateRenewBefore is how close to expiry a leaf is re-issued.
-// A wallet that runs for months is the normal case for a hosted one, and
-// nothing about an expired leaf announces itself: credentials keep being
-// issued and quietly stop verifying.
+// Renew before expiry so a continuously running wallet keeps issuing verifiable
+// credentials.
 const signingCertificateRenewBefore = 30 * 24 * time.Hour
 
-// RefreshSigningCertificateIfExpiring re-issues the signing leaf when it is
-// near its expiry, and reports whether it did.
 func (w *Wallet) RefreshSigningCertificateIfExpiring(now time.Time) (bool, error) {
 	expiry := w.SigningCertificateExpiry()
 	if expiry.IsZero() || now.Add(signingCertificateRenewBefore).Before(expiry) {
@@ -622,22 +518,16 @@ func (w *Wallet) RefreshSigningCertificateIfExpiring(now time.Time) (bool, error
 	return true, nil
 }
 
-// GenerateDefaultCredentials generates SD-JWT and mDoc PID credentials from
-// the pre-defined PID templates, replacing any that exist. claimOverrides are
-// merged on top of the template claims.
-//
-// vct selects the PID type and its claim set: the country-independent EUDI PID
-// when empty or mock.DefaultPIDVCT, the German PID for mock.GermanPIDVCT, and
-// the country-independent claim set under any other type given.
+// GenerateDefaultCredentials merges claimOverrides with PID template claims. An empty vct
+// uses the EUDI PID. GermanPIDVCT selects the German PID. Other types use the EUDI claim
+// set under the supplied vct.
 func (w *Wallet) GenerateDefaultCredentials(claimOverrides map[string]any, vct string) error {
 	return w.generateDefaultCredentials(claimOverrides, vct, true)
 }
 
-// generateDefaultCredentials generates the default PIDs. dropExisting removes
-// any current default PID of the same type first, so a local wallet replaces
-// its default rather than keeping two. The demo baseline path passes false: it
-// drops its own previous baseline separately and must keep whatever visitors
-// issued (see GenerateProtectedDefaults).
+// Local regeneration replaces existing defaults of the same type. Demo baseline
+// generation removes its own protected credentials separately and preserves visitor
+// credentials.
 func (w *Wallet) generateDefaultCredentials(claimOverrides map[string]any, vct string, dropExisting bool) error {
 	sdName, mdocName, _ := credtemplate.PIDTemplateNames(vct)
 	sdTpl, err := credtemplate.Load(sdName, w.Templates)
@@ -673,8 +563,8 @@ func (w *Wallet) generateDefaultCredentials(claimOverrides map[string]any, vct s
 	mdocClaims := credtemplate.MergeClaims(mdocTpl.Claims, claimOverrides)
 	mdocNamespaces := splitClaimsByNamespace(mdocClaims, mdocNamespace)
 
-	// A protected one is kept instead of removed, and then there is nothing to
-	// regenerate: it is the baseline and must not be duplicated.
+	// Keep protected defaults and skip regenerating them to avoid duplicate baseline
+	// credentials.
 	var keptSD, keptMDoc bool
 	if dropExisting {
 		keptSD = w.removeByType("dc+sd-jwt", vct) > 0
@@ -705,8 +595,6 @@ func (w *Wallet) generateDefaultCredentials(claimOverrides map[string]any, vct s
 		AlwaysDisclosed: sdTpl.AlwaysDisclosed,
 	}
 
-	// Assign status list indices when the wallet has a status list URL
-	// (derived from the issuer URL or base URL).
 	statusListURL := w.StatusListURL()
 	var sdStatusIdx, mdocStatusIdx int
 	if statusListURL != "" {
@@ -736,8 +624,8 @@ func (w *Wallet) generateDefaultCredentials(claimOverrides map[string]any, vct s
 	mdocConfig := mock.MDOCConfig{
 		DocType:   mdocDocType,
 		Namespace: mdocNamespace,
-		// The German PID keeps its national additions in a second namespace,
-		// which claim keys carry as a "namespace:element" prefix.
+		// German PID additions use a second namespace. Claim keys encode it as
+		// namespace:element.
 		NamespaceClaims: mdocNamespaces,
 		Key:             issuerKey,
 		HolderKey:       holderPubKey,
@@ -771,13 +659,12 @@ func (w *Wallet) generateDefaultCredentials(claimOverrides map[string]any, vct s
 
 	mdocSpec := applyPIDTrustProfileDefaults(IssuedAttestationSpec{Format: "mso_mdoc", DocType: mdocDocType})
 	if dropExisting {
-		// This call replaced the wallet's PIDs, so it owns what the wallet
-		// says it issues.
+		// Replacing defaults also replaces the wallet's registered issuance profiles.
 		w.IssuedAttestations = []IssuedAttestationSpec{pidSpec, mdocSpec}
 		return nil
 	}
-	// A baseline is built from several PID types in turn, and each of them is
-	// something this wallet issues, so they add up instead of replacing.
+	// Baseline generation adds several PID profiles, so accumulate their
+	// registrations.
 	for _, spec := range []IssuedAttestationSpec{pidSpec, mdocSpec} {
 		if err := w.RegisterIssuedAttestation(spec); err != nil {
 			return fmt.Errorf("registering PID attestation metadata: %w", err)
@@ -787,10 +674,8 @@ func (w *Wallet) generateDefaultCredentials(claimOverrides map[string]any, vct s
 	return nil
 }
 
-// removeByType drops every credential of the given type. Protected
-// credentials survive: regenerating the defaults must not be a way around the
-// rule that only direct access to the wallet file can remove them. It returns
-// how many protected credentials it kept.
+// Keep protected credentials so regenerating defaults cannot remove the shared
+// baseline. Return the number retained.
 func (w *Wallet) removeByType(format, vct string) int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -809,11 +694,8 @@ func (w *Wallet) removeByType(format, vct string) int {
 	return keptProtected
 }
 
-// removeMDocsByNamespace drops every mdoc of the given doctype whose elements
-// sit in exactly the given namespaces. The German PID and the
-// country-independent one share doctype eu.europa.ec.eudi.pid.1 and differ
-// only by namespace, so removing by doctype would drop both. Protected
-// credentials survive as in removeByType, and the count kept is returned.
+// German and EUDI PIDs share a doctype but use different namespaces. Match both to
+// avoid deleting the other PID. Protected credentials remain.
 func (w *Wallet) removeMDocsByNamespace(docType string, namespaces []string) int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -833,10 +715,8 @@ func (w *Wallet) removeMDocsByNamespace(docType string, namespaces []string) int
 	return keptProtected
 }
 
-// credentialNamespaces returns the mdoc namespaces a credential holds elements
-// in. NameSpaces is rebuilt from the credential on every load, so it is
-// authoritative. The claim keys are a derived "namespace:element" view, and a
-// wallet file without that prefix stores them bare.
+// Use NameSpaces rebuilt from the credential. Derived claim keys may lack namespace
+// prefixes in older wallet files.
 func credentialNamespaces(c StoredCredential) []string {
 	if len(c.NameSpaces) > 0 {
 		names := make([]string, 0, len(c.NameSpaces))
@@ -858,7 +738,6 @@ func credentialNamespaces(c StoredCredential) []string {
 	return names
 }
 
-// namespaceNames returns the keys of a namespace-keyed claim map.
 func namespaceNames(claims map[string]map[string]any) []string {
 	names := make([]string, 0, len(claims))
 	for ns := range claims {
@@ -867,14 +746,13 @@ func namespaceNames(claims map[string]map[string]any) []string {
 	return names
 }
 
-// namespaceKey is an order-independent identity for a set of namespaces.
+// Namespace order must not affect identity.
 func namespaceKey(namespaces []string) string {
 	sorted := append([]string(nil), namespaces...)
 	sort.Strings(sorted)
 	return strings.Join(sorted, "\x00")
 }
 
-// removeProtected drops every credential of the previous baseline.
 func (w *Wallet) removeProtected() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -887,7 +765,6 @@ func (w *Wallet) removeProtected() {
 	w.Credentials = kept
 }
 
-// ClearCredentials removes all stored credentials and returns how many were removed.
 func (w *Wallet) ClearCredentials() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -902,14 +779,12 @@ func (w *Wallet) ClearCredentials() int {
 	return removed
 }
 
-// RemoveCredential removes a credential by ID. Protected credentials are
-// never removed, so no API or CLI path can drop a shared baseline.
+// RemoveCredential preserves protected baseline credentials across API and CLI calls.
 func (w *Wallet) RemoveCredential(id string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	full := w.resolveIDLocked(id)
-	// Deleting one copy of a batch deletes the whole batch: it reads as one
-	// credential, so removing part of it would leave orphan copies behind.
+	// The UI treats a batch as one credential, so deleting it removes every copy.
 	group := ""
 	for _, c := range w.Credentials {
 		if c.ID == full {
@@ -920,9 +795,7 @@ func (w *Wallet) RemoveCredential(id string) bool {
 			break
 		}
 	}
-	// A protected copy anywhere in the batch stops the whole delete, the same
-	// rule revoking a batch follows, so a protected baseline cannot be removed
-	// through one of its copies.
+	// A protected copy prevents deletion of the entire batch.
 	if group != "" {
 		for _, c := range w.Credentials {
 			if c.BatchGroup == group && c.Protected {
@@ -943,7 +816,6 @@ func (w *Wallet) RemoveCredential(id string) bool {
 	return removed
 }
 
-// IsProtected reports whether the credential is part of a protected baseline.
 func (w *Wallet) IsProtected(id string) bool {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -956,30 +828,22 @@ func (w *Wallet) IsProtected(id string) bool {
 	return false
 }
 
-// BaselinePIDVCTs are the PID types a protected baseline holds, in each of
-// the two credential formats. Both are there because the German PID extends
-// the country-independent one: holding only one of them would leave the
-// inheritance the wallet implements with nothing to show.
+// BaselinePIDVCTs includes EUDI and German PIDs to demonstrate type inheritance.
 var BaselinePIDVCTs = []string{mock.DefaultPIDVCT, mock.GermanPIDVCT}
 
-// GenerateProtectedDefaults generates the default PID credentials and marks
-// exactly those as protected. Credentials that were already in the wallet
-// keep their current state, so a restart never protects visitor data.
+// GenerateProtectedDefaults protects newly generated defaults only. Existing visitor
+// credentials retain their flags.
 func (w *Wallet) GenerateProtectedDefaults() error {
-	// Drop the previous baseline whatever it looked like. Matching it by type
-	// only replaces credentials that still carry today's vct and doctype, so a
-	// release that changes either (urn:eudi:pid:de:1 to urn:eudi:pid:1, say)
-	// would leave the old one behind and the demo would show two.
+	// Remove the previous baseline by its protected flag. Matching only current types
+	// would leave old credentials behind after a type changes.
 	w.removeProtected()
 
 	existing := make(map[string]bool)
 	for _, c := range w.GetCredentials() {
 		existing[c.ID] = true
 	}
-	// A fresh baseline (marked protected below) never freezes on an old
-	// release's claim set. dropExisting is false: a visitor's own PID of the
-	// same type stays, and one baseline type must not drop the one generated
-	// before it.
+	// Preserve visitor credentials and other baseline types while generating fresh
+	// defaults.
 	for _, vct := range BaselinePIDVCTs {
 		if err := w.generateDefaultCredentials(nil, vct, false); err != nil {
 			return err
@@ -995,8 +859,6 @@ func (w *Wallet) GenerateProtectedDefaults() error {
 	return nil
 }
 
-// RegisterIssuedAttestation records a credential type and its trust/registration
-// metadata as something this wallet is configured to issue.
 func (w *Wallet) RegisterIssuedAttestation(spec IssuedAttestationSpec) error {
 	normalized, err := NormalizeIssuedAttestationSpec(spec, "")
 	if err != nil {
@@ -1018,7 +880,6 @@ func (w *Wallet) RegisterIssuedAttestation(spec IssuedAttestationSpec) error {
 	return nil
 }
 
-// GetCredentials returns a snapshot of all credentials.
 func (w *Wallet) GetCredentials() []StoredCredential {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -1027,21 +888,16 @@ func (w *Wallet) GetCredentials() []StoredCredential {
 	return out
 }
 
-// Mode returns the validation mode under the read lock. The conformance
-// settings can be changed at runtime on a local wallet (PUT
-// /api/config/conformance), and ValidationMode is a string, so an unsynchronized
-// read racing that write could tear. Read it through here on any path that can
-// run concurrently with the write.
+// Mode reads runtime settings under the lock. Concurrent string reads and writes can
+// return inconsistent values.
 func (w *Wallet) Mode() ValidationMode {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.ValidationMode
 }
 
-// VCIFeatureVersion returns the OpenID4VCI feature level under the read lock,
-// for the same reason Mode does: it is runtime-mutable on a local wallet. An
-// unset value reads as the default rather than as an empty version, so a
-// wallet built by a test that never set one behaves like 1.0.
+// VCIFeatureVersion holds the lock because configuration can change at runtime. An unset
+// value defaults to 1.0.
 func (w *Wallet) VCIFeatureVersion() VCIVersion {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -1051,9 +907,8 @@ func (w *Wallet) VCIFeatureVersion() VCIVersion {
 	return w.VCIVersion
 }
 
-// HolderKeyPair returns the wallet's holder key under the read lock. A store
-// reload replaces it while requests are in flight, so a reader takes the
-// pointer once and works from that copy.
+// HolderKeyPair reads the key pointer once under the lock because a concurrent reload can
+// replace it. Read the pointer once under the lock.
 func (w *Wallet) HolderKeyPair() *ecdsa.PrivateKey {
 	if w == nil {
 		return nil
@@ -1063,26 +918,23 @@ func (w *Wallet) HolderKeyPair() *ecdsa.PrivateKey {
 	return w.HolderKey
 }
 
-// ConformanceSettings returns the three runtime-mutable conformance fields
-// together under the read lock.
+// ConformanceSettings reads related settings together under the lock.
 func (w *Wallet) ConformanceSettings() (ValidationMode, bool, bool) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.ValidationMode, w.RequireHAIP, w.RequireEncryptedRequest
 }
 
-// KeyAttestationLevelSetting returns KeyAttestationLevel under the read lock,
-// since PUT /api/config/conformance can change it while a flow runs.
+// KeyAttestationLevelSetting holds the lock because configuration can change during a
+// flow.
 func (w *Wallet) KeyAttestationLevelSetting() string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.KeyAttestationLevel
 }
 
-// resolveIDLocked maps a credential id or an unambiguous id prefix to the full
-// stored id, so a command can name a credential by the short id the UI shows.
-// An exact id wins over any prefix. A prefix that matches nothing or more than
-// one credential returns "". The caller holds w.mu.
+// Caller must hold w.mu. Exact IDs take precedence. Return empty for missing or
+// ambiguous prefixes.
 func (w *Wallet) resolveIDLocked(idOrPrefix string) string {
 	if idOrPrefix == "" {
 		return ""
@@ -1104,7 +956,6 @@ func (w *Wallet) resolveIDLocked(idOrPrefix string) string {
 	return ""
 }
 
-// GetCredential returns a credential by its id or an unambiguous id prefix.
 func (w *Wallet) GetCredential(id string) (StoredCredential, bool) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -1117,19 +968,16 @@ func (w *Wallet) GetCredential(id string) (StoredCredential, bool) {
 	return StoredCredential{}, false
 }
 
-// SetLogSink sets a callback invoked after each log entry is appended.
 func (w *Wallet) SetLogSink(fn func(LogEntry)) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.logSink = fn
 }
 
-// AddLog records a log entry.
 func (w *Wallet) AddLog(action, detail string, success bool) {
 	w.AddLogDetails(action, detail, success, nil)
 }
 
-// AddLogDetails records a log entry with structured verbose details.
 func (w *Wallet) AddLogDetails(action, detail string, success bool, details map[string]any) {
 	w.appendLogEntry(LogEntry{
 		Time:    time.Now(),
@@ -1140,9 +988,8 @@ func (w *Wallet) AddLogDetails(action, detail string, success bool, details map[
 	})
 }
 
-// AddWarning records a finding the wallet noted without failing the flow: a
-// spec violation in debug mode and the demo, or a test setting worth seeing. It is not a failure, so Success stays true
-// and the entry carries the warning severity for the UI to mark distinctly.
+// AddWarning preserves Success and sets Severity so the UI can distinguish warnings from
+// failures.
 func (w *Wallet) AddWarning(action, detail string, details map[string]any) {
 	w.appendLogEntry(LogEntry{
 		Time:     time.Now(),
@@ -1154,10 +1001,8 @@ func (w *Wallet) AddWarning(action, detail string, details map[string]any) {
 	})
 }
 
-// warnFindings records a set of findings as a single activity log entry, so a
-// long list does not fill the log's main description. One finding is shown as
-// its own message. Several become one entry naming the count, with the full
-// list in the entry details for the UI to expand.
+// Summarize multiple findings in one log entry and put the full list in its details. A
+// single finding uses its own message.
 func (w *Wallet) warnFindings(action, summary string, findings []string) {
 	switch len(findings) {
 	case 0:
@@ -1169,10 +1014,8 @@ func (w *Wallet) warnFindings(action, summary string, findings []string) {
 	}
 }
 
-// maxLogEntries is how much activity history a wallet keeps. The log is
-// persisted and re-read at every request boundary, so an unbounded one costs a
-// growing parse on each reload. logTrimSlack lets it run past the cap before
-// trimming, so the copy happens rarely rather than on every append.
+// Bound stored activity history to limit reload costs. logTrimSlack allows occasional
+// trimming instead of copying on every append.
 const (
 	maxLogEntries = 1000
 	logTrimSlack  = 256
@@ -1182,9 +1025,8 @@ func (w *Wallet) appendLogEntry(entry LogEntry) {
 	w.mu.Lock()
 	w.Log = append(w.Log, entry)
 	if len(w.Log) >= maxLogEntries+logTrimSlack {
-		// Copied into a fresh slice rather than resliced: resliced, the
-		// dropped entries stay reachable through the backing array and their
-		// details maps are never collected.
+		// Copy into a new slice so removed entries and their details can be garbage
+		// collected.
 		trimmed := make([]LogEntry, maxLogEntries)
 		copy(trimmed, w.Log[len(w.Log)-maxLogEntries:])
 		w.Log = trimmed
@@ -1207,14 +1049,12 @@ func cloneLogDetails(details map[string]any) map[string]any {
 	return out
 }
 
-// ClearLog removes all activity log entries.
 func (w *Wallet) ClearLog() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.Log = nil
 }
 
-// GetLog returns a snapshot of log entries.
 func (w *Wallet) GetLog() []LogEntry {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -1223,7 +1063,6 @@ func (w *Wallet) GetLog() []LogEntry {
 	return out
 }
 
-// LoadKeyFromFile loads a private key from a file path.
 func LoadKeyFromFile(path string) (*ecdsa.PrivateKey, error) {
 	privKey, err := keys.LoadPrivateKey(path)
 	if err != nil {
@@ -1236,8 +1075,7 @@ func LoadKeyFromFile(path string) (*ecdsa.PrivateKey, error) {
 	return ecKey, nil
 }
 
-// credentialLabel names a credential the way a message about it reads best:
-// by its type, falling back to the id when the format carries none.
+// Use the credential type as its label, falling back to its ID.
 func credentialLabel(c StoredCredential) string {
 	if c.VCT != "" {
 		return c.VCT
@@ -1248,18 +1086,14 @@ func credentialLabel(c StoredCredential) string {
 	return c.ID
 }
 
-// reservedCredentialClaims are the JWT and SD-JWT VC protocol members that
-// carry no user attribute, so a claim count that reflects what the credential
-// says about its subject leaves them out (RFC 7519 registered claims plus the
-// SD-JWT VC members of draft-ietf-oauth-sd-jwt-vc §3.2.2).
+// Exclude protocol fields from the user claim count. These include RFC 7519 registered
+// claims and SD-JWT VC fields from draft-ietf-oauth-sd-jwt-vc §3.2.2.
 var reservedCredentialClaims = map[string]bool{
 	"iss": true, "sub": true, "aud": true, "exp": true, "nbf": true,
 	"iat": true, "jti": true, "cnf": true, "vct": true, "vct#integrity": true,
 	"status": true, "_sd": true, "_sd_alg": true,
 }
 
-// userClaimCount counts the claims that say something about the subject, the
-// number the card and the listing report, leaving out the protocol members.
 func userClaimCount(claims map[string]any) int {
 	n := 0
 	for key := range claims {
@@ -1270,7 +1104,6 @@ func userClaimCount(claims map[string]any) int {
 	return n
 }
 
-// CredentialSummary returns a JSON-serializable summary of a credential.
 func CredentialSummary(c StoredCredential) map[string]any {
 	summary := map[string]any{
 		"id":          c.ID,
@@ -1288,17 +1121,14 @@ func CredentialSummary(c StoredCredential) map[string]any {
 	if c.Protected {
 		summary["protected"] = true
 	}
-	// A batch reads as one credential: the flag lets a listing draw it as a
-	// stack and act on the whole batch, without exposing a copy count (a batch
-	// cycles and reuses, so the number is not a useful signal).
+	// The UI treats a batch as one credential and applies actions to the whole batch.
 	if c.BatchGroup != "" {
 		summary["batch"] = true
 	}
 	if disp := displayForListing(c); disp != nil {
 		summary["display"] = disp
 	}
-	// Both backends build their listings from this, so a caller reading the
-	// expiry reads the same value whichever one answered.
+	// Keep expiry values consistent between local and remote listings.
 	if expiry := CredentialExpiry(c); !expiry.IsZero() {
 		summary["expires_at"] = expiry.UTC().Format(time.RFC3339)
 	}
@@ -1311,20 +1141,19 @@ func CredentialSummary(c StoredCredential) map[string]any {
 	if signature := credentialSignatureState(c); signature != nil {
 		summary["signature"] = signature
 	}
-	// Whether it can be asked for again, not the token that would do it: a
-	// listing is printed and logged in places a refresh token should not go.
+	// Expose renewal availability without the refresh token, since listings may be
+	// printed or logged.
 	if c.CanRenew() {
 		summary["can_renew"] = true
 	}
-	// A key nothing here resolves, so every listing can say that this
-	// credential's issuer signature was never checked.
+	// Record when issuer key resolution is unavailable and the signature remains
+	// unchecked.
 	if did := credentialIssuerDID(c.Raw); did != "" {
 		summary["issuer_key_did"] = did
 	}
 	return summary
 }
 
-// MarshalConsentRequest returns a JSON-serializable view of a consent request.
 func MarshalConsentRequest(r *ConsentRequest) map[string]any {
 	m := map[string]any{
 		"id":                  r.ID,
@@ -1355,34 +1184,27 @@ func MarshalConsentRequest(r *ConsentRequest) map[string]any {
 	if r.OfferDetails != nil {
 		m["offer_details"] = r.OfferDetails
 	}
-	// A presentation request (including one an issuer asked for during an
-	// issuance) carries how its request authenticated itself, for the consent
-	// dialog's "who is asking" block. signed being true means the request was
-	// self-consistent (its signature verified against the key material it
-	// carries), not that the verifier was checked against a trust list. A pure
-	// issuance offer is not a signed request object, so it gets no client_auth.
+	// Presentation consent reports whether the Request Object signature verifies
+	// against its supplied key. This does not establish trust in the verifier.
+	// Issuance offers have no Request Object and omit client_auth.
 	if r.Type == ConsentTypePresentation || r.Type == ConsentTypeIssuancePresentation {
 		m["client_auth"] = map[string]any{
 			"signed": r.ClientAuthSigned,
 			"detail": r.ClientAuthDetail,
 		}
 	}
-	// The self-asserted verifier name, when the request carried one. It is
-	// unverified.
+	// The verifier name is unverified.
 	if r.ClientName != "" {
 		m["client_name"] = r.ClientName
 	}
 	return m
 }
 
-// CredentialsJSON returns all credentials as JSON bytes.
 func (w *Wallet) CredentialsJSON() ([]byte, error) {
 	return w.CredentialsJSONWindow(0, 0)
 }
 
-// ListedCredentials returns the credentials as the UI and CLI list them: one
-// entry per batch, represented by its holder-key copy, so a batch of copies
-// reads as a single credential. Credentials outside a batch are unchanged.
+// ListedCredentials represents each batch once using its holder key copy.
 func (w *Wallet) ListedCredentials() []StoredCredential {
 	creds := w.GetCredentials()
 	out := make([]StoredCredential, 0, len(creds))
@@ -1401,9 +1223,8 @@ func (w *Wallet) ListedCredentials() []StoredCredential {
 	return out
 }
 
-// batchRepresentative returns the holder-key copy of a batch (the one presented
-// with the wallet holder key), falling back to the given copy when none is
-// found, so a batch is always listed by a stable member.
+// Use the holder-key copy as a stable batch representative. Fall back to the supplied
+// copy if none exists.
 func batchRepresentative(creds []StoredCredential, member StoredCredential) StoredCredential {
 	if member.BindingKeyPEM == "" {
 		return member
@@ -1416,19 +1237,14 @@ func batchRepresentative(creds []StoredCredential, member StoredCredential) Stor
 	return member
 }
 
-// CredentialsJSONWindow serializes a slice of the stored credentials.
-// A limit of 0 means "to the end", and an offset past the end yields an
-// empty array rather than an error, so a paging client that lands on a
-// stale page sees an empty page.
+// CredentialsJSONWindow includes all remaining credentials when the limit is zero. An
+// offset beyond the end returns an empty array for stale pages.
 func (w *Wallet) CredentialsJSONWindow(offset, limit int) ([]byte, error) {
 	return json.Marshal(w.listedSummaries(offset, limit))
 }
 
-// CredentialsListingJSONWindow is the overview listing: the same window trimmed
-// to the fields a card renders. It leaves out the claim values and the raw
-// credential (the per-credential GET and the decoder carry those), so a wallet
-// holding image-heavy credentials is not returned by the megabyte on every
-// refresh. The CLI and the HTTP list share it through TrimCredentialListing.
+// CredentialsListingJSONWindow omits raw credentials and claims to keep refreshes small.
+// Full details remain available through the credential endpoint and decoder.
 func (w *Wallet) CredentialsListingJSONWindow(offset, limit int) ([]byte, error) {
 	summaries := w.listedSummaries(offset, limit)
 	for _, s := range summaries {
@@ -1437,8 +1253,7 @@ func (w *Wallet) CredentialsListingJSONWindow(offset, limit int) ([]byte, error)
 	return json.Marshal(summaries)
 }
 
-// TrimCredentialListing removes the fields an overview card does not render (the
-// claim values and the raw credential), so a listing stays small.
+// TrimCredentialListing omits raw credentials and claims from overview responses.
 func TrimCredentialListing(summary map[string]any) {
 	delete(summary, "raw")
 	delete(summary, "claims")
@@ -1446,8 +1261,7 @@ func TrimCredentialListing(summary map[string]any) {
 
 func (w *Wallet) listedSummaries(offset, limit int) []map[string]any {
 	creds := w.ListedCredentials()
-	// Sorted before the window is taken, or paging would slice the stored
-	// order and then order each page on its own.
+	// Sort before pagination so the order is consistent across pages.
 	SortCredentialsNewestFirst(creds)
 	if offset > len(creds) {
 		offset = len(creds)
@@ -1463,8 +1277,6 @@ func (w *Wallet) listedSummaries(offset, limit int) []map[string]any {
 	return summaries
 }
 
-// BatchGroupSize is how many copies a batch holds, so a listing can report the
-// count of a credential shown once.
 func (w *Wallet) BatchGroupSize(group string) int {
 	if group == "" {
 		return 0
@@ -1480,10 +1292,8 @@ func (w *Wallet) BatchGroupSize(group string) int {
 	return n
 }
 
-// RestoreCredential appends a credential that is already known to have been
-// imported, without re-parsing it. It exists for one case: a store reload
-// replaced the credential list while an issuance flow was in progress, and
-// the credential it produced has to be put back before the wallet is saved.
+// RestoreCredential restores an import discarded by concurrent reload without parsing it
+// again.
 func (w *Wallet) RestoreCredential(cred StoredCredential) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -1495,8 +1305,7 @@ func (w *Wallet) RestoreCredential(cred StoredCredential) {
 	w.Credentials = append(w.Credentials, cred)
 }
 
-// PutCredential stores the credential under its id, replacing a stored copy
-// (unlike RestoreCredential, which keeps it).
+// PutCredential replaces existing copies, unlike RestoreCredential.
 func (w *Wallet) PutCredential(cred StoredCredential) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

@@ -25,7 +25,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/web"
 )
 
-// Classify determines the OID4VP/VCI traffic class from the request/response.
 func Classify(entry *TrafficEntry) {
 	entry.Class = classifyEntry(entry)
 	entry.ClassLabel = entry.Class.Label()
@@ -59,11 +58,9 @@ func (c *StatefulClassifier) Classify(entry *TrafficEntry) {
 
 	entry.Class = class
 	entry.ClassLabel = entry.Class.Label()
-	// decodeEntry runs credential validation (disk and, for metadata-keyed
-	// tokens, a network fetch), so keep it off the classifier mutex: holding
-	// the lock here would serialize every proxied exchange behind one slow
-	// issuer-metadata lookup. The endpoints map is only ever touched under the
-	// lock, above and in learn.
+	// Validate outside the classifier lock. Issuer metadata fetches can be slow and
+	// would otherwise block all proxied traffic. Keep endpoint map access under the
+	// lock.
 	entry.Decoded = decodeEntry(entry)
 	entry.Credentials, entry.CredentialLabels = extractCredentials(entry)
 
@@ -81,37 +78,30 @@ func classifyEntry(e *TrafficEntry) TrafficClass {
 		query = u.Query()
 	}
 
-	// VCI: .well-known/openid-credential-issuer
 	if strings.Contains(path, ".well-known/openid-credential-issuer") {
 		return ClassVCIMetadata
 	}
 
-	// OIDC: .well-known/openid-configuration
 	if strings.Contains(path, ".well-known/openid-configuration") {
 		return ClassOIDCMetadata
 	}
 
-	// VCI: credential_offer or credential_offer_uri in query
 	if query.Has("credential_offer") || query.Has("credential_offer_uri") {
 		return ClassVCICredentialOffer
 	}
 
-	// VP Auth Request: client_id + VP-specific response_type or transport hints.
 	if isVPAuthRequest(query) {
 		return ClassVPAuthRequest
 	}
 
-	// OIDC Authorization Request
 	if isOIDCAuthRequest(query) {
 		return ClassOIDCAuthRequest
 	}
 
-	// OIDC callback back to the client app.
 	if isOIDCCallback(e.Method, query, e.RequestBody) {
 		return ClassOIDCCallback
 	}
 
-	// VP Request Object: GET returns a JWT (standard request_uri fetch)
 	if e.Method == "GET" && isJWTBody(e.ResponseBody) {
 		return ClassVPRequestObject
 	}
@@ -121,13 +111,11 @@ func classifyEntry(e *TrafficEntry) TrafficClass {
 		return ClassVPRequestObject
 	}
 
-	// POST-based classification
 	if e.Method == "POST" {
 		if isVCINonceRequest(path, e.ResponseBody) {
 			return ClassVCINonceRequest
 		}
 
-		// VP Auth Response (direct_post or direct_post.jwt)
 		if hasBodyField(e.RequestBody, "vp_token") ||
 			hasBodyField(e.RequestBody, "presentation_submission") ||
 			hasBodyField(e.RequestBody, "id_token") ||
@@ -140,12 +128,10 @@ func classifyEntry(e *TrafficEntry) TrafficClass {
 			return ClassOIDCTokenRequest
 		}
 
-		// VCI Token Request: path ends with /token
 		if strings.HasSuffix(path, "/token") {
 			return ClassVCITokenRequest
 		}
 
-		// VCI Credential Request: path ends with /credential
 		if strings.HasSuffix(path, "/credential") || strings.HasSuffix(path, "/credentials") {
 			return ClassVCICredentialRequest
 		}
@@ -185,7 +171,6 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 			if v := q.Get("redirect_uri"); v != "" {
 				decoded["redirect_uri"] = v
 			}
-			// Parse JSON query params into proper objects
 			if v := q.Get("dcql_query"); v != "" {
 				var m map[string]any
 				if err := json.Unmarshal([]byte(v), &m); err == nil {
@@ -210,8 +195,6 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 			if header, payload, _, err := format.ParseJWTParts(responseBody); err == nil {
 				decoded["header"] = header
 				decoded["payload"] = payload
-				// Surface the verifier's ephemeral encryption key if present
-				// (used by the wallet to encrypt the JARM response in direct_post.jwt)
 				if jwks, ok := payload["jwks"].(map[string]any); ok {
 					decoded["encryption_jwks"] = jwks
 				}
@@ -220,7 +203,6 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 				}
 			}
 		} else if isJWE(responseBody) {
-			// Encrypted request object. Surface JWE header info
 			headerBytes, err := format.DecodeBase64URL(strings.SplitN(responseBody, ".", 2)[0])
 			if err == nil {
 				var header map[string]any
@@ -236,7 +218,6 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 				}
 			}
 		}
-		// Surface wallet_metadata and wallet_nonce from POST request body
 		if e.RequestBody != "" {
 			fields := parseFormOrJSON(e.RequestBody)
 			if wm, ok := fields["wallet_metadata"]; ok && wm != "" {
@@ -340,7 +321,6 @@ func decodeEntry(e *TrafficEntry) map[string]any {
 			var resp map[string]any
 			if err := json.Unmarshal([]byte(e.ResponseBody), &resp); err == nil {
 				decoded["response"] = resp
-				// Try to decode the credential inside the response
 				if cred, ok := resp["credential"].(string); ok {
 					if credDecoded, err := web.Decode(cred); err == nil {
 						decoded["credential_decoded"] = credDecoded
@@ -417,7 +397,6 @@ func isJWTBody(body string) bool {
 	return len(parts) == 3 && len(parts[0]) > 0 && len(parts[1]) > 0 && !strings.ContainsAny(body, " \n\t{<")
 }
 
-// isJWE checks whether a string looks like a JWE compact serialization (5 dot-separated parts).
 func isJWE(s string) bool {
 	s = strings.TrimSpace(s)
 	parts := strings.Split(s, ".")
@@ -442,7 +421,6 @@ func decodeJARMResponse(raw string, cekB64 string, jwkJSON string, decoded map[s
 		}
 		decoded["response_header"] = header
 
-		// Surface key fields for easier debugging
 		if alg, ok := header["alg"].(string); ok {
 			decoded["encryption_alg"] = alg
 		}
@@ -463,7 +441,6 @@ func decodeJARMResponse(raw string, cekB64 string, jwkJSON string, decoded map[s
 			decoded["encryption_apv"] = apv
 		}
 
-		// Try to decrypt with debug CEK if available
 		if cekB64 != "" {
 			cek, err := format.DecodeBase64URL(cekB64)
 			if err == nil {
@@ -478,7 +455,6 @@ func decodeJARMResponse(raw string, cekB64 string, jwkJSON string, decoded map[s
 			}
 		}
 
-		// Fall back to JWK private key (scanned from verifier logs) for ECDH-ES decryption
 		if jwkJSON != "" {
 			if plaintext, err := DecryptJWEWithJWK(raw, jwkJSON); err == nil {
 				var payload map[string]any
@@ -494,7 +470,6 @@ func decodeJARMResponse(raw string, cekB64 string, jwkJSON string, decoded map[s
 		return
 	}
 
-	// JWS: decode header + payload
 	if header, payload, _, err := format.ParseJWTParts(raw); err == nil {
 		decoded["response_type"] = "JWS (signed)"
 		decoded["response_header"] = header
@@ -502,8 +477,6 @@ func decodeJARMResponse(raw string, cekB64 string, jwkJSON string, decoded map[s
 	}
 }
 
-// extractJARMCredentials pulls credential strings from a decrypted JARM payload.
-// The payload typically contains vp_token (map or string) and optionally id_token.
 func extractJARMCredentials(payload map[string]any) ([]string, []string) {
 	var creds []string
 	var labels []string
@@ -544,8 +517,6 @@ func extractJARMCredentials(payload map[string]any) ([]string, []string) {
 	return creds, labels
 }
 
-// hasBodyField checks whether a field exists in either URL-encoded form data or JSON body.
-// containsResponseType checks if a space-separated response_type string contains any of the given values.
 func containsResponseType(responseType string, targets ...string) bool {
 	for _, part := range strings.Fields(responseType) {
 		for _, t := range targets {
@@ -677,7 +648,6 @@ func parseFormOrJSON(body string) map[string]string {
 		}
 	}
 
-	// Try URL-encoded form first
 	values, err := url.ParseQuery(body)
 	if err == nil && len(values) > 0 {
 		for k := range values {
@@ -686,7 +656,6 @@ func parseFormOrJSON(body string) map[string]string {
 		return result
 	}
 
-	// Try JSON
 	var m map[string]any
 	if err := json.Unmarshal([]byte(body), &m); err == nil {
 		for k, v := range m {
@@ -704,8 +673,6 @@ func parseFormOrJSON(body string) map[string]string {
 	return result
 }
 
-// ExtractCorrelationKey returns the first of ExtractCorrelationKeys, which
-// is what flow grouping uses.
 func ExtractCorrelationKey(entry *TrafficEntry) string {
 	u, _ := url.Parse(entry.URL)
 
@@ -804,8 +771,6 @@ func ExtractCorrelationKey(entry *TrafficEntry) string {
 	return ""
 }
 
-// ExtractCorrelationKeys returns all correlation aliases that can be used to
-// group related protocol entries into the same flow.
 func ExtractCorrelationKeys(entry *TrafficEntry) []string {
 	u, _ := url.Parse(entry.URL)
 	var keys []string
@@ -828,7 +793,6 @@ func ExtractCorrelationKeys(entry *TrafficEntry) []string {
 		if u != nil && u.String() != "" {
 			keys = append(keys, "vp:request_uri:"+u.String())
 		}
-		// Look for state/nonce in the decoded JWT payload
 		if entry.Decoded != nil {
 			if payload, ok := entry.Decoded["payload"].(map[string]any); ok {
 				if v, ok := payload["state"].(string); ok && v != "" {
@@ -1069,7 +1033,6 @@ func extractCredentials(e *TrafficEntry) ([]string, []string) {
 			creds = append(creds, id)
 			labels = append(labels, "id_token")
 		}
-		// Extract credentials from decrypted JARM payload
 		if e.Decoded != nil {
 			if payload, ok := e.Decoded["response_payload"].(map[string]any); ok {
 				jarmCreds, jarmLabels := extractJARMCredentials(payload)
@@ -1093,7 +1056,6 @@ func extractCredentials(e *TrafficEntry) ([]string, []string) {
 					creds = append(creds, cred)
 					labels = append(labels, "credential")
 				}
-				// batch response: credentials array
 				if arr, ok := resp["credentials"].([]any); ok {
 					for i, item := range arr {
 						if obj, ok := item.(map[string]any); ok {

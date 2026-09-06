@@ -12,9 +12,8 @@ if [[ $# -gt 0 ]]; then
   exit 1
 fi
 
-# Port helpers, same approach as ../keycloak-web-wallet/start.sh: explicit
-# overrides are validated, defaults skip to the next free port, and a port
-# held by this project's own keycloak container counts as free.
+# Validate explicit ports. For defaults, choose a free port or reuse the port held by this
+# project's Keycloak container.
 port_listening() {
   (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
 }
@@ -61,9 +60,8 @@ if [[ ! -f "${SIBLING}/providers/keycloak-extension-oid4vp.jar" ]]; then
   "${SIBLING}/scripts/download-extension.sh"
 fi
 
-# Keycloak must be publicly reachable: the public wallet fetches the request
-# object and calls the token endpoint server side. Bring your own public URL
-# via KEYCLOAK_PUBLIC_URL, otherwise an ngrok tunnel is started here.
+# The public wallet must reach Keycloak. Use KEYCLOAK_PUBLIC_URL when supplied or start an
+# ngrok tunnel.
 if [[ -z "${KEYCLOAK_PUBLIC_URL:-}" ]]; then
   if ! command -v ngrok >/dev/null 2>&1; then
     echo "ngrok is required (or set KEYCLOAK_PUBLIC_URL to a public https URL" >&2
@@ -77,8 +75,8 @@ if [[ -z "${KEYCLOAK_PUBLIC_URL:-}" ]]; then
   fi
   echo "Starting the ngrok tunnel for Keycloak (localhost:${KEYCLOAK_PORT})..."
   rm -f ngrok.log
-  # Full redirect: ngrok outlives the script, an inherited stdout or stderr
-  # would keep pipes on start.sh open forever (e.g. ./start.sh | tee).
+  # Redirect both streams because ngrok outlives this script and would otherwise hold its
+  # output pipes open.
   ngrok http "${KEYCLOAK_PORT}" ${NGROK_DOMAIN:+--domain="${NGROK_DOMAIN}"} \
     --log ngrok.log --log-format logfmt >/dev/null 2>&1 &
   echo $! > .ngrok.pid

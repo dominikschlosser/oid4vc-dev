@@ -222,9 +222,8 @@ func strictPreAuthIssuer(t *testing.T, w *Wallet, requireDPoP, requireClientAtte
 	return srv, "openid-credential-offer://?credential_offer=" + url.QueryEscape(string(offerJSON))
 }
 
-// TestProcessCredentialOffer_PreAuthHonorsIssuerProtections covers the
-// pre-authorized code flow against an issuer that requires DPoP, wallet
-// attestation, and key attestation: the flow sends all three.
+// Pre-authorized issuance must send DPoP, client attestation and key attestation when
+// the issuer requires them.
 func TestProcessCredentialOffer_PreAuthHonorsIssuerProtections(t *testing.T) {
 	for _, tc := range []struct {
 		name                                               string
@@ -258,8 +257,6 @@ func TestProcessCredentialOffer_PreAuthHonorsIssuerProtections(t *testing.T) {
 			if !tc.requireKeyAttest {
 				return
 			}
-			// The issuer answered the single attested proof with one
-			// credential per attested key, stored as one batch.
 			creds := w.GetCredentials()
 			if len(creds) != maxBatchProofKeys {
 				t.Fatalf("stored %d copies, want the batch of %d", len(creds), maxBatchProofKeys)
@@ -293,7 +290,6 @@ func TestIssuanceProofKeys_KeyAttestationCoversBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issuanceProofKeys: %v", err)
 	}
-	// batch_size 10 is capped to the wallet's own ceiling.
 	if len(keys) != maxBatchProofKeys {
 		t.Fatalf("batch produced %d proof keys, want %d", len(keys), maxBatchProofKeys)
 	}
@@ -343,8 +339,8 @@ func TestCredentialProofType(t *testing.T) {
 	}
 }
 
-// TestKeyAttestationClaims covers what the attestation says about its key
-// storage under each setting, and the activity log entry that goes with it.
+// Check the advertised key protection level and its activity log warning for each
+// setting.
 func TestKeyAttestationClaims(t *testing.T) {
 	metadataRequiring := func(requirement map[string]any) map[string]any {
 		return map[string]any{"credential_configurations_supported": map[string]any{

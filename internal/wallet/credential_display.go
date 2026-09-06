@@ -60,7 +60,6 @@ const (
 	maxDisplayAltTextRunes     = 120
 )
 
-// boundDisplayText trims a display string and caps it at max runes.
 func boundDisplayText(s string, maxRunes int) string {
 	s = strings.TrimSpace(s)
 	r := []rune(s)
@@ -70,9 +69,8 @@ func boundDisplayText(s string, maxRunes int) string {
 	return string(r[:maxRunes])
 }
 
-// mergeCredentialDisplay lays the fields of over onto base, so an explicit
-// display overrides only the fields it sets and inherits the rest (a template's
-// art in particular) from base. Either side may be nil.
+// Explicit display fields override template defaults individually. Unset fields retain
+// the template's value. Either display may be nil.
 func mergeCredentialDisplay(base, over *CredentialDisplay) *CredentialDisplay {
 	if base == nil {
 		return over
@@ -93,9 +91,8 @@ func mergeCredentialDisplay(base, over *CredentialDisplay) *CredentialDisplay {
 	if over.TextColor != "" {
 		out.TextColor = over.TextColor
 	}
-	// A new logo carries its own alt text (even an empty one, so a replaced logo
-	// never keeps the old text). An alt text set on its own lays over the base,
-	// so an operator can describe a template's logo without replacing it.
+	// Replacing a logo also replaces its alt text, including with an empty value. Alt
+	// text alone can describe an unchanged template logo.
 	if over.LogoURI != "" {
 		out.LogoURI = over.LogoURI
 		out.LogoAltText = over.LogoAltText
@@ -108,18 +105,13 @@ func mergeCredentialDisplay(base, over *CredentialDisplay) *CredentialDisplay {
 	return &out
 }
 
-// maxDisplayImageBytes caps a cached display image. The image lives in
-// wallet.json, which every save rewrites whole, so a card background stays
-// small or stays out.
+// Limit cached image size to keep wallet storage small.
 const maxDisplayImageBytes = 256 << 10
 
-// maxDisplayImageFetchBytes caps what is downloaded for a display image.
-// Real card art runs to a few megabytes, and anything over the cache cap is
-// downscaled to card size before it is stored.
+// Limit downloads before resizing large images to fit the cache.
 const maxDisplayImageFetchBytes = 4 << 20
 
-// displayImageMaxSide is the longest side a cached display image keeps. A
-// card never renders wider, so more pixels only bloat the store.
+// Limit image dimensions to the size used by credential cards.
 const displayImageMaxSide = 1024
 
 // maxDisplayImagePixels bounds what is decoded into memory. A small file can
@@ -168,7 +160,6 @@ func displayImageRef(id, kind, uri string) string {
 	return "/api/credentials/" + id + "/display/" + kind
 }
 
-// dataURIImage decodes a base64 data URI into its content type and bytes.
 func dataURIImage(uri string) (contentType string, data []byte, ok bool) {
 	if !strings.HasPrefix(uri, "data:") {
 		return "", nil, false
@@ -259,7 +250,6 @@ func (w *Wallet) checkDisplayContrast(d *CredentialDisplay) {
 		})
 }
 
-// parseCSSColor reads the hex and rgb()/rgba() forms into RGB channels.
 func parseCSSColor(value string) ([3]float64, bool) {
 	var rgb [3]float64
 	value = strings.TrimSpace(value)
@@ -355,10 +345,8 @@ func (w *Wallet) templateDisplay(td *credtemplate.TemplateDisplay) *CredentialDi
 	return d
 }
 
-// templateImage resolves a template image reference to card art. An
-// "embedded:<file>" reference reads a bundled asset by base name, so a template
-// can only reach the wallet's own read-only assets. Any other value is a display
-// image URI and runs through the policed cache.
+// Resolve embedded images by base name to restrict access to bundled assets. Other
+// references use the image cache and address checks.
 func (w *Wallet) templateImage(ref, field string) string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -375,7 +363,6 @@ func (w *Wallet) templateImage(ref, field string) string {
 	return w.cacheDisplayImage(ref, field)
 }
 
-// embeddedImageMIME is the media type of a bundled image, by extension.
 func embeddedImageMIME(name string) string {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".svg":
@@ -414,7 +401,6 @@ func (w *Wallet) issuedDisplay(in IssueDisplay) *CredentialDisplay {
 	return d
 }
 
-// displayColor reads one color field against the §12.2.4 value space.
 func (w *Wallet) displayColor(entry map[string]any, field string) string {
 	value, _ := entry[field].(string)
 	if value == "" {
@@ -429,12 +415,9 @@ func (w *Wallet) displayColor(entry map[string]any, field string) string {
 	return ""
 }
 
-// cacheDisplayImage turns a display image URI into the data URI the card
-// renders. §12.2.4 names both schemes: a data: URI is read in place, an
-// https: URI is fetched once through the policed client. An image over the
-// cache cap is downscaled to card size before it is stored. Under
-// --adhoc-display-images an https: URI is kept as the URL, for the card to
-// fetch on demand.
+// Cache display images under OpenID4VCI §12.2.4. Decode data URIs locally and fetch
+// HTTPS URLs with address checks. Resize images over the cache limit. With
+// --adhoc-display-images, leave HTTPS URLs for the browser to fetch.
 func (w *Wallet) cacheDisplayImage(uri, field string) string {
 	if uri == "" {
 		return ""
@@ -448,11 +431,9 @@ func (w *Wallet) cacheDisplayImage(uri, field string) string {
 		return w.encodeDisplayImage(body, mediaType, field, uri)
 	}
 	if w.AdhocDisplayImages && strings.HasPrefix(uri, "https://") {
-		// The https URL is kept for the card to fetch on demand (displayImageRef
-		// passes it to the browser as-is). Only https: is kept: an http image is
-		// mixed content a browser blocks on an https wallet page, so it is
-		// fetched and stored as usual. The issuer sees every render, so this is
-		// off by default.
+		// Keep only HTTPS URLs for loading on demand. Browsers block HTTP images on
+		// HTTPS pages, so cache those images. Loading from the issuer reveals each
+		// card view and is disabled by default.
 		return uri
 	}
 	return w.fetchAndEmbedDisplayImage(uri, field)
@@ -476,10 +457,8 @@ func (w *Wallet) embedDisplayImage(uri, field string) string {
 	return w.fetchAndEmbedDisplayImage(uri, field)
 }
 
-// fetchAndEmbedDisplayImage GETs a non-data image URI and returns it as a
-// cached data URI. The fetch goes through the policed client: the URI comes
-// from issuer metadata, which on a shared demo is attacker-controlled, so it
-// must not reach an internal address (ADR-0004).
+// Image URLs come from untrusted issuer metadata. Apply the fetch address policy to
+// block private destinations (ADR-0004).
 func (w *Wallet) fetchAndEmbedDisplayImage(uri, field string) string {
 	req, err := http.NewRequest("GET", uri, nil)
 	if err != nil {
@@ -555,7 +534,6 @@ func (w *Wallet) keepVectorImage(body []byte, field, uri string) string {
 	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(body)
 }
 
-// decodeImageDataURI reads the base64 form of an image data URI.
 func decodeImageDataURI(uri string) ([]byte, string, bool) {
 	rest, ok := strings.CutPrefix(uri, "data:")
 	if !ok {
@@ -608,10 +586,8 @@ func (w *Wallet) rejectDisplayImage(field, uri, reason string) {
 		map[string]any{"field": field, "uri": uri, "reason": reason})
 }
 
-// rememberDisplay attaches a display to a credential: to the store's entry
-// and to the caller's copy. Import hands back a copy, and the server restores
-// that copy into a store that was reloaded mid-flow, so a display only the
-// store entry carries would be lost right there.
+// Update both the stored credential and the copy returned by Import. The server may
+// restore that copy after a reload during issuance.
 func (w *Wallet) rememberDisplay(cred *StoredCredential, d *CredentialDisplay) {
 	if w == nil || cred == nil || d == nil {
 		return

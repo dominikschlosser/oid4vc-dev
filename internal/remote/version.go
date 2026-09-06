@@ -35,7 +35,6 @@ type Version struct {
 func ParseVersion(raw string) (Version, bool) {
 	raw = strings.TrimSpace(raw)
 	raw = strings.TrimPrefix(raw, "v")
-	// Cut pre-release and build metadata: 1.19.0-rc.1+abc -> 1.19.0.
 	if i := strings.IndexAny(raw, "-+"); i >= 0 {
 		raw = raw[:i]
 	}
@@ -57,12 +56,10 @@ func ParseVersion(raw string) (Version, bool) {
 	return Version{Major: numbers[0], Minor: numbers[1], Patch: numbers[2]}, true
 }
 
-// String renders the version the way it is reported.
 func (v Version) String() string {
 	return strconv.Itoa(v.Major) + "." + strconv.Itoa(v.Minor) + "." + strconv.Itoa(v.Patch)
 }
 
-// Compatibility says whether a CLI can manage an instance.
 type Compatibility int
 
 const (
@@ -70,9 +67,7 @@ const (
 	// comparable version (a development build, or an instance predating
 	// version reporting).
 	CompatibilityUnknown Compatibility = iota
-	// Compatible means both sides run the same major release.
 	Compatible
-	// Incompatible means the major releases differ.
 	Incompatible
 )
 

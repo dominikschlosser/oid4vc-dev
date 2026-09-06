@@ -16,7 +16,7 @@ package wallet
 
 import "fmt"
 
-// ValidationMode controls whether the wallet enforces all normative checks.
+// ValidationMode decides whether normative findings stop a flow or become warnings.
 type ValidationMode string
 
 const (
@@ -24,7 +24,6 @@ const (
 	ValidationModeStrict ValidationMode = "strict"
 )
 
-// ParseValidationMode validates and normalizes the user-provided mode.
 func ParseValidationMode(raw string) (ValidationMode, error) {
 	switch ValidationMode(raw) {
 	case "", ValidationModeDebug:

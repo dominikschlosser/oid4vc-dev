@@ -40,33 +40,27 @@ func TestBuildWalletMetadata_Basic(t *testing.T) {
 	if meta["request_object_signing_alg_values_supported"] == nil {
 		t.Fatal("expected request_object_signing_alg_values_supported")
 	}
-	// §10 wallet metadata is Authorization Server Metadata (RFC 8414), which
-	// requires response_types_supported. The wallet answers with a vp_token.
+	// RFC 8414 requires response_types_supported in the metadata used by OID4VP 1.0
+	// §10.
 	if rts, _ := meta["response_types_supported"].([]string); len(rts) != 1 || rts[0] != "vp_token" {
 		t.Errorf("response_types_supported = %v, want [vp_token]", meta["response_types_supported"])
 	}
-	// The RFC 8414 default (query, fragment) does not describe this wallet, so
-	// the response modes it actually returns a vp_token in are stated.
+	// RFC 8414 defaults to query and fragment, which this wallet does not use.
 	rms, _ := meta["response_modes_supported"].([]string)
 	if !slices.Contains(rms, "direct_post") || !slices.Contains(rms, "direct_post.jwt") {
 		t.Errorf("response_modes_supported = %v, want it to include direct_post and direct_post.jwt", rms)
 	}
-	// The Authorization Response encryption algorithms are always advertised, for
-	// the direct_post.jwt and dc_api.jwt response modes.
 	if algs, _ := meta["authorization_encryption_alg_values_supported"].([]string); len(algs) != 1 || algs[0] != "ECDH-ES" {
 		t.Errorf("authorization_encryption_alg_values_supported = %v, want [ECDH-ES]", meta["authorization_encryption_alg_values_supported"])
 	}
 	if encs, _ := meta["authorization_encryption_enc_values_supported"].([]string); !slices.Contains(encs, "A128GCM") || !slices.Contains(encs, "A256GCM") {
 		t.Errorf("authorization_encryption_enc_values_supported = %v, want it to include A128GCM and A256GCM", meta["authorization_encryption_enc_values_supported"])
 	}
-	// This wallet holds no encryption key, so it offers none. Holding one, it
-	// always offers it (see TestBuildWalletMetadata_OffersEncryptionKey).
 	if meta["jwks"] != nil {
 		t.Error("should not include jwks when the wallet holds no encryption key")
 	}
 
-	// Appendix B names issuerauth_alg_values for mso_mdoc, and its values are
-	// COSE algorithm identifiers (-7 is ECDSA with SHA-256).
+	// Appendix B uses COSE identifiers for mso_mdoc. -7 means ECDSA with SHA-256.
 	vpFormats := meta["vp_formats_supported"].(map[string]any)
 	mdoc := vpFormats["mso_mdoc"].(map[string]any)
 	algValues := mdoc["issuerauth_alg_values"].([]int)
@@ -116,9 +110,6 @@ func TestBuildWalletMetadata_WithEncryption(t *testing.T) {
 	}
 }
 
-// TestBuildWalletMetadata_OffersEncryptionKey pins that a held encryption key is
-// advertised even when the wallet does not require an encrypted request object,
-// so a Verifier that wants to encrypt one can.
 func TestBuildWalletMetadata_OffersEncryptionKey(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -135,9 +126,7 @@ func TestBuildWalletMetadata_OffersEncryptionKey(t *testing.T) {
 	}
 }
 
-// TestBuildWalletMetadata_SigningAlgsGatedOnPrefix pins that Request Object
-// signing algorithms are advertised only when the Client Identifier Prefix
-// permits a signed Request Object. The redirect_uri prefix precludes one.
+// The redirect_uri prefix forbids signed Request Objects.
 func TestBuildWalletMetadata_SigningAlgsGatedOnPrefix(t *testing.T) {
 	signed := []string{"x509_hash:abc", "x509_san_dns:verifier.example", "pre-registered", "verifier.example", ""}
 	for _, clientID := range signed {
@@ -209,7 +198,6 @@ func TestMakeFetchRequestURI_POST(t *testing.T) {
 		receivedWalletMetadata = r.Form.Get("wallet_metadata")
 		receivedWalletNonce = r.Form.Get("wallet_nonce")
 
-		// Return signed-style JWT that includes the wallet_nonce
 		jwt := makeTestJWT(map[string]any{"alg": "ES256"}, map[string]any{
 			"client_id":     "test-client",
 			"response_type": "vp_token",
@@ -392,7 +380,6 @@ func TestDecryptRequestObjectJWE(t *testing.T) {
 		"nonce":         "test-nonce",
 	})
 
-	// Encrypt the JWT using the wallet's public key (simulating verifier behavior)
 	jweStr, _, err := EncryptJWE([]byte(jwt), &walletKey.PublicKey, "test-kid", "ECDH-ES", "A128GCM", nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -545,9 +532,6 @@ func TestParseWithOptionsRequestURIMethodPost(t *testing.T) {
 	}
 }
 
-// The media type of a request_uri response is a validation finding like any
-// other: strict refuses a wrong one, debug records a profile warning and
-// reads the request object anyway. Both fetch methods judge it the same way.
 func TestRequestURIMediaTypeFollowsTheValidationMode(t *testing.T) {
 	jwt := makeTestJWT(map[string]any{"alg": "ES256"}, map[string]any{
 		"client_id":     "test-client",
@@ -588,7 +572,6 @@ func TestRequestURIMediaTypeFollowsTheValidationMode(t *testing.T) {
 	}
 }
 
-// makeTestJWT creates a minimal unsigned JWT for testing.
 func makeTestJWT(header, payload map[string]any) string {
 	h, _ := json.Marshal(header)
 	p, _ := json.Marshal(payload)
@@ -608,10 +591,8 @@ func containsStr(s, substr string) bool {
 	return false
 }
 
-// OID4VP 1.0 §10.1: "client_id_prefixes_supported ... If omitted, the default
-// value is pre-registered." A Verifier reads this to choose a prefix (§5.9.1),
-// so a wallet that stays silent is understood to accept pre-registered clients
-// only and will never be sent an x509_hash request.
+// OID4VP 1.0 §10.1 defaults to pre-registered when client_id_prefixes_supported is
+// absent. Explicitly listing x509_hash lets verifiers choose it (§5.9.1).
 func TestWalletMetadataAdvertisesTheClientIDPrefixesItAccepts(t *testing.T) {
 	meta := BuildWalletMetadata(generateTestWallet(t), "")
 
@@ -628,15 +609,12 @@ func TestWalletMetadataAdvertisesTheClientIDPrefixesItAccepts(t *testing.T) {
 			t.Errorf("%s is not advertised: %v", want, prefixes)
 		}
 	}
-	// The reserved prefix of §5.9.3 is one the wallet "MUST NOT accept ... in
-	// requests", so advertising it would invite exactly that.
+	// OID4VP 1.0 §5.9.3 forbids the reserved prefix in requests.
 	if listed["origin"] {
 		t.Error("the reserved origin prefix is advertised as supported")
 	}
-	// A Verifier picks a prefix from this list (§5.9.1), so it may only name
-	// prefixes whose Request Object signature this wallet can verify. Its
-	// signature check reads the leaf of an x5c chain, which these three do
-	// not carry.
+	// The wallet verifies signatures using an x5c leaf certificate. It cannot verify
+	// requests with these prefixes.
 	for _, unverifiable := range []string{"verifier_attestation", "decentralized_identifier", "openid_federation"} {
 		if listed[unverifiable] {
 			t.Errorf("%s is advertised, but a request using it cannot be verified by this wallet", unverifiable)
@@ -644,9 +622,8 @@ func TestWalletMetadataAdvertisesTheClientIDPrefixesItAccepts(t *testing.T) {
 	}
 }
 
-// Appendix B names the members of each format profile. The generic
-// alg_values_supported is not one of them, so a Verifier reading it learns
-// nothing about what this wallet can verify.
+// Appendix B defines format specific algorithm fields. The generic
+// alg_values_supported is not one of them.
 func TestWalletMetadataNamesTheFormatProfileMembers(t *testing.T) {
 	meta := BuildWalletMetadata(generateTestWallet(t), "")
 

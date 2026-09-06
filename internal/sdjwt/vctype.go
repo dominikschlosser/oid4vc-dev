@@ -27,8 +27,6 @@ const (
 	TypeSDJWTVCLegacy = "vc+sd-jwt"
 )
 
-// AcceptedVCTypes lists the typ header parameter values an SD-JWT VC may
-// carry.
 func AcceptedVCTypes() []string {
 	return []string{TypeSDJWTVC, TypeSDJWTVCLegacy}
 }

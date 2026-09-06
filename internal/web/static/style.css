@@ -14,7 +14,6 @@
   --purple: #bb9af7;
   --font-mono: "SF Mono", "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
 
-  /* Disclosure color palette */
   --disc-color-0: #e0af68;
   --disc-color-1: #9ece6a;
   --disc-color-2: #ff9e64;
@@ -56,9 +55,7 @@
   box-sizing: border-box;
 }
 
-/* Base link color: without this, links in unstyled containers fall back to
-   the browser default dark blue, which is unreadable on the dark theme.
-   Scoped rules below override where needed. */
+/* Use a readable default link color on dark backgrounds. */
 a {
   color: var(--accent);
 }
@@ -83,8 +80,7 @@ header {
   flex-shrink: 0;
 }
 
-/* The mark is 46:51, so give it that ratio instead of a square box that
-   would letterbox it and add phantom padding next to the title. */
+/* Match the logo's 46:51 aspect ratio to avoid padding from a square box. */
 .header-logo {
   width: 26px;
   height: 29px;
@@ -219,15 +215,14 @@ main {
   color: var(--purple);
 }
 
-/* Editor container: stacks textarea over colorized raw-view */
 .input-editor {
   flex: 1;
   position: relative;
   overflow: hidden;
 }
 
-/* Only the credential editor's textarea is the overlay; scoping keeps this off
-   other textareas (the signature verify box, say). */
+/* Scope the transparent overlay to the credential editor so other textareas remain
+   visible. */
 .input-editor textarea {
   position: absolute;
   top: 0;
@@ -251,7 +246,6 @@ main {
   overflow-wrap: normal;
 }
 
-/* When colorized view is active, make textarea text invisible but keep caret */
 .input-editor textarea.colorized {
   background: transparent;
   color: transparent;
@@ -287,7 +281,6 @@ main {
   border-radius: 6px;
 }
 
-/* Sections */
 .section {
   margin-bottom: 16px;
 }
@@ -328,7 +321,6 @@ main {
   display: none;
 }
 
-/* JSON rendering */
 .json-key {
   color: var(--cyan);
 }
@@ -399,8 +391,7 @@ main {
 .disclosure-value,
 .claim-value {
   color: var(--green);
-  /* A base64 image is one token thousands of characters long, and without
-     this the line it sits on is as wide as the value. */
+  /* Break long Base64 tokens so image claims cannot widen the entire pane. */
   overflow-wrap: anywhere;
 }
 
@@ -440,7 +431,6 @@ main {
   margin-top: 2px;
 }
 
-/* Validity banner */
 .validity-banner {
   display: flex;
   flex-direction: column;
@@ -453,7 +443,6 @@ main {
   margin-bottom: 12px;
 }
 
-/* A subtle tint per verdict; the verdict word carries the colour. */
 .validity-banner.valid { background: rgba(158, 206, 106, 0.08); }
 .validity-banner.expired { background: rgba(247, 118, 142, 0.08); }
 .validity-banner.unverified { background: rgba(224, 175, 104, 0.08); }
@@ -543,14 +532,12 @@ main {
   color: var(--text-dim);
 }
 
-/* Timestamp hover */
 .timestamp-hover {
   text-decoration: underline dotted var(--text-dim);
   text-underline-offset: 2px;
   cursor: help;
 }
 
-/* Copy button on sections */
 .section-header .copy-btn {
   margin-left: auto;
   background: none;
@@ -579,7 +566,6 @@ main {
   opacity: 1;
 }
 
-/* Issuer summary badges */
 .issuer-summary {
   display: flex;
   flex-wrap: wrap;
@@ -614,14 +600,12 @@ main {
   max-width: 300px;
 }
 
-/* Digest truncation */
 .digest-truncated {
   cursor: help;
   text-decoration: underline dotted var(--text-dim);
   text-underline-offset: 2px;
 }
 
-/* Resolved claims */
 .resolved-claims-list {
   display: flex;
   flex-direction: column;
@@ -676,7 +660,6 @@ main {
 .raw-view .jwt-signature { color: var(--cyan); }
 .raw-view .jwt-separator { color: var(--text-dim); }
 
-/* Disclosure color palette — each disclosure gets a unique color */
 .raw-view .jwt-disc-0 { color: var(--yellow); }
 .raw-view .jwt-disc-1 { color: var(--green); }
 .raw-view .jwt-disc-2 { color: var(--orange); }
@@ -686,7 +669,6 @@ main {
 .raw-view .jwt-disc-6 { color: var(--accent); }
 .raw-view .jwt-disc-7 { color: var(--text); }
 
-/* Hover cross-highlight */
 .raw-view [data-section] {
   border-radius: 2px;
   transition: background 0.1s;
@@ -709,7 +691,6 @@ main {
   padding-right: 8px;
 }
 
-/* Disclosure item color indicators */
 .disclosure-item[data-disc-index] {
   transition: background 0.1s;
 }
@@ -718,7 +699,6 @@ main {
   background: var(--bg-hover);
 }
 
-/* Footer */
 .shortcut-hint {
   font-size: 10px;
   color: var(--text-dim);
@@ -752,7 +732,6 @@ main {
   text-decoration: underline;
 }
 
-/* Share toast */
 .toast {
   position: fixed;
   bottom: 20px;
@@ -775,7 +754,6 @@ main {
   opacity: 1;
 }
 
-/* Signature (re-)verification form, inside the verification panel's details. */
 .verify-inline {
   display: flex;
   flex-direction: column;
@@ -829,7 +807,6 @@ main {
   cursor: default;
 }
 
-/* Responsive */
 @media (max-width: 768px) {
   body {
     overflow: auto;
@@ -866,9 +843,6 @@ main {
     overflow: visible;
   }
 
-  /* Stack the header into left-aligned rows so nothing overflows and every
-     row shares one left edge: brand, then links on their own full-width row,
-     then the action buttons. */
   header {
     flex-direction: column;
     align-items: stretch;
@@ -894,7 +868,6 @@ main {
   }
 }
 
-/* Get the CLI modal (markup and classes shared with the wallet UI) */
 .consent-overlay {
   display: none;
   position: fixed;
@@ -962,8 +935,6 @@ main {
   margin-top: 16px;
 }
 
-/* mdoc decoder: an explanation per section, and the salt/digest that make
-   selective disclosure work shown next to each element. */
 .format-note {
   font-size: 11px;
   line-height: 1.5;
@@ -989,7 +960,6 @@ main {
   color: var(--red);
 }
 
-/* A disclosure the credential never refers to discloses nothing. */
 .disclosure-unreferenced {
   color: var(--red);
   font-weight: 600;

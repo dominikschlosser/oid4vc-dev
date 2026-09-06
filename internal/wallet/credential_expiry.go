@@ -54,9 +54,8 @@ func CredentialExpiry(cred StoredCredential) time.Time {
 	}
 }
 
-// CredentialNeedsRenewal reports whether a credential is close enough to
-// expiry to be worth renewing now. A credential without a stated lifetime
-// never is.
+// CredentialNeedsRenewal excludes credentials without an expiry because renewal cannot be
+// scheduled.
 func CredentialNeedsRenewal(cred StoredCredential, now time.Time) bool {
 	expiry := CredentialExpiry(cred)
 	if expiry.IsZero() {

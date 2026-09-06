@@ -12,19 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// The consent dialog lets the user override which credentials answer a
-// presentation. The overrides reference the ConsentCredentialOptions the
-// request offered: an option index per credential set and a credential per
-// query id. ValidateConsentSelection checks an approval body against the
-// offer before it is accepted, ApplyConsentSelection turns the accepted
-// selection back into the matches the presentation is built from.
+// Consent overrides select an offered option per credential set and a credential per
+// query. Validate selections before approval, then rebuild presentation matches from
+// the accepted choices.
 
 package wallet
 
 import "fmt"
 
-// ValidateConsentSelection checks that picks and set choices reference what
-// the consent request offered.
 func ValidateConsentSelection(options *ConsentCredentialOptions, picks map[string]string, setChoices []int) error {
 	if len(picks) == 0 && len(setChoices) == 0 {
 		return nil
@@ -69,14 +64,12 @@ func ValidateConsentSelection(options *ConsentCredentialOptions, picks map[strin
 	return nil
 }
 
-// ApplyConsentSelection rebuilds the matches an approval chose from the
-// offered options. An approval without overrides keeps the wallet's own
-// selection, so auto-accept and untouched consents behave identically.
+// ApplyConsentSelection preserves automatic selection without overrides so unchanged
+// consent and auto-accept agree.
 func ApplyConsentSelection(options *ConsentCredentialOptions, matches []CredentialMatch, result ConsentResult) []CredentialMatch {
 	if options == nil || (len(result.Picks) == 0 && len(result.SetChoices) == 0) {
-		// A copy: the claim filtering after approval writes into the
-		// returned slice, and the published ConsentRequest keeps marshaling
-		// its own MatchedCreds concurrently.
+		// Copy matches before filtering claims. ConsentRequest can still be marshalled
+		// concurrently.
 		return append([]CredentialMatch(nil), matches...)
 	}
 

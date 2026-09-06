@@ -1,8 +1,8 @@
 # Spec conformance is checked before and after every change
 
-This tool exists to tell a developer whether their issuer, verifier or wallet follows the specifications. Every finding it reports, every check it runs and every sentence of its documentation is a claim about what a specification says. A wrong claim makes someone fix code that was conformant.
+Developers use this tool to check whether issuers, verifiers and wallets follow the specifications. Incorrect checks or documentation can send them to fix conformant code.
 
-So conformance comes before features, ergonomics and internal tidiness. It is verified twice for every change: before the work, to establish what the specification requires, and after it, to confirm the change still matches.
+Conformance takes priority over features and convenience. Before each change, confirm what the specification requires. Afterwards, verify the result against it.
 
 ## What checking means
 
@@ -24,7 +24,7 @@ Confirm every citation the change touches is verbatim and correctly attributed, 
 
 ## The executable check is the OIDF conformance suite
 
-Citation checking covers each claim. The OpenID Foundation conformance suite verifies the running binary against the same specifications, in both directions. The wallet plans test this wallet ([runbook](../conformance-run.md)). The issuer and verifier plans test the demo issuer and verifier ([runbook](../conformance-run-demorp.md)). The results are recorded in [conformance results](../conformance-results.md). It is the only mature executable suite for the protocols the EUDI stack builds on (OpenID4VP 1.0, OpenID4VCI 1.0, HAIP 1.0), so a conformance statement about this project points at those runs.
+Citation checking covers each claim. The OpenID Foundation conformance suite verifies the running binary against the same specifications, in both directions. The wallet plans test this wallet ([runbook](../conformance-run.md)). The issuer and verifier plans test the demo issuer and verifier ([runbook](../conformance-run-demorp.md)). The results are recorded in [conformance results](../conformance-results.md). Conformance claims for OpenID4VP 1.0, OpenID4VCI 1.0 and HAIP 1.0 refer to these recorded runs.
 
 EUDI stays the primary target, and [ADR-0013](0013-only-the-eudi-stack-is-supported.md) bounds the specification set to what the ARF references. The ARF rules the OIDF suite does not cover (registration certificates, over-asking) are checked by this toolkit's own validations.
 
@@ -40,7 +40,7 @@ No other executable conformance suite exists for EUDI or the ARF as of 2026-08. 
 
 ## Consequences
 
-A check without a citation is removed. Such a check refuses conformant input, which is the failure this tool exists to find in others.
+Remove checks that have no specification basis. They can reject conformant input.
 
 Behaviour kept for interoperability with implementations built against an older rule may stay, as long as the code says so and does not call it a requirement. The wallet names the issuer in the subject alternative names of the leaves it signs with for that reason.
 

@@ -17,19 +17,16 @@ package mdoc
 
 import "time"
 
-// Document represents a parsed mDOC credential.
 type Document struct {
-	Raw        []byte
-	DocType    string
-	NameSpaces map[string][]IssuerSignedItem
-	IssuerAuth *IssuerAuth
-	// DeviceSigned contains the device authentication data from a DeviceResponse.
+	Raw          []byte
+	DocType      string
+	NameSpaces   map[string][]IssuerSignedItem
+	IssuerAuth   *IssuerAuth
 	DeviceSigned *DeviceSigned
 	// ResponseVersion and ResponseStatus are the DeviceResponse members that
 	// sit outside the document itself.
-	ResponseVersion string
-	ResponseStatus  *uint64
-	// IsDeviceResponse indicates this was parsed from a DeviceResponse wrapper.
+	ResponseVersion  string
+	ResponseStatus   *uint64
 	IsDeviceResponse bool
 	// Deviations records parts the parser dropped because it could not read them
 	// (a malformed namespace, a repeated element). The rest of the document
@@ -37,7 +34,6 @@ type Document struct {
 	Deviations []string
 }
 
-// DeviceSigned contains the device-signed portion of a DeviceResponse document.
 type DeviceSigned struct {
 	DeviceAuth map[string]any
 	// RawDeviceSignature is the deviceSignature COSE_Sign1 as it arrived,
@@ -45,7 +41,6 @@ type DeviceSigned struct {
 	RawDeviceSignature []byte
 }
 
-// IssuerSignedItem represents a single claim within a namespace.
 type IssuerSignedItem struct {
 	DigestID          uint64
 	Random            []byte
@@ -56,7 +51,6 @@ type IssuerSignedItem struct {
 	RawCBOR []byte
 }
 
-// IssuerAuth represents the COSE_Sign1 issuer authentication.
 type IssuerAuth struct {
 	RawCOSE           []byte
 	ProtectedHeader   map[any]any
@@ -82,7 +76,6 @@ type MSO struct {
 	Status        map[string]any
 }
 
-// ValidityInfo contains credential validity dates.
 type ValidityInfo struct {
 	Signed     *time.Time
 	ValidFrom  *time.Time

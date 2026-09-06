@@ -26,10 +26,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// --- Next Error Override Tests ---
-
 func TestNextErrorOverride_ConsumedAfterUse(t *testing.T) {
-	srv := newTestServer(t, true) // auto-accept
+	srv := newTestServer(t, true)
 
 	rec := serverRequest(t, srv, "POST", "/api/next-error",
 		`{"error":"access_denied","error_description":"testing"}`)
@@ -55,7 +53,6 @@ func TestNextErrorOverride_ConsumedAfterUse(t *testing.T) {
 		"dcql_query":    {string(dcqlJSON)},
 	}
 
-	// First request: should get the error override
 	req := httptest.NewRequest("GET", "/authorize?"+params.Encode(), nil)
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
@@ -74,7 +71,6 @@ func TestNextErrorOverride_ConsumedAfterUse(t *testing.T) {
 		t.Errorf("expected error_description 'testing', got %v", result["error_description"])
 	}
 
-	// Second request: should proceed normally (override consumed)
 	req2 := httptest.NewRequest("GET", "/authorize?"+params.Encode(), nil)
 	w2 := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w2, req2)
@@ -120,7 +116,6 @@ func TestNextErrorOverride_ClearWithoutConsuming(t *testing.T) {
 		"dcql_query":    {string(dcqlJSON)},
 	}
 
-	// Request should proceed normally (override was cleared)
 	req := httptest.NewRequest("GET", "/authorize?"+params.Encode(), nil)
 	w := httptest.NewRecorder()
 	srv.mux.ServeHTTP(w, req)
@@ -131,8 +126,6 @@ func TestNextErrorOverride_ClearWithoutConsuming(t *testing.T) {
 	}
 }
 
-// --- Preferred Format Tests ---
-
 func TestPreferredFormat_SDJWTPreferred(t *testing.T) {
 	srv := newTestServer(t, true)
 	srv.wallet.PreferredFormat = "dc+sd-jwt"
@@ -141,7 +134,7 @@ func TestPreferredFormat_SDJWTPreferred(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		parsedForm, _ := url.ParseQuery(string(body))
 		vpToken := parsedForm.Get("vp_token")
-		// SD-JWT contains '~', mDoc does not
+		// SD-JWT serialization contains ~ separators. mdoc serialization does not.
 		if !strings.Contains(vpToken, "~") {
 			http.Error(w, "expected SD-JWT token", http.StatusBadRequest)
 			return
@@ -175,7 +168,6 @@ func TestPreferredFormat_SDJWTPreferred(t *testing.T) {
 		t.Fatalf("expected status 'submitted', got %v", result["status"])
 	}
 
-	// Check that only one vp_token key was submitted (the preferred one)
 	vpTokenKeys, ok := result["vp_token_keys"].([]any)
 	if !ok {
 		t.Fatal("expected vp_token_keys")
@@ -233,7 +225,6 @@ func TestPreferredFormat_MDocPreferred(t *testing.T) {
 
 func TestPreferredFormat_NoPreference(t *testing.T) {
 	srv := newTestServer(t, true)
-	// No preferred format set (default)
 
 	verifier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
@@ -265,8 +256,7 @@ func TestPreferredFormat_NoPreference(t *testing.T) {
 		t.Fatalf("expected status 'submitted', got %v", result["status"])
 	}
 
-	// With no preference, credential_sets takes the first match in iteration
-	// order, so either credential may be presented.
+	// Without a format preference, credential_sets selects the first matching option.
 }
 
 func TestPreferredFormat_API(t *testing.T) {
@@ -298,8 +288,6 @@ func TestPreferredFormat_API(t *testing.T) {
 	}
 }
 
-// --- Helpers ---
-
 func pidDCQLQuery() map[string]any {
 	return map[string]any{
 		"credentials": []any{
@@ -317,8 +305,6 @@ func pidDCQLQuery() map[string]any {
 	}
 }
 
-// bothFormatDCQLQuery creates a query that matches both SD-JWT and mDoc PID
-// using credential_sets to select one option.
 func bothFormatDCQLQuery() map[string]any {
 	return map[string]any{
 		"credentials": []any{

@@ -26,7 +26,6 @@ import (
 	"github.com/makiuchi-d/gozxing/qrcode"
 )
 
-// ScanFile opens an image file and decodes a QR code from it.
 func ScanFile(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {

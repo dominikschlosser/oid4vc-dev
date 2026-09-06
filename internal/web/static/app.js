@@ -1,10 +1,9 @@
 (() => {
   "use strict";
 
-  // Compute base path so API calls work when mounted under a sub-path (e.g. /decode/).
+  // Resolve API paths relative to the mounted decoder, which may live below /decoder/.
   const basePath = (() => {
     const path = window.location.pathname;
-    // If path ends with /, use it; otherwise strip the last segment.
     return path.endsWith("/") ? path : path.substring(0, path.lastIndexOf("/") + 1);
   })();
 
@@ -19,25 +18,20 @@
 
   let decodeTimer = null;
   let decodeDueAt = 0;
-  // Bumped per decode so a slow answer for text that has since changed is
-  // dropped instead of overwriting what is on screen.
+  // Ignore results from earlier decodes after the input changes.
   let decodeSeq = 0;
   let renderedSeq = -1;
   let lastData = null;
   let lastValidation = null;
-  let colorized = false; // true when showing colorized view instead of textarea
-  // The credential currently shown, when it came from a wallet this decoder
-  // is mounted on: {id, credential}. A link can then name it by id instead of
-  // carrying kilobytes of base64url, and the share button keeps that form.
+  let colorized = false;
+  // Keep the wallet credential ID while its content is unchanged so shared links can use
+  // the short form.
   let walletCredential = null;
 
-  // Disclosure color palette size
   const DISC_COLORS = 8;
 
-  // Well-known timestamp fields in JWT/SD-JWT payloads
   const TIMESTAMP_FIELDS = new Set(["exp", "iat", "nbf", "auth_time", "updated_at"]);
 
-  // Theme toggle
   const savedTheme = localStorage.getItem("eudi-dev-theme");
   if (savedTheme === "light") document.documentElement.setAttribute("data-theme", "light");
   themeBtn.addEventListener("click", () => {
@@ -46,7 +40,6 @@
     localStorage.setItem("eudi-dev-theme", isLight ? "" : "light");
   });
 
-  // Clear
   clearBtn.addEventListener("click", () => {
     input.value = "";
     resetOutput();
@@ -54,7 +47,6 @@
     input.focus();
   });
 
-  // Share: copy the URL with a ?credential= query param
   shareBtn.addEventListener("click", copyShareLink);
 
   function copyShareLink() {
@@ -79,7 +71,6 @@
 
   function buildCredentialURL(text) {
     if (!text) return window.location.pathname;
-    // The short form, while what is shown is still the credential it named.
     if (walletCredential && walletCredential.credential === text) {
       return window.location.pathname + "?id=" + encodeURIComponent(walletCredential.id);
     }
@@ -109,7 +100,6 @@
     applyCredential(next);
   }
 
-  // Colorized input view, overlaid behind a transparent textarea
   function showColorized() {
     if (colorized) return;
     colorized = true;
@@ -125,7 +115,6 @@
     rawView.style.display = "none";
   }
 
-  // Sync scroll between textarea and colorized view
   input.addEventListener("scroll", () => {
     if (colorized) {
       rawView.scrollTop = input.scrollTop;
@@ -133,9 +122,8 @@
     }
   });
 
-  // Section offset map: built during updateRawView, maps character ranges
-  // to section IDs for cross-highlighting without pointer-events hacks.
-  let sectionRanges = []; // [{start, end, section}]
+  // Map input character ranges to section IDs for highlighting.
+  let sectionRanges = [];
 
   function updateRawView() {
     const text = input.value.trim();
@@ -145,7 +133,6 @@
       return;
     }
 
-    // Try to colorize as JWT/SD-JWT
     const parts = text.split("~");
     const jwtPart = parts[0];
     const jwtSegments = jwtPart.split(".");
@@ -154,21 +141,17 @@
       let html = "";
       let pos = 0;
 
-      // Header
       sectionRanges.push({ start: pos, end: pos + jwtSegments[0].length, section: "header" });
       html += '<span class="jwt-header" data-section="header">' + escapeHtml(jwtSegments[0]) + "</span>";
       pos += jwtSegments[0].length;
 
-      // .
       html += '<span class="jwt-separator">.</span>';
       pos += 1;
 
-      // Payload
       sectionRanges.push({ start: pos, end: pos + jwtSegments[1].length, section: "payload" });
       html += '<span class="jwt-payload" data-section="payload">' + escapeHtml(jwtSegments[1]) + "</span>";
       pos += jwtSegments[1].length;
 
-      // Signature
       if (jwtSegments.length > 2) {
         html += '<span class="jwt-separator">.</span>';
         pos += 1;
@@ -178,8 +161,6 @@
         pos += sigText.length;
       }
 
-      // SD-JWT disclosures, each in its own color
-      // Detect KB-JWT: last non-empty part that contains dots (JWT structure)
       let kbJwtIndex = -1;
       if (parts.length > 1) {
         for (let i = parts.length - 1; i >= 1; i--) {
@@ -193,10 +174,9 @@
       let discIdx = 0;
       for (let i = 1; i < parts.length; i++) {
         html += '<span class="jwt-separator">~</span>';
-        pos += 1; // ~
+        pos += 1;
         if (parts[i]) {
           if (i === kbJwtIndex) {
-            // KB-JWT: colorize its internal structure
             const kbSegs = parts[i].split(".");
             sectionRanges.push({ start: pos, end: pos + parts[i].length, section: "kb-jwt" });
             html += '<span data-section="kb-jwt">';
@@ -223,13 +203,10 @@
 
       rawView.innerHTML = html;
     } else {
-      // Non-JWT (e.g. mDOC hex/base64)
       rawView.innerHTML = escapeHtml(text);
     }
   }
 
-  // Cross-highlight: use character position in textarea to find which
-  // section the cursor is over, based on the offset map built during colorization.
   let lastHoveredSection = null;
 
   function clearHoverHighlight() {
@@ -274,8 +251,7 @@
     }
   }
 
-  // Hit-test the rawView spans to find which section the mouse is over.
-  // Briefly swaps pointer-events so elementFromPoint can reach the rawView layer.
+  // Temporarily change pointer-events so elementFromPoint can reach the highlighted layer.
   function sectionFromPoint(e) {
     input.style.pointerEvents = "none";
     rawView.style.pointerEvents = "auto";
@@ -287,7 +263,7 @@
   }
 
   input.addEventListener("mousemove", (e) => {
-    // Skip cross-highlighting while user is dragging to select text
+    // Do not change highlighting while the user selects text.
     if (e.buttons !== 0) return;
     if (!colorized) return;
     const sec = sectionFromPoint(e);
@@ -320,11 +296,7 @@
     }).then((res) => res.json());
   }
 
-  // Two passes over the same input. The offline one carries the whole decode
-  // and every check answerable from the credential itself, so the output is on
-  // screen right away. The online one adds what only a lookup at the issuer can
-  // answer (the status list, and an issuer key named by metadata), which is a
-  // round trip to a counterparty that can take seconds.
+  // Display offline checks first so network requests do not delay decoding.
   function decode() {
     const text = input.value.trim();
     if (!text) {
@@ -363,8 +335,6 @@
         render(seq, data, {});
       })
       .catch(() => {
-        // The network checks stay unanswered, so the banner falls back to
-        // what the offline pass reported about them.
         if (seq === decodeSeq && renderedSeq === seq) {
           replaceValidationBanner(lastValidation && lastValidation.checks, lastData && lastData.deviations, {});
         }
@@ -387,8 +357,7 @@
     renderedSeq = -1;
   }
 
-  // Swaps the banner in place so the rest of the output (and which sections the
-  // reader collapsed) survives the online pass landing.
+  // Replace only the banner to preserve the reader's expanded and collapsed sections.
   function replaceValidationBanner(checks, deviations, opts) {
     if (!checks) return;
     const existing = outputEl.querySelector(".validity-banner");
@@ -396,7 +365,6 @@
     existing.replaceWith(renderValidationBanner(checks, deviations, opts));
   }
 
-  // Re-validate with a public key or trust list for signature verification
   function verifySignature(keyText, trustListURL) {
     const text = input.value.trim();
     if (!text) return;
@@ -420,13 +388,11 @@
       });
   }
 
-  // Typing waits out a pause. A paste is the whole credential at once, so it
-  // decodes as soon as the value has landed.
+  // Debounce typing, but decode pasted credentials as soon as input updates.
   const TYPING_DECODE_DELAY = 300;
   const PASTE_DECODE_DELAY = 10;
 
-  // A decode already due sooner than this one stays. A paste raises both the
-  // paste event and an input event, and that pair is one decode.
+  // Paste emits two events. Keep the earlier scheduled decode to process it once.
   function scheduleDecode(delay) {
     const dueAt = Date.now() + delay;
     if (decodeTimer !== null && decodeDueAt <= dueAt) return;
@@ -439,7 +405,6 @@
   }
 
   input.addEventListener("input", () => {
-    // Update colorized view immediately so it stays in sync while typing
     if (colorized) updateRawView();
     scheduleDecode(TYPING_DECODE_DELAY);
   });
@@ -451,18 +416,15 @@
     outputEl.innerHTML = '<div class="error">' + escapeHtml(msg) + "</div>";
   }
 
-  // Render result
   function showResult(data, opts) {
     updateBadge(data.format);
     outputEl.innerHTML = "";
 
-    // Issuer/subject summary line
     const summary = extractSummary(data);
     if (summary) {
       outputEl.appendChild(renderSummaryLine(summary));
     }
 
-    // Validation banner (always from server checks now)
     if (data.validation && data.validation.checks) {
       outputEl.appendChild(renderValidationBanner(data.validation.checks, data.deviations, opts));
     }
@@ -480,12 +442,10 @@
     }
   }
 
-  // Issuer/subject summary
   function extractSummary(data) {
     const parts = [];
     if (data.format === "mso_mdoc") {
       if (data.docType) parts.push({ label: "DocType", value: data.docType });
-      // Look for issuing_authority or issuing_country in mDOC claims
       if (data.claims) {
         for (const ns of Object.keys(data.claims)) {
           const c = data.claims[ns];
@@ -536,11 +496,6 @@
     }
   }
 
-  // The verification panel: a verdict, then the checks sorted into what is
-  // valid, what could not be checked, and what is a clear violation (a failed
-  // check, or a structural break the parser recorded as a deviation).
-  // opts.awaitingNetworkChecks means the online pass is still running, so the
-  // checks it owns are shown as in flight rather than as an outcome.
   function renderValidationBanner(checks, deviations, opts) {
     const banner = document.createElement("div");
     banner.className = "validity-banner";
@@ -559,7 +514,7 @@
       const item = { name: c.name, detail: c.detail };
       if (c.status === "pass") valid.push(item);
       else if (c.status === "fail") violations.push(item);
-      else cantCheck.push(item); // skipped or a warning that could not resolve
+      else cantCheck.push(item);
     });
     deviations.forEach((d) => violations.push({ name: "structure", detail: d }));
 
@@ -669,7 +624,6 @@
         const item = document.createElement("div");
         item.className = "disclosure-item";
         item.setAttribute("data-disc-index", idx);
-        // Color-code the left border to match colorized input
         const colorIdx = idx % DISC_COLORS;
         item.style.borderLeftColor = "var(--disc-color-" + colorIdx + ", var(--accent))";
         const name = d.isArrayEntry ? "(array element)" : d.name;
@@ -690,8 +644,8 @@
         digest.title = d.digest;
         digest.textContent = truncatedDigest;
         meta.appendChild(digest);
-        // The digest is what ties a disclosure to the signed credential. One
-        // the credential never refers to discloses nothing.
+        // A disclosure reveals a claim only if the signed credential references its
+        // digest.
         if (d.referenced === true) {
           meta.appendChild(document.createTextNode(" \u00b7 matches _sd"));
         } else if (d.referenced === false) {
@@ -711,7 +665,6 @@
         disc.firstChild);
       appendSection("Disclosures (" + data.disclosures.length + ")", disc, data.disclosures, "disclosures");
 
-      // Bidirectional hover: disclosure items <-> colorized input spans
       disc.querySelectorAll(".disclosure-item[data-disc-index]").forEach((item) => {
         const idx = item.getAttribute("data-disc-index");
         item.addEventListener("mouseenter", () => {
@@ -730,7 +683,6 @@
       });
     }
 
-    // Resolved Claims with disclosed vs standard separation
     if (data.resolvedClaims) {
       const disclosedNames = new Set();
       if (data.disclosures) {
@@ -748,8 +700,6 @@
       appendSection("Key Binding JWT", kb, data.keyBindingJWT, "kb-jwt");
     }
 
-    // Deviations are shown in the verification panel. These are the benign
-    // structural notes that do not make the credential invalid.
     if (data.warnings && data.warnings.length > 0) {
       const w = document.createElement("div");
       data.warnings.forEach((msg) => {
@@ -766,7 +716,6 @@
     const el = document.createElement("div");
     el.className = "resolved-claims-list";
 
-    // Separate disclosed vs standard claims
     const disclosed = [];
     const standard = [];
     const keys = Object.keys(claims).sort();
@@ -820,8 +769,6 @@
     appendSection("Payload", renderJSONBlock(data.payload, { timestampKeys: TIMESTAMP_FIELDS }), data.payload, "payload");
   }
 
-  // What each part of an mdoc is for. The decoder is also where people come
-  // to learn the format, and "issuerAuth" says nothing on its own.
   const MDOC_NOTES = {
     structure:
       "An mdoc is CBOR, not text. issuerSigned holds what the issuer signed (the elements and the COSE_Sign1 over them). deviceSigned holds what the holder signed when presenting.",
@@ -857,7 +804,6 @@
     }
     appendSection("Document Info", info, { docType: data.docType });
 
-    // issuerSigned.nameSpaces, as mdoc selective disclosure actually works.
     if (data.issuerSignedItems) {
       Object.keys(data.issuerSignedItems).sort().forEach((ns) => {
         const items = data.issuerSignedItems[ns];
@@ -870,7 +816,6 @@
       });
     }
 
-    // issuerSigned.issuerAuth, broken into its COSE_Sign1 parts.
     if (data.issuerAuth) {
       const el = document.createElement("div");
       el.appendChild(renderNote(MDOC_NOTES.issuerAuth));
@@ -892,8 +837,7 @@
       const mso = data.mso;
       const el = document.createElement("div");
       el.appendChild(renderNote(MDOC_NOTES.mso));
-      // In the order ISO 18013-5 declares them: version, digestAlgorithm,
-      // valueDigests, deviceKeyInfo, docType, validityInfo.
+      // Keep the MSO field order from ISO 18013-5.
       if (mso.version) el.appendChild(renderKV("version", mso.version));
       if (mso.digestAlgorithm) el.appendChild(renderKV("digestAlgorithm", mso.digestAlgorithm));
       if (mso.valueDigests) {
@@ -944,8 +888,6 @@
     appendSection("deviceSigned.deviceAuth", deviceAuth, data.deviceAuth || {});
   }
 
-  // One disclosed element: the value, and the salt and digest that make
-  // withholding the others possible.
   function renderIssuerSignedItem(item) {
     const wrap = document.createElement("div");
     wrap.className = "mdoc-item";
@@ -982,7 +924,6 @@
     return wrap;
   }
 
-  // UI helpers
   function appendSection(title, contentEl, copyData, sectionId) {
     const section = document.createElement("div");
     section.className = "section";
@@ -1001,7 +942,6 @@
     header.appendChild(arrow);
     header.appendChild(titleSpan);
 
-    // Copy button
     if (copyData !== undefined) {
       const copyBtn = document.createElement("button");
       copyBtn.className = "copy-btn";
@@ -1034,7 +974,6 @@
       arrow.classList.toggle("collapsed", collapsed);
     });
 
-    // Bidirectional hover: output section → colorized input span(s)
     if (sectionId) {
       section.addEventListener("mouseenter", () => {
         section.classList.add("highlight");
@@ -1200,9 +1139,8 @@
     return wrap;
   }
 
-  // A claim value can be kilobytes (a portrait is the everyday case). Showing
-  // all of it buries the rest of the section and lays out one line thousands of
-  // pixels wide, so the head of it stands in until asked for the rest.
+  // Truncate long values such as portraits until expanded so they do not hide the rest of
+  // the output.
   const MAX_INLINE_VALUE_CHARS = 300;
 
   function createEmbeddedValueElement(value, opts) {
@@ -1262,7 +1200,6 @@
     });
     wrap.appendChild(toggle);
 
-    // An image claim is the one long value a reader can actually read.
     const image = imageDataURL(value);
     if (image) {
       const img = document.createElement("img");
@@ -1276,7 +1213,7 @@
     return wrap;
   }
 
-  // Only base64 data URLs, which is the form a credential carries an image in.
+  // Accept only Base64 image data URLs.
   const IMAGE_DATA_URL_RE = /^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/i;
 
   function imageDataURL(value) {
@@ -1327,10 +1264,8 @@
     }
   }
 
-  // Real mDOC structures are at least hundreds of bytes. The length floor
-  // keeps short base64url blobs (sd_hash and other 32-byte digests, whose
-  // random first byte often happens to look like a CBOR marker) from being
-  // rendered as clickable embedded credentials.
+  // Require enough bytes to distinguish embedded mdocs from short digests with a similar
+  // CBOR marker.
   const MDOC_MIN_BYTES = 64;
 
   function looksLikeMDOC(text) {
@@ -1376,7 +1311,6 @@
     return major === 4 || major === 5 || major === 6;
   }
 
-  // JSON syntax highlighting: strings, keys, booleans, null, numbers
   var JSON_TOKEN_RE = /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g;
 
   function syntaxHighlight(json) {
@@ -1399,9 +1333,7 @@
     return renderJSONBlock(obj);
   }
 
-  // Escapes for both element content and quoted attribute values. A
-  // textContent round-trip leaves " and ' intact, which is not enough for a
-  // value that lands inside an attribute.
+  // Escape quotes too because values appear in HTML attributes.
   function escapeHtml(str) {
     return String(str === undefined || str === null ? "" : str)
       .replace(/&/g, "&amp;")
@@ -1411,12 +1343,10 @@
       .replace(/'/g, "&#39;");
   }
 
-  // Pre-fill: check ?credential= query param, then /api/prefill
   function prefill(credential) {
     applyCredential(credential);
   }
 
-  // Update keyboard shortcut hints for platform
   const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
   const mod = isMac ? "\u2318" : "Ctrl";
   const hintEl = document.querySelector(".shortcut-hint .kbd-hints");
@@ -1438,8 +1368,8 @@
     applyCredential(credential);
   });
 
-  // ?id= names a credential held by the wallet this decoder is mounted on,
-  // which keeps a link short. Anything else is carried in the link itself.
+  // A mounted decoder can use a wallet credential ID. Other links carry the credential
+  // itself.
   function loadWalletCredential(id) {
     return fetch(basePath + "api/credentials/" + encodeURIComponent(id))
       .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
@@ -1474,7 +1404,6 @@
       .catch(() => {});
   }
 
-  // Get the CLI modal (same behavior as the wallet UI)
   const cliOverlay = document.getElementById("cli-overlay");
   document.getElementById("get-cli-link").addEventListener("click", (event) => {
     event.preventDefault();
@@ -1484,7 +1413,6 @@
     cliOverlay.classList.remove("active");
   });
 
-  // Footer: version + imprint link (basePath-relative so the /decoder mount works)
   fetch(basePath + "api/meta")
     .then((res) => res.json())
     .then((meta) => {
@@ -1498,8 +1426,6 @@
       }
       if (meta.wallet) {
         const walletLink = document.getElementById("wallet-link");
-        // "Demo wallet" only where it is one. A decoder mounted on somebody's
-        // local wallet should not call it a demo.
         walletLink.textContent = meta.demo ? "Demo wallet" : "Wallet";
         walletLink.hidden = false;
       }

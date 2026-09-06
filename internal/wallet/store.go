@@ -38,45 +38,36 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
-// WalletStore persists the wallet through the storage layer: wallet.json
-// (one entity per blob under state/ on the memory and database backends, see
-// store_entities.go), the key and certificate PEMs, assets/ and templates/
-// under the wallet's prefix, and the shared CA one level up.
+// WalletStore uses wallet.json on the file backend and separate entities under state/
+// on memory and Postgres. Keys, certificates, assets and templates use the wallet
+// prefix. The shared CA uses its parent prefix.
 type WalletStore struct {
-	// Dir is the wallet's directory. On the file backend it is where the
-	// files are. On every backend it identifies the wallet: the instance
-	// registry and the remote CLI find a served wallet by it.
+	// Dir identifies the wallet for the instance registry and remote CLI on every
+	// backend. On the file backend it is also the storage directory.
 	Dir string
 
 	backend storage.Store
-	// prefix is the wallet's key prefix (Dir's base name on the file backend,
-	// Dir relative to the state directory elsewhere, see walletKeyPrefix).
-	// sharedPrefix is the prefix one level up, where the CA lives.
+	// prefix identifies the wallet's keys. sharedPrefix identifies the parent prefix
+	// holding the shared CA. See walletKeyPrefix.
 	prefix       string
 	sharedPrefix string
 
-	// seed derives the keys this store generates. Empty generates at random.
+	// An empty seed generates random keys.
 	seed mock.Seed
 
-	// saveMu orders the writers of wallet.json. Save snapshots the wallet and
-	// then writes the blob, and without the mutex a save that snapshotted
-	// earlier can write later, so the blob silently loses whatever only the
-	// newer snapshot had. The next reload then makes the loss permanent. The
-	// server's own lock does not cover every writer: the log sink and the
-	// demo issuer save through their own callbacks.
+	// Serialize snapshots and writes so an older snapshot cannot overwrite a newer
+	// save. This also protects log and demo issuer callbacks outside the server lock.
 	saveMu sync.Mutex
 
-	// saveDelay widens the snapshot-to-write window in tests. Nil otherwise.
+	// Tests use this hook to pause between taking a snapshot and writing it.
 	saveDelay func()
 
-	// saves counts the entity saves, so the stored log is trimmed every
-	// logTrimEvery of them.
+	// Used to trim the entity log every logTrimEvery saves.
 	saves int
 }
 
 var walletRuntimeRegistry sync.Map
 
-// walletJSON is the stored format of wallet.json.
 type walletJSON struct {
 	Credentials        []StoredCredential      `json:"credentials"`
 	IssuedAttestations []IssuedAttestationSpec `json:"issued_attestations,omitempty"`
@@ -88,20 +79,18 @@ type walletJSON struct {
 	IssuerURL          string                  `json:"issuer_url,omitempty"`
 	Port               int                     `json:"port,omitempty"`
 
-	// LegacyPendingIssuances reads the field's earlier name, so deferred
-	// credentials recorded under it are still collected. Only the current name
-	// is written, so one save migrates the file.
+	// Read the old field name so existing deferred issuances can still be collected.
+	// Saves use only the current name.
 	LegacyPendingIssuances []DeferredIssuance `json:"pending_issuances,omitempty"`
 }
 
-// DefaultWalletDir returns the default wallet storage directory inside the
-// tool's state directory (~/.eudi-dev, with a legacy ~/.oid4vc-dev fallback).
+// DefaultWalletDir uses ~/.eudi-dev/wallet, with a fallback to the former ~/.oid4vc-dev
+// location.
 func DefaultWalletDir() string {
 	return filepath.Join(config.BaseDir(), "wallet")
 }
 
-// ResolveWalletDir returns the absolute wallet directory, the default when
-// dir is empty.
+// ResolveWalletDir selects the default directory when dir is empty.
 func ResolveWalletDir(dir string) string {
 	if dir == "" {
 		dir = DefaultWalletDir()
@@ -112,15 +101,11 @@ func ResolveWalletDir(dir string) string {
 	return dir
 }
 
-// NewWalletStore returns the store for a wallet directory (the default
-// directory when dir is empty). The backend comes from EUDI_DEV_STORAGE,
-// files when the variable is unset.
+// NewWalletStore reads its backend from EUDI_DEV_STORAGE. An unset variable uses files.
 func NewWalletStore(dir string) *WalletStore {
 	return NewWalletStoreOn(dir, storage.FromEnv(storageOptions(dir)))
 }
 
-// OpenWalletStore returns the store for a wallet directory on the backend
-// given by spec (see storage.Open).
 func OpenWalletStore(dir, spec string) (*WalletStore, error) {
 	backend, err := storage.Open(spec, storageOptions(dir))
 	if err != nil {
@@ -129,16 +114,13 @@ func OpenWalletStore(dir, spec string) (*WalletStore, error) {
 	return NewWalletStoreOn(dir, backend), nil
 }
 
-// storageOptions describes the wallet directory for storage.Open. An explicit
-// dir, or a state directory set through the environment, counts as a
-// requested location for "auto".
+// An explicit wallet directory or state directory counts as a requested location when
+// resolving auto storage.
 func storageOptions(dir string) storage.Options {
 	requested := dir != "" || os.Getenv("EUDI_DEV_HOME") != "" || os.Getenv("OID4VC_DEV_HOME") != ""
 	return storage.Options{Root: filepath.Dir(ResolveWalletDir(dir)), RootRequested: requested}
 }
 
-// NewWalletStoreOn returns the store for a wallet directory inside the given
-// backend.
 func NewWalletStoreOn(dir string, backend storage.Store) *WalletStore {
 	dir = ResolveWalletDir(dir)
 	prefix := filepath.Base(dir)
@@ -154,16 +136,14 @@ func NewWalletStoreOn(dir string, backend storage.Store) *WalletStore {
 	return store
 }
 
-// SeedEnvVar is the environment variable with the key seed. "auto" means the
-// built-in seed on the memory backend and random keys elsewhere.
+// SeedEnvVar accepts auto to seed memory storage while other backends generate random
+// keys.
 const SeedEnvVar = "EUDI_DEV_SEED"
 
-// defaultSeed is the image's seed, and the one "auto" applies on the memory
-// backend. It is public.
+// The built-in seed is public. It is used by the image and by auto on memory storage.
 const defaultSeed = "eudi-dev"
 
-// SetSeed derives the keys this store generates from seed (see SeedEnvVar).
-// An empty seed generates at random.
+// SetSeed selects random keys when the seed is empty.
 func (s *WalletStore) SetSeed(seed string) {
 	if seed == "auto" {
 		seed = ""
@@ -174,17 +154,14 @@ func (s *WalletStore) SetSeed(seed string) {
 	s.seed = mock.Seed(seed)
 }
 
-// Seeded reports whether generated keys derive from a seed.
 func (s *WalletStore) Seeded() bool {
 	return len(s.seed) > 0
 }
 
-// BuiltInSeedSource is what SeedSource returns for the image's public seed.
 const BuiltInSeedSource = "built-in seed"
 
-// SeedSource says where the seed came from, for the startup summary: ""
-// without a seed, "seed" for a caller's and BuiltInSeedSource for the
-// image's.
+// SeedSource returns an empty string without a seed, seed for a custom seed, or
+// BuiltInSeedSource for the public image seed.
 func (s *WalletStore) SeedSource() string {
 	switch string(s.seed) {
 	case "":
@@ -196,10 +173,9 @@ func (s *WalletStore) SeedSource() string {
 	}
 }
 
-// walletKeyPrefix is the key prefix of a wallet in a backend without
-// directories: the wallet directory relative to the state directory when it
-// lies inside it, else its absolute path in slash form without the leading
-// separator. The default wallet is "wallet" on every machine.
+// Use the wallet path relative to the state directory when possible. Otherwise use its
+// absolute path with forward slashes and no leading separator. The default wallet
+// prefix is wallet on every machine.
 func walletKeyPrefix(dir string) string {
 	base := filepath.Dir(ResolveWalletDir(""))
 	if rel, err := filepath.Rel(base, dir); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, "../") {
@@ -212,23 +188,18 @@ func walletKeyPrefix(dir string) string {
 	return strings.TrimPrefix(slash, "/")
 }
 
-// Backend returns the storage layer this store writes through.
 func (s *WalletStore) Backend() storage.Store {
 	return s.backend
 }
 
-// Location describes where the wallet lives, for messages: the directory on
-// the file backend, the backend and the prefix otherwise.
 func (s *WalletStore) Location() string {
 	return s.backend.Locate(s.prefix)
 }
 
-// Templates returns where this wallet's user templates live.
 func (s *WalletStore) Templates() credtemplate.Location {
 	return credtemplate.Location{Store: s.backend, Prefix: s.key("templates")}
 }
 
-// Exists reports whether the wallet has been saved at least once.
 func (s *WalletStore) Exists() bool {
 	if s.entityMode() {
 		names, err := s.backend.List(s.stateKey(revisionSection))
@@ -243,32 +214,26 @@ func (s *WalletStore) runtime() *WalletRuntime {
 	return runtime.(*WalletRuntime)
 }
 
-// key returns the store key of a blob inside the wallet.
 func (s *WalletStore) key(parts ...string) string {
 	return path.Join(append([]string{s.prefix}, parts...)...)
 }
 
 func (s *WalletStore) walletKey() string { return s.key("wallet.json") }
 
-// WalletStamp returns wallet.json's change stamp, or ok=false when the wallet
-// has not been saved.
+// WalletStamp returns ok=false when the wallet has never been saved.
 func (s *WalletStore) WalletStamp() (storage.Stamp, bool) {
 	return s.backend.Stat(s.walletKey())
 }
 
-// assetKey returns the key of a display image referenced from wallet.json,
-// kept beside it so a credential's card art does not bloat the document the
-// wallet reparses on every request.
+// Store display images separately so reloading wallet state does not also parse image
+// data.
 func (s *WalletStore) assetKey(name string) string {
 	return s.key("assets", name)
 }
 
-// storeDisplayAsset writes a data-URI display image as a content-addressed
-// asset and returns a reference of the form "asset:<sha256>.<ext>". A value
-// that is not a data URI (an already-stored reference, or an external URL) is
-// returned unchanged with converted=false, so it can run on every save.
-// Content addressing dedupes the baseline art a demo re-issues and makes an
-// asset immutable, so a reference stays valid across a shared, reloaded store.
+// Store images by their content hash and return an asset:<sha256>.<ext> reference.
+// Identical images share one immutable asset. Existing references and external URLs
+// pass through unchanged, allowing this conversion on every save.
 func (s *WalletStore) storeDisplayAsset(uri string) (ref string, converted bool) {
 	contentType, data, ok := dataURIImage(uri)
 	if !ok {
@@ -286,13 +251,12 @@ func (s *WalletStore) storeDisplayAsset(uri string) (ref string, converted bool)
 	return "asset:" + name, true
 }
 
-// ReadDisplayAsset returns the bytes and content type of a stored display asset,
-// or ok=false when the reference is not an asset reference or the asset is
-// missing. The image-serving endpoint uses it.
+// ReadDisplayAsset returns ok=false for missing assets and references that do not identify
+// assets.
 func (s *WalletStore) ReadDisplayAsset(ref string) (contentType string, data []byte, ok bool) {
 	name, found := strings.CutPrefix(ref, "asset:")
-	// The name is a hash and an extension the store wrote, but the read is
-	// guarded anyway so a reference can never reach outside the assets.
+	// Restrict reads to the asset directory even though generated names contain only a
+	// hash and extension.
 	if !found || name == "" || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
 		return "", nil, false
 	}
@@ -303,12 +267,9 @@ func (s *WalletStore) ReadDisplayAsset(ref string) (contentType string, data []b
 	return assetContentType(name), data, true
 }
 
-// PruneUnreferencedAssets deletes display assets that no credential in
-// wallet.json references. It reads the current wallet.json under saveMu, so it
-// never races a save that is adding a reference (or an asset), and content
-// addressing means a re-issued image rewrites the same asset. A leftover asset
-// is harmless, so errors are ignored. The demo reset calls it, since clearing
-// the baseline orphans the assets of whatever was issued since the last reset.
+// PruneUnreferencedAssets reads current references under saveMu to avoid racing saves.
+// Demo resets use this to remove orphaned assets. Ignore errors because unused assets are
+// harmless.
 func (s *WalletStore) PruneUnreferencedAssets() {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
@@ -359,7 +320,6 @@ func (s *WalletStore) storedCredentials() ([]StoredCredential, error) {
 	return wj.Credentials, nil
 }
 
-// assetExtension maps an image content type to a file extension.
 func assetExtension(contentType string) string {
 	switch contentType {
 	case "image/png":
@@ -377,7 +337,6 @@ func assetExtension(contentType string) string {
 	}
 }
 
-// assetContentType maps a stored asset name back to its content type.
 func assetContentType(name string) string {
 	switch {
 	case strings.HasSuffix(name, ".png"):
@@ -413,8 +372,7 @@ func (s *WalletStore) legacyTLSKeyPEM() string { return s.key("issuer-tls-key.pe
 
 func (s *WalletStore) logCleanMarkerKey() string { return s.key("wallet-log-cleaned-at") }
 
-// LoadOrCreate loads the wallet, or creates a new empty wallet if none exists.
-// Keys are loaded or auto-generated as needed.
+// LoadOrCreate loads missing keys or generates them for a new wallet.
 func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
 	holderKey, issuerKey, err := s.LoadOrCreateKeys()
 	if err != nil {
@@ -468,7 +426,7 @@ func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
 	return w, nil
 }
 
-// rehydrate restores the credential fields that are not stored from Raw.
+// Restore parsed fields from Raw because they are not serialized.
 func rehydrate(w *Wallet) {
 	for i := range w.Credentials {
 		if err := w.Credentials[i].Rehydrate(); err != nil {
@@ -477,7 +435,6 @@ func rehydrate(w *Wallet) {
 	}
 }
 
-// Save persists the wallet state.
 func (s *WalletStore) Save(w *Wallet) error {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
@@ -519,10 +476,8 @@ func (s *WalletStore) Save(w *Wallet) error {
 	return nil
 }
 
-// withStoredAssets moves any embedded display image out of the credentials
-// into the assets, leaving a reference in its place. It works on the copy
-// it is given, so the in-memory wallet is untouched until a reload picks up
-// the references.
+// Replace embedded display images with asset references in the supplied copy. The live
+// wallet keeps its current values until reloaded.
 func (s *WalletStore) withStoredAssets(creds []StoredCredential) []StoredCredential {
 	for i := range creds {
 		if creds[i].Display == nil {
@@ -540,7 +495,6 @@ func (s *WalletStore) withStoredAssets(creds []StoredCredential) []StoredCredent
 	return creds
 }
 
-// ClearLog removes all persisted wallet activity log entries.
 func (s *WalletStore) ClearLog() error {
 	w, err := s.LoadOrCreate()
 	if err != nil {
@@ -586,7 +540,6 @@ func (s *WalletStore) writeLogCleanMarker(cleanedAt time.Time) error {
 	return err
 }
 
-// LoadOrCreateKeys loads the holder and issuer keys, generating them if they don't exist.
 func (s *WalletStore) LoadOrCreateKeys() (*ecdsa.PrivateKey, *ecdsa.PrivateKey, error) {
 	holderKey, err := s.loadOrGenerateKey(s.key("holder.pem"), "holder")
 	if err != nil {
@@ -601,9 +554,8 @@ func (s *WalletStore) LoadOrCreateKeys() (*ecdsa.PrivateKey, *ecdsa.PrivateKey, 
 	return holderKey, issuerKey, nil
 }
 
-// LoadOrCreateSharedCA loads the shared wallet CA or creates it. Two servers
-// starting on one empty backend create the key with WriteIf, so one of them
-// wins and the other waits for the winner's certificate.
+// LoadOrCreateSharedCA uses WriteIf so concurrent creators choose one CA key. The other
+// server waits for the matching certificate.
 func (s *WalletStore) LoadOrCreateSharedCA() (*ecdsa.PrivateKey, *x509.Certificate, error) {
 	for attempt := 0; ; attempt++ {
 		keyData, keyErr := s.backend.Read(s.sharedCAKeyPEM())
@@ -648,7 +600,7 @@ func (s *WalletStore) LoadOrCreateSharedCA() (*ecdsa.PrivateKey, *x509.Certifica
 		return caKey, caCert, nil
 	}
 
-	// What is stored is not a usable CA. It is replaced.
+	// Replace the stored CA if it is unusable.
 	caKey, caCert, err := s.generateCA()
 	if err != nil {
 		return nil, nil, err
@@ -674,7 +626,6 @@ func (s *WalletStore) generateCA() (*ecdsa.PrivateKey, *x509.Certificate, error)
 	return caKey, caCert, nil
 }
 
-// LoadOrCreateSharedCACertificatePEM returns the shared wallet CA certificate PEM.
 func (s *WalletStore) LoadOrCreateSharedCACertificatePEM() ([]byte, error) {
 	if _, _, err := s.LoadOrCreateSharedCA(); err != nil {
 		return nil, err
@@ -686,8 +637,7 @@ func (s *WalletStore) LoadOrCreateSharedCACertificatePEM() ([]byte, error) {
 	return certPEM, nil
 }
 
-// LoadOrCreateIssuerTLSCertificate loads the issuer HTTPS certificate, or
-// generates and persists a new one if none exists or it no longer matches the
+// LoadOrCreateIssuerTLSCertificate replaces certificates that no longer match the
 // requested host.
 func (s *WalletStore) LoadOrCreateIssuerTLSCertificate(serverName string) (tls.Certificate, error) {
 	certPEM, keyPEM, err := s.loadIssuerTLSCertificatePEM(serverName)
@@ -702,14 +652,10 @@ func (s *WalletStore) LoadOrCreateIssuerTLSCertificate(serverName string) (tls.C
 	return cert, nil
 }
 
-// LoadOrCreateIssuerTLSCertificateForURL resolves the host from the issuer URL and
-// loads or creates a matching issuer HTTPS certificate.
 func (s *WalletStore) LoadOrCreateIssuerTLSCertificateForURL(issuerURL string) (tls.Certificate, error) {
 	return s.LoadOrCreateIssuerTLSCertificate(parseIssuerHost(issuerURL))
 }
 
-// LoadOrCreateIssuerTLSCertificatePEM returns the persisted issuer HTTPS certificate PEM,
-// generating it first if needed.
 func (s *WalletStore) LoadOrCreateIssuerTLSCertificatePEM(serverName string) ([]byte, error) {
 	certPEM, _, err := s.loadIssuerTLSCertificatePEM(serverName)
 	if err != nil {
@@ -718,8 +664,6 @@ func (s *WalletStore) LoadOrCreateIssuerTLSCertificatePEM(serverName string) ([]
 	return certPEM, nil
 }
 
-// LoadOrCreateIssuerTLSLeafCertificatePEM returns only the leaf PEM certificate
-// for the wallet HTTPS server.
 func (s *WalletStore) LoadOrCreateIssuerTLSLeafCertificatePEM(serverName string) ([]byte, error) {
 	certPEM, err := s.LoadOrCreateIssuerTLSCertificatePEM(serverName)
 	if err != nil {
@@ -728,14 +672,10 @@ func (s *WalletStore) LoadOrCreateIssuerTLSLeafCertificatePEM(serverName string)
 	return firstCertificatePEM(certPEM)
 }
 
-// LoadOrCreateIssuerTLSCertificatePEMForURL resolves the host from the issuer URL and
-// returns the matching persisted issuer HTTPS certificate PEM.
 func (s *WalletStore) LoadOrCreateIssuerTLSCertificatePEMForURL(issuerURL string) ([]byte, error) {
 	return s.LoadOrCreateIssuerTLSCertificatePEM(parseIssuerHost(issuerURL))
 }
 
-// LoadOrCreateIssuerTLSLeafCertificatePEMForURL resolves the host from the issuer URL and
-// returns only the leaf PEM certificate for the wallet HTTPS server.
 func (s *WalletStore) LoadOrCreateIssuerTLSLeafCertificatePEMForURL(issuerURL string) ([]byte, error) {
 	return s.LoadOrCreateIssuerTLSLeafCertificatePEM(parseIssuerHost(issuerURL))
 }
@@ -780,14 +720,14 @@ func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []
 		return nil, nil, err
 	}
 	if !errors.Is(keyErr, fs.ErrNotExist) {
-		// The stored pair does not fit serverName and is replaced.
+		// Replace the stored pair when it does not match serverName.
 		if err := s.saveIssuerTLSPEM(certPEM, keyPEM); err != nil {
 			return nil, nil, err
 		}
 		return certPEM, keyPEM, nil
 	}
-	// Two servers creating the pair at once: WriteIf makes one of them win
-	// the key, and the other reads the winner's pair back.
+	// WriteIf selects one key during concurrent creation. Other servers read that
+	// key's certificate.
 	_, err = s.backend.WriteIf(s.tlsKeyPEM(), keyPEM, 0o600, "")
 	if errors.Is(err, storage.ErrConflict) {
 		for attempt := 0; attempt < 50; attempt++ {
@@ -851,7 +791,6 @@ func issuerTLSCertificateMatches(cert tls.Certificate, serverName string, caCert
 	return true
 }
 
-// loadOrGenerateKey loads the PEM key stored at the given key, or generates and saves a new one.
 func (s *WalletStore) loadOrGenerateKey(at, label string) (*ecdsa.PrivateKey, error) {
 	data, err := s.backend.Read(at)
 	if err == nil {
@@ -866,8 +805,7 @@ func (s *WalletStore) loadOrGenerateKey(at, label string) (*ecdsa.PrivateKey, er
 	if err != nil {
 		return nil, fmt.Errorf("generating %s key: %w", label, err)
 	}
-	// Another server generating the same key at the same time wins, and
-	// its key is the one used.
+	// Use the key already saved by a concurrent creator.
 	_, err = s.backend.WriteIf(at, keyPEM(key), 0o600, "")
 	if errors.Is(err, storage.ErrConflict) {
 		data, err := s.backend.Read(at)
@@ -884,14 +822,12 @@ func (s *WalletStore) loadOrGenerateKey(at, label string) (*ecdsa.PrivateKey, er
 	return key, nil
 }
 
-// parsePEMKey parses an EC private key from PEM data.
 func parsePEMKey(data []byte, label string) (*ecdsa.PrivateKey, error) {
 	block, _ := pem.Decode(data)
 	if block == nil {
 		return nil, fmt.Errorf("%s key: no PEM block found", label)
 	}
 
-	// Try PKCS#8 first
 	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err == nil {
 		if ecKey, ok := key.(*ecdsa.PrivateKey); ok {
@@ -900,7 +836,6 @@ func parsePEMKey(data []byte, label string) (*ecdsa.PrivateKey, error) {
 		return nil, fmt.Errorf("%s key: not an EC key", label)
 	}
 
-	// Try EC key
 	ecKey, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
 		return nil, fmt.Errorf("%s key: unable to parse PEM: %w", label, err)
@@ -920,13 +855,11 @@ func parsePEMCertificate(data []byte, label string) (*x509.Certificate, error) {
 	return cert, nil
 }
 
-// saveKeyPEM stores an EC private key as PEM.
 func (s *WalletStore) saveKeyPEM(at string, key *ecdsa.PrivateKey) error {
 	_, err := s.backend.Write(at, keyPEM(key), 0o600)
 	return err
 }
 
-// keyPEM encodes an EC private key as PEM.
 func keyPEM(key *ecdsa.PrivateKey) []byte {
 	der, err := x509.MarshalECPrivateKey(key)
 	if err != nil {

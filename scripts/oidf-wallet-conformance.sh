@@ -14,24 +14,20 @@ fi
 PORT=${PORT:-$(pick_port_pair)}
 RUN_DIR=${OIDF_RUN_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/oidf-wallet-conformance.XXXXXX")}
 WALLET_DIR=${OIDF_WALLET_DIR:-"$RUN_DIR/wallet"}
-# An explicit OIDF_WALLET_URL names an externally managed wallet (for example
-# the strict conformance host, see docs/conformance-run.md). The wrapper then
-# drives that wallet over its API instead of starting one.
+# OIDF_WALLET_URL selects an externally managed wallet, so the wrapper does not start one.
 WALLET_MANAGED=1
 if [ -n "${OIDF_WALLET_URL:-}" ]; then
   WALLET_MANAGED=0
 fi
-# The managed wallet registers in its own home, so a `wallet kill --all` or
-# `wallet use` in the user's default home leaves the run alone.
+# Use a separate home so ordinary instance commands do not stop or reconfigure the test
+# wallet.
 if [ "$WALLET_MANAGED" = "1" ]; then
   EUDI_DEV_HOME=${EUDI_DEV_HOME:-"$RUN_DIR/home"}
   export EUDI_DEV_HOME
 fi
 WALLET_URL=${OIDF_WALLET_URL:-"http://127.0.0.1:${PORT}"}
-# A hosted suite fetches the wallet's status list itself, so the wallet needs
-# a public https base URL (a tunnel terminating TLS in front of $PORT). An
-# https base URL becomes the issuer origin, so status list and issuer
-# metadata live on it directly.
+# The hosted suite needs a public HTTPS origin to fetch wallet metadata and status lists.
+# A tunnel can terminate TLS in front of the local port.
 WALLET_BASE_URL=${OIDF_WALLET_BASE_URL:-}
 if [ -n "$WALLET_BASE_URL" ]; then
   WALLET_ISSUER_URL=${OIDF_WALLET_ISSUER_URL:-"${WALLET_BASE_URL%/}"}
@@ -115,10 +111,8 @@ python3 -m venv "$VENV_DIR"
 # the mdoc issuerAuth, cryptography checks the leaf against the CA).
 "$VENV_DIR/bin/pip" install --quiet cbor2 cryptography
 
-# The suite runs on this machine and competes with the wallet for it, so a
-# request it would normally answer at once can take tens of seconds under
-# load. Giving up costs the module and the flow cannot be resumed, so the
-# wallet's remote timeout is raised well above its default.
+# The local suite competes for CPU with the wallet. Raise the remote timeout because a
+# timed out flow cannot resume.
 EUDI_REMOTE_TIMEOUT=${EUDI_REMOTE_TIMEOUT:-120s}
 export EUDI_REMOTE_TIMEOUT
 
@@ -157,8 +151,7 @@ if [ "$WALLET_MANAGED" = "1" ]; then
     fi
     sleep 1
   done
-  # The shared CA is a file only on the file backend. The other backends
-  # (EUDI_DEV_STORAGE) hand it out over the API.
+  # Export the CA through the API when the backend does not store it as a file.
   if [ ! -f "$WALLET_CA_CERT" ]; then
     if ! curl -fsS "$WALLET_URL/api/certificates/ca" -o "$WALLET_CA_CERT"; then
       echo "error: could not fetch the wallet CA from $WALLET_URL/api/certificates/ca" >&2

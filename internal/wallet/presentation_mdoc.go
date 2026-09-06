@@ -28,17 +28,13 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/format"
 )
 
-// createMDocPresentation creates an mDoc DeviceResponse with selected data
-// elements. mdocNonce is the generated nonce of the response this document
-// belongs to. Empty means this document is the response and generates its
-// own.
+// An empty mdocNonce makes this document generate the nonce for its response.
+// Documents in a shared response receive the same nonce.
 func (w *Wallet) createMDocPresentation(cred StoredCredential, selectedKeys []string, params PresentationParams, mdocNonce string, signingKey *ecdsa.PrivateKey) (VPTokenResult, error) {
-	// ISO 18013-5 §9.1.2.4 makes the MSO deviceKey mandatory. Without one the
-	// DeviceSigned binds to a key the MSO never vouched for. The wallet builds
-	// the response anyway and warns, letting the verifier's refusal be the
-	// finding ([ADR-0001]).
-	//
-	// [ADR-0001]: docs/adr/0001-debug-by-default-validation-with-opt-in-strict-mode.md
+	// ISO 18013-5 §9.1.2.4 requires deviceKey in the MSO. Without it, the issuer has
+	// not bound the credential to the key used for DeviceSigned. Debug mode still
+	// builds the response and warns, so the verifier can report the problem. See
+	// docs/adr/0001-debug-by-default-validation-with-opt-in-strict-mode.md.
 	if !credentialHolderBinding(cred.Raw).Bound {
 		detail := fmt.Sprintf(
 			"mdoc %s names no MSO deviceKey (ISO 18013-5 §9.1.2.4 makes it mandatory), so its DeviceSigned binds to a key the issuer never vouched for and the verifier refuses this presentation.",
@@ -65,10 +61,9 @@ func (w *Wallet) createMDocPresentation(cred StoredCredential, selectedKeys []st
 		return VPTokenResult{}, fmt.Errorf("parsing IssuerSigned CBOR: %w", err)
 	}
 
-	// Each item's RawCBOR is the exact Tag-24 the issuer signed and the MSO
-	// digest covers, so a selected element goes out byte for byte. The parser
-	// skips unparseable items and drops repeated element identifiers, so the raw
-	// array cannot be indexed by position.
+	// RawCBOR preserves the exact Tag-24 bytes covered by the MSO digest. The parser
+	// skips invalid items and duplicate element identifiers, so positions in the
+	// parsed list may differ from the raw array.
 	filteredNS := make(map[string][]cbor.RawMessage)
 	for ns, items := range cred.NameSpaces {
 		var filtered []cbor.RawMessage
@@ -91,8 +86,7 @@ func (w *Wallet) createMDocPresentation(cred StoredCredential, selectedKeys []st
 
 	switch {
 	case mode != SessionTranscriptISO:
-		// Only the ISO transcript hashes it, and the result reports the
-		// nonce this document was actually signed over.
+		// Only the ISO transcript uses the generated nonce.
 		mdocNonce = ""
 	case mdocNonce == "":
 		generated, err := newMDocGeneratedNonce()
@@ -149,10 +143,8 @@ func (w *Wallet) createMDocPresentation(cred StoredCredential, selectedKeys []st
 	}, nil
 }
 
-// newMDocGeneratedNonce returns an mdoc generated nonce (ISO 18013-7 Annex
-// B). One belongs to a response rather than to a document: it is hashed into
-// every document's session transcript and travels once, in the apu of the
-// encrypted response.
+// ISO 18013-7 Annex B uses one generated nonce per response. Every document includes
+// it in its session transcript. The encrypted response carries it once in apu.
 func newMDocGeneratedNonce() (string, error) {
 	nonceBytes := make([]byte, 16)
 	if _, err := rand.Read(nonceBytes); err != nil {
@@ -164,9 +156,8 @@ func newMDocGeneratedNonce() (string, error) {
 // buildSessionTranscript constructs the SessionTranscript CBOR bytes using the
 // configured mode (ISO 18013-7 or OID4VP).
 func (w *Wallet) buildSessionTranscript(params PresentationParams, mdocNonce string, jwkThumbprint []byte) ([]byte, error) {
-	// Interactive Authorization has its own handover whichever transcript mode
-	// is configured (OpenID4VCI 1.1 Appendix A.2.5): the presentation is bound
-	// to the challenge endpoint, not to a client_id or a response_uri.
+	// Interactive Authorization uses the challenge endpoint in its handover regardless
+	// of the configured transcript mode (OpenID4VCI 1.1 Appendix A.2.5).
 	if isInteractiveAuthorizationResponseMode(params.ResponseMode) {
 		// A.2.5: "If the Response Mode is ia_post, the third element MUST be
 		// null", even where client_metadata carried an encryption key.
@@ -194,8 +185,6 @@ func (w *Wallet) buildSessionTranscript(params PresentationParams, mdocNonce str
 	}
 }
 
-// BuildOID4VCIIAESessionTranscript lets a verifier rebuild the value the
-// holder signed over.
 func BuildOID4VCIIAESessionTranscript(challengeEndpoint, nonce string, jwkThumbprint []byte) ([]byte, error) {
 	return buildSessionTranscriptOID4VCIIAE(challengeEndpoint, nonce, jwkThumbprint)
 }
@@ -257,8 +246,6 @@ func buildSessionTranscriptISO(clientID, responseURI, nonce, mdocNonce string) (
 	return cbor.Marshal(sessionTranscript)
 }
 
-// BuildOID4VPSessionTranscript exposes the OID4VP session transcript so a
-// verifier can rebuild the value the holder signed over.
 func BuildOID4VPSessionTranscript(clientID, nonce string, jwkThumbprint []byte, responseURI string) ([]byte, error) {
 	return buildSessionTranscriptOID4VP(clientID, nonce, jwkThumbprint, responseURI)
 }

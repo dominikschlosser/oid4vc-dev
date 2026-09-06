@@ -16,31 +16,26 @@
 // from JSON.
 package jsonutil
 
-// GetString returns the string value for key, or "" if missing or not a string.
 func GetString(m map[string]any, key string) string {
 	v, _ := m[key].(string)
 	return v
 }
 
-// GetStringOK returns the string value for key and whether it was present and a string.
 func GetStringOK(m map[string]any, key string) (string, bool) {
 	v, ok := m[key].(string)
 	return v, ok
 }
 
-// GetMap returns the nested map for key, or nil if missing or not a map.
 func GetMap(m map[string]any, key string) map[string]any {
 	v, _ := m[key].(map[string]any)
 	return v
 }
 
-// GetArray returns the slice for key, or nil if missing or not a slice.
 func GetArray(m map[string]any, key string) []any {
 	v, _ := m[key].([]any)
 	return v
 }
 
-// GetFloat64 returns the float64 value for key and whether it was present.
 func GetFloat64(m map[string]any, key string) (float64, bool) {
 	v, ok := m[key].(float64)
 	return v, ok

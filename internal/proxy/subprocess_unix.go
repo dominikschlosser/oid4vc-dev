@@ -26,7 +26,6 @@ func setProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
-// Stop sends SIGTERM to the subprocess process group.
 func (s *Subprocess) Stop() {
 	if s.cmd.Process == nil {
 		return

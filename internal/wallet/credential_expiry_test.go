@@ -23,9 +23,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// The two formats state their lifetime in different places. A caller deciding
-// whether to renew must not have to know which one it is holding, so both are
-// read here and a credential that states nothing is never treated as expiring.
+// Read expiry from both credential formats. Missing expiry must not count as due for
+// renewal.
 func TestCredentialExpiryReadsBothFormats(t *testing.T) {
 	w := generateTestWallet(t)
 
@@ -58,7 +57,6 @@ func TestCredentialExpiryReadsBothFormats(t *testing.T) {
 		if CredentialNeedsRenewal(cred, time.Now()) {
 			t.Errorf("%s: a credential valid for two hours was marked as needing renewal", name)
 		}
-		// Inside the margin it is due, just outside it is not.
 		if !CredentialNeedsRenewal(cred, expiry.Add(-renewalMargin/2)) {
 			t.Errorf("%s: a credential expiring within the margin was not marked for renewal", name)
 		}
@@ -77,11 +75,8 @@ func TestCredentialWithoutAStatedLifetimeNeverExpires(t *testing.T) {
 	}
 }
 
-// The list is newest first, so a freshly issued credential tops a list that
-// pages ten at a time, and stable, so the same list does not reorder itself
-// between two reads.
+// Sort newest first and preserve ties so repeated listings remain stable.
 func TestSortCredentialsNewestFirst(t *testing.T) {
-	// at signs a bare token whose only dated claim is iat.
 	at := func(unix int64) StoredCredential {
 		key, err := mock.GenerateKey()
 		if err != nil {
@@ -110,16 +105,12 @@ func TestSortCredentialsNewestFirst(t *testing.T) {
 		t.Fatalf("order = %v, want newest first", order)
 	}
 
-	// Sorting again must not move anything: an unstable order is what makes
-	// a list look like it shuffles itself.
 	SortCredentialsNewestFirst(creds)
 	if creds[0].ID != "c3000" || creds[2].ID != "c1000" {
 		t.Error("a second sort reordered an already sorted list")
 	}
 }
 
-// A credential imported in this process reports the iat it carries, and the
-// newest-first order follows it.
 func TestCredentialIssuedAt_ImportedCredentials(t *testing.T) {
 	w := generateTestWallet(t)
 	key, err := mock.GenerateKey()
@@ -150,8 +141,8 @@ func TestCredentialIssuedAt_ImportedCredentials(t *testing.T) {
 	}
 }
 
-// A credential that states no issuance time still has to appear, after the
-// ones that do, without disturbing its neighbours.
+// Keep credentials with no issuance time after dated credentials, preserving their
+// order.
 func TestSortCredentialsNewestFirst_UndatedGoLast(t *testing.T) {
 	key, err := mock.GenerateKey()
 	if err != nil {

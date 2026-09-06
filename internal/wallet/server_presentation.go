@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// The OID4VP endpoints: the authorization endpoint a verifier sends a
-// request to, and the API a caller submits one through.
-
 package wallet
 
 import (
@@ -27,24 +24,21 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/oid4vc"
 )
 
-// presentationRequestOptions carries the per-request knobs a presentation flow
-// still needs. Conformance (validation mode, HAIP, encrypted requests) is not
-// among them: it is process-level wallet state, changed only through the local
-// UI, so every request sees the same settings.
+// Conformance settings belong to the running wallet and apply to every request. Only
+// the options here can vary per presentation.
 type presentationRequestOptions struct {
 	AutoAccept        bool
 	SessionTranscript string
 }
 
-// handleAuthorize processes an OID4VP authorization request from query params or form data.
 func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	var authReq *AuthorizationRequestParams
 	var err error
 	var values map[string][]string
 
 	if r.Method == "GET" {
-		// A GET carries the request in the URI's query component, where "+"
-		// is a literal plus (RFC 3986), not the form encoding of a space.
+		// RFC 3986 treats + as a literal character in a URI query. Form encoding
+		// instead uses it for a space.
 		values = oid4vc.URIQueryValues(r.URL)
 	} else {
 		if parseErr := r.ParseForm(); parseErr != nil {
@@ -56,17 +50,15 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	authReq, err = parseAuthParams(values, s.parseOpts, s.wallet.Mode())
 
 	if err != nil {
-		// A request that cannot be parsed names a response endpoint the wallet
-		// has no reason to trust, so nothing is sent there (RFC 6749 §4.1.2.1,
-		// which §8.5 adopts). The caller is told instead.
+		// Report parsing failures to the caller. Do not send a response to an invalid
+		// request's destination (RFC 6749 §4.1.2.1, adopted by OpenID4VP §8.5).
 		http.Error(w, fmt.Sprintf("invalid authorization request: %v", err), http.StatusBadRequest)
 		return
 	}
 
 	authReq.BrowserRedirect = isBrowserNavigation(r)
-	// A browser reaching this endpoint may be the wallet's first contact with
-	// it, so the session is created on the response that redirects it to the UI
-	// and the request it creates belongs to that new session.
+	// This may be the browser's first request. Create its session before associating
+	// the consent request with it.
 	authReq.Session = requestOwner(r)
 	if authReq.BrowserRedirect && authReq.Session == "" {
 		authReq.Session = newBrowserSession(w, r, s.browserSecure(r))
@@ -74,7 +66,6 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	s.handleAuthFlow(w, authReq)
 }
 
-// handlePresentationAPI processes a presentation request URI via API.
 func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		URI               string `json:"uri"`
@@ -87,7 +78,7 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A new request makes any earlier failure stale, the same as for an offer.
+	// Clear the previous flow's error before starting a new request.
 	s.wallet.ClearLastError(callerOwners(r))
 
 	s.log("Received authorization request")
@@ -177,9 +168,8 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 		Session:          requestOwner(r),
 	}
 
-	// Validate here only to answer the API caller with a 400 on a hard failure.
-	// handleAuthFlow runs the same validation and logs the warnings, so logging
-	// them here too would double every warning for one request.
+	// Validate here to return HTTP 400 for fatal errors. handleAuthFlow logs warnings
+	// later, so logging here too would duplicate them.
 	vpMode, vpHAIP, _ := reqServer.wallet.ConformanceSettings()
 	if _, err := ValidateAuthorizationRequest(vpMode, vpHAIP, authReq); err != nil {
 		reqServer.log("  ERROR: %v", err)
@@ -194,8 +184,8 @@ func (s *Server) handlePresentationAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if body.Interactive {
-		// A scheme dispatch or another submitter acting for a user
-		// interaction: keep the consent dialog despite the API channel.
+		// Scheme dispatches still require interactive consent even though they use the
+		// API.
 		authReq.Source = "interactive"
 		s.noteStaleClient(r)
 	}
@@ -208,8 +198,8 @@ func cloneWalletForPresentation(src *Wallet, opts presentationRequestOptions) (*
 		return nil, fmt.Errorf("wallet is not initialized")
 	}
 
-	// Snapshot the runtime-mutable conformance fields under the lock: a local
-	// PUT /api/config/conformance can change them while this copy runs.
+	// Copy conformance settings under the lock because the configuration API can
+	// change them concurrently.
 	srcMode, srcHAIP, srcEncrypted := src.ConformanceSettings()
 
 	clone := &Wallet{
@@ -240,14 +230,14 @@ func cloneWalletForPresentation(src *Wallet, opts presentationRequestOptions) (*
 		logSink: func(entry LogEntry) {
 			src.appendLogEntry(entry)
 		},
-		// An issuance run on the clone must still land in the real wallet.
+		// Issuance on the clone must update the original wallet.
 		credentialSink: func(cred StoredCredential) {
 			src.mu.Lock()
 			src.Credentials = append(src.Credentials, cred)
 			src.mu.Unlock()
 		},
-		// A batch copy presented on the clone advances the rotation on the real
-		// wallet, which is what gets saved after the presentation.
+		// Update batch rotation on the original wallet so it is saved after
+		// presentation.
 		batchPresentedSink: func(id string) {
 			src.recordBatchPresentation(id)
 		},

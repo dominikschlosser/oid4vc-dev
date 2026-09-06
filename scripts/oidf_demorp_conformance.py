@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
 
-"""Run the official OIDF issuer and verifier plans against the demo issuer and
-demo verifier mounted on the local wallet server.
+"""Run OIDF issuer and verifier plans against the local demo services.
 
-The suite plays the wallet. The harness supplies what a human tester would:
-credential offers to the suite's credential_offer endpoint, the sign-in at the
-demo issuer's authorization page, one demo verifier request per verifier
-module, and the screenshot placeholders those modules end on. It also reads
-the demo verifier's verdict per module, which the suite cannot observe (its
-verifier modules end in REVIEW either way).
-"""
+The suite acts as the wallet. The harness provides offers, signs in at the issuer and submits verifier requests. It supplies screenshot placeholders and reads the demo verifier verdict because the suite ends verifier modules in REVIEW regardless of that result."""
 
 import argparse
 import html
@@ -56,16 +49,12 @@ OFFER_WAIT_LOG_MESSAGE = "Waiting for call to credential offer endpoint, see exp
 VCI_ISSUER_TEMPLATE = "scripts/test-configs-rp-against-op/vci-issuer-test-config-client_attestation-client-auth-dpop.json"
 VP_VERIFIER_TEMPLATE = "scripts/test-configs-rp-against-op/vp-verifier-test-config.json"
 
-# The credential configuration the demo issuer offers, and the type the demo
-# verifier asks the suite for. The suite's emulated wallet only holds the
-# country-independent PID as an SD-JWT VC (vct urn:eudi:pid:1) plus an mdoc
-# PID it signs on demand, so every verifier scenario asks for exactly that.
+# Request the country independent PID, which the suite supports as SD-JWT VC and mdoc.
 DEMO_CREDENTIAL_CONFIGURATION_ID = "demo-ticket"
 PID_VCT = "urn:eudi:pid:1"
 
-# A throwaway EC P-256 test key for the second client of the multiple-clients
-# module. The template ships an RSA key there, and the suite's key proof
-# generator signs ES256 with P-256 keys only.
+# Use a test P-256 key for the second client. The suite proof generator requires it for
+# ES256, but its template provides RSA.
 CLIENT2_JWK = {
     "kty": "EC",
     "crv": "P-256",
@@ -86,9 +75,8 @@ class DemoScenario:
     variant: dict[str, str]
     # modules limits the run to these test names. None runs the whole plan.
     modules: tuple[str, ...] | None = None
-    # offer_query parameterizes the demo offer of a vci issuer_initiated
-    # scenario (POST /issuer/api/offers?<offer_query>). None means the flow is
-    # wallet initiated and the suite never waits for an offer.
+        # offer_query configures issuer initiated offers. None selects wallet initiated
+    # issuance without an offer.
     offer_query: str | None = None
     # request_body creates the demo verifier request of a vp scenario
     # (POST /verifier/api/requests).
@@ -97,12 +85,8 @@ class DemoScenario:
 
 VCI_ISSUER_MODULE_BATCH = "oid4vci-1_0-issuer-batch-issuance"
 
-# Every module of the issuer plans that can run against the demo issuer. Three
-# stay out because the demo does not offer what they test, so they would skip
-# themselves (and run-test-plan counts a skip as a failure): the demo serves
-# unsigned issuer metadata (metadata-test-signed), requires no key attestation
-# (fail-invalid-key-attestation-signature), and advertises no credential
-# request or response encryption (fail-unsupported-encryption-algorithm).
+# Exclude unsupported signed metadata, key attestation and credential encryption modules.
+# They would skip themselves, which run-test-plan records as failure.
 VCI_ISSUER_MODULES = (
     "oid4vci-1_0-issuer-metadata-test",
     "oid4vci-1_0-issuer-happy-flow",
@@ -125,13 +109,9 @@ VCI_ISSUER_MODULES = (
 )
 
 
-# The client attestation negative modules under the pre-authorized code grant
-# trip a bug in suite release-v5.2.4: their processTokenEndpointResponse calls
-# fireTestFinished after the expected token refusal, but the surrounding
-# performPreAuthorizationCodeFlow keeps going into the credential request, and
-# the suite interrupts the module ("Condition called when test status is
-# 'WAITING'. This is a bug in the test module"). The same modules complete
-# under both authorization code flows, where the refusal happens at PAR.
+# Suite release-v5.2.4 continues credential issuance after the expected pre-authorized
+# token rejection and interrupts these modules. They complete under authorization code
+# flows, where rejection happens at PAR.
 VCI_PREAUTH_BROKEN_MODULES = frozenset(
     {
         "oid4vci-1_0-issuer-fail-invalid-client-attestation-signature",
@@ -145,9 +125,7 @@ VCI_PREAUTH_BROKEN_MODULES = frozenset(
 
 
 def vci_issuer_modules(flow_variant: str, grant: str = "authorization_code") -> tuple[str, ...]:
-    """The wallet initiated flow runs without a credential offer, and the demo
-    issuer signs one credential unless an offer asked for a batch, so the batch
-    module cannot be evaluated there and skips itself."""
+    """Wallet initiated issuance has no offer requesting a batch, so the demo issues one credential and the batch module skips."""
     modules = VCI_ISSUER_MODULES
     if flow_variant == "wallet_initiated":
         modules = tuple(m for m in modules if m != VCI_ISSUER_MODULE_BATCH)
@@ -207,9 +185,8 @@ def vp_modules_for_variant(variant: dict[str, str]) -> tuple[str, ...]:
         # fetch twice.
         modules.remove(VP_VERIFIER_MODULE_REQUEST_URI_FETCHED_TWICE)
     else:
-        # The module tests a verifier that asks for request_uri_method=post.
-        # The demo verifier serves its request objects over GET, so the module
-        # skips itself, and run-test-plan counts the skip as a failure.
+                # The demo serves request objects through GET. The POST module would skip, which
+        # the runner treats as failure.
         modules.remove(VP_VERIFIER_MODULE_REQUEST_URI_METHOD_POST)
     return tuple(modules)
 
@@ -227,9 +204,8 @@ def vp_scenario(slug: str, plan_name: str, variant: dict[str, str], request_body
 
 PID_SDJWT_REQUEST = {"type": "pid", "format": "sd-jwt"}
 PID_MDOC_REQUEST = {"type": "pid", "format": "mdoc"}
-# The unsigned-request scenario goes through the custom request builder: the
-# preset pid request always signs, and the redirect_uri prefix is only
-# reachable there (OpenID4VP 1.0 §5.9.3 pairs it with an unsigned request).
+# Use the custom builder for unsigned redirect_uri requests. The PID preset always signs
+# (OpenID4VP 1.0 §5.9.3).
 PID_SDJWT_UNSIGNED_REQUEST = {
     "type": "custom",
     "client_id_scheme": "redirect_uri",
@@ -300,12 +276,9 @@ def demo_scenarios() -> list[DemoScenario]:
             modules=vci_issuer_modules("issuer_initiated", "pre_authorization_code"),
             offer_query="batch=8",
         ),
-        # Only the VCI modules: the plan's appended FAPI2 Security Profile
-        # server suite exercises a full OAuth authorization server, and the
-        # demo issuer implements the minimal HAIP profile a wallet needs.
-        # Everything but the format and flow variant is pinned per module
-        # group inside the plan, and the runner instantiates each selected
-        # name once, under the first group that carries it.
+                # Run the VCI modules. The appended FAPI2 plans require a fuller authorization
+        # server. Other variants are fixed by module group, and the runner uses the first
+        # group containing each module.
         DemoScenario(
             slug="vci-issuer-haip",
             kind="vci",
@@ -383,8 +356,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def scenario_alias(args: argparse.Namespace, scenario: DemoScenario) -> str:
-    """Carries the wallet's port, so no two runs contend for the same suite
-    alias (an alias belongs to whichever test claimed it last)."""
+    """Include the wallet port in the suite alias to prevent separate runs from replacing each other's configuration."""
     port = urllib.parse.urlparse(args.wallet_url).port
     return f"oid4vc-dev-{scenario.slug}-{port or 'local'}"
 
@@ -447,10 +419,7 @@ def suite_get(url: str) -> None:
 
 
 def deliver_credential_offer(wallet_url: str, scenario: DemoScenario, alias: str) -> None:
-    """Creates a fresh demo offer and hands it to the suite's exposed
-    credential_offer endpoint, the way a wallet's deep link would receive it.
-    Delivered by value, since the suite requires a credential_offer_uri to be
-    https."""
+    """Send a new offer by value to the suite credential_offer endpoint. The suite requires HTTPS for offers by reference."""
     created = wallet_request(wallet_url, "POST", f"/issuer/api/offers?{scenario.offer_query}")
     offer = wallet_request(wallet_url, "GET", "/issuer/offer/" + created["id"])
     encoded = urllib.parse.quote(json.dumps(offer, separators=(",", ":")), safe="")
@@ -459,10 +428,7 @@ def deliver_credential_offer(wallet_url: str, scenario: DemoScenario, alias: str
 
 
 def submit_verifier_request(wallet_url: str, scenario: DemoScenario, alias: str) -> str:
-    """Creates a demo verifier request and delivers its authorization request
-    to the suite's authorization endpoint, standing in for the wallet the
-    openid4vp:// URI would have invoked. Returns the demo request id the
-    verdict is read from."""
+    """Create a demo verifier request and submit it to the suite authorization endpoint. Return the request ID used to read the verdict."""
     created = wallet_request(
         wallet_url, "POST", "/verifier/api/requests", scenario.request_body
     )
@@ -473,19 +439,16 @@ def submit_verifier_request(wallet_url: str, scenario: DemoScenario, alias: str)
 
 
 def unverified_opener() -> urllib.request.OpenerDirector:
-    # The login crosses two local TLS origins (the wallet CA behind the demo
-    # issuer, the suite's own certificate on the callback), so the opener
-    # skips verification the way the rest of the local harness does.
+        # Local redirects cross the wallet and suite TLS origins, whose certificates are not
+    # in the system truststore.
     context = ssl._create_unverified_context()
     return urllib.request.build_opener(urllib.request.HTTPSHandler(context=context))
 
 
 def complete_demo_login(authorize_url: str) -> None:
-    """Signs in at the demo issuer's authorization page as the demo account,
-    which sends the authorization code to the suite's callback. The callback
-    answers with the suite's implicit-submission page, whose script a browser
-    would run: it POSTs the URL fragment (empty for a query-mode response) to
-    the submission endpoint, and only that POST moves the module on."""
+    """Sign in as the demo account and follow the authorization callback.
+
+    The suite callback page normally posts its URL fragment to the submission endpoint. Reproduce that POST, including an empty fragment for query responses, to advance the module."""
     opener = unverified_opener()
     with opener.open(authorize_url, timeout=REQUEST_TIMEOUT) as resp:
         page = resp.read().decode("utf-8", errors="replace")
@@ -583,9 +546,8 @@ def handle_module(
         state["request_submitted"] = True
         state["demo_request_id"] = submit_verifier_request(wallet_url, scenario, alias)
 
-    # One offer per wait, counted from the suite's own log: a module can wait
-    # more than once (the multiple-clients module runs a second flow), and a
-    # pre-authorized code is single use, so every wait needs a fresh offer.
+        # Create an offer for each logged wait. Some modules run twice and pre-authorized
+    # codes can only be redeemed once.
     if scenario and alias and scenario.kind == "vci" and scenario.offer_query:
         waits = sum(1 for entry in logs if entry.get("msg") == OFFER_WAIT_LOG_MESSAGE)
         while state["offers_delivered"] < waits:

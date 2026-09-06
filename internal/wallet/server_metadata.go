@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// The documents the wallet publishes about itself: trust lists, issuer
-// metadata, registrar records and the status list.
-
 package wallet
 
 import (
@@ -29,7 +26,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/statuslist"
 )
 
-// handleTrustList generates and serves an ETSI trust list JWT from the wallet's issuer key.
 func (s *Server) handleTrustList(w http.ResponseWriter, r *http.Request) {
 	if len(s.wallet.CertChain) < 2 {
 		http.Error(w, "wallet has no CA certificate chain", http.StatusInternalServerError)
@@ -94,16 +90,9 @@ func (s *Server) handleJWTVCIssuerMetadata(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// handleOpenIDCredentialIssuerMetadata serves the Credential Issuer Metadata of
-// OpenID4VCI 1.0 §12.2.2 in whichever of the two forms the client asked for.
-//
-// The unsigned form is the one that must always be there: "The Credential
-// Issuer MUST support returning metadata in an unsigned form 'application/json'
-// and MAY support returning it in a signed form 'application/jwt'." Signed
-// metadata is served to a client whose Accept header asks for application/jwt
-// and nothing else, following the same section: "It is RECOMMENDED for
-// Credential Issuers to respond with a Content-Type matching to the Wallet's
-// requested Accept header when the requested content type is supported."
+// OpenID4VCI 1.0 §12.2.2 requires unsigned JSON metadata and permits signed JWT
+// metadata. Serve the signed form only when Accept requests application/jwt
+// exclusively.
 func (s *Server) handleOpenIDCredentialIssuerMetadata(w http.ResponseWriter, r *http.Request) {
 	issuer := strings.TrimRight(s.wallet.IssuerURL, "/")
 	if issuer == "" {
@@ -129,10 +118,8 @@ func (s *Server) handleOpenIDCredentialIssuerMetadata(w http.ResponseWriter, r *
 	w.Write([]byte(jwt))
 }
 
-// acceptsOnlySignedIssuerMetadata reports whether the client asked for the
-// signed form and no other. A client that accepts application/json, or anything
-// at all, gets the unsigned document: it is the form every issuer must serve
-// and every wallet must understand.
+// Clients that accept JSON or any media type receive unsigned metadata, the form
+// required by OpenID4VCI 1.0 §12.2.2.
 func acceptsOnlySignedIssuerMetadata(accept string) bool {
 	wantsJWT := false
 	for _, entry := range strings.Split(accept, ",") {
@@ -203,13 +190,9 @@ func (s *Server) handleRegistrarWRPByIdentifier(w http.ResponseWriter, r *http.R
 	w.Write([]byte(recordJWT))
 }
 
-// handleStatusList generates and serves the wallet's Status List Token, in
-// the JWT or the CWT representation depending on what the client asks for.
 func (s *Server) handleStatusList(w http.ResponseWriter, r *http.Request) {
-	// draft-ietf-oauth-status-list §8.1: the endpoint "SHOULD support the use
-	// of Cross-Origin Resource Sharing [...] to enable Browser-based clients
-	// to access it", such as the validate UI here. Only GET is routed here and
-	// Accept is CORS-safelisted, so no preflight is ever sent.
+	// draft-ietf-oauth-status-list §8.1 recommends CORS so browser clients can read
+	// status lists. GET with an Accept header needs no preflight.
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// §8.4 defines the time parameter for historical resolution: "If the
@@ -252,11 +235,9 @@ func (s *Server) handleStatusList(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(jwt))
 }
 
-// handleCRL serves the certificate revocation list of the wallet CA, the URL
-// the CRL distribution points of generated signing certificates name
-// (ISO/IEC 18013-5 Table B.3). Certificate-level revocation never happens
-// here (credential revocation runs over the status list), so the list is
-// empty and states that with a fresh signature.
+// Generated signing certificates reference this CRL (ISO/IEC 18013-5 Table B.3). The
+// wallet does not revoke certificates, so it signs an empty list. Credential
+// revocation uses the status list.
 func (s *Server) handleCRL(w http.ResponseWriter, r *http.Request) {
 	s.wallet.mu.RLock()
 	caKey := s.wallet.CAKey

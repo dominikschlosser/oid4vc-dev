@@ -11,13 +11,11 @@
   const timelineToggle = document.getElementById("timeline-toggle");
 
   let entries = [];
-  // Traffic the user cleared. The proxy keeps its own record, so without
-  // this the next resync would bring everything back.
+  // Remember cleared traffic locally so a server resync does not restore it.
   let clearedThroughID = 0;
   let showAll = false;
   let timelineView = localStorage.getItem("proxy-timeline") === "true";
 
-  // Theme toggle
   const savedTheme = localStorage.getItem("proxy-theme") || "dark";
   if (savedTheme === "light") document.documentElement.setAttribute("data-theme", "light");
 
@@ -32,7 +30,6 @@
     }
   });
 
-  // Show all toggle
   showAllCheckbox.checked = localStorage.getItem("proxy-show-all") === "true";
   showAll = showAllCheckbox.checked;
 
@@ -42,7 +39,6 @@
     renderEntries();
   });
 
-  // Clear
   clearBtn.addEventListener("click", function () {
     for (var i = 0; i < entries.length; i++) {
       if (entries[i].id > clearedThroughID) clearedThroughID = entries[i].id;
@@ -51,7 +47,6 @@
     renderEntries();
   });
 
-  // HAR export
   harExportBtn.addEventListener("click", function () {
     fetch("/api/har")
       .then(function (r) { return r.blob(); })
@@ -70,7 +65,6 @@
       });
   });
 
-  // Timeline toggle
   updateTimelineButton();
   timelineToggle.addEventListener("click", function () {
     timelineView = !timelineView;
@@ -106,9 +100,7 @@
     return d.toLocaleTimeString("en-GB", { hour12: false });
   }
 
-  // Escapes for both element content and quoted attribute values. A
-  // textContent round-trip leaves " and ' intact, which is not enough for a
-  // value that lands inside an attribute (proxied URLs do).
+  // Escape quotes too because proxied URLs appear in HTML attributes.
   function escapeHtml(s) {
     return String(s === undefined || s === null ? "" : s)
       .replace(/&/g, "&amp;")
@@ -243,8 +235,6 @@
 
     var frag = document.createDocumentFragment();
 
-    // Newest flow first, like the entry list. The entries inside one flow
-    // stay in the order they happened.
     flowOrder.reverse();
     standalone.reverse();
 
@@ -254,7 +244,6 @@
       var group = document.createElement("div");
       group.className = "flow-group";
 
-      // Determine flow type from first classified entry
       var flowType = "Flow";
       for (var j = 0; j < flowEntries.length; j++) {
         if (flowEntries[j].classLabel.startsWith("VP")) { flowType = "VP Flow"; break; }
@@ -311,7 +300,6 @@
     if (timelineView) {
       entriesEl.appendChild(renderFlowTimeline(visible));
     } else {
-      // Newest first, as the wallet's activity log reads.
       for (var i = visible.length - 1; i >= 0; i--) {
         entriesEl.appendChild(renderEntry(visible[i]));
       }
@@ -323,7 +311,6 @@
     if (!isVisible(entry)) return;
 
     if (timelineView) {
-      // Re-render to properly group
       renderEntries();
       return;
     }
@@ -335,10 +322,8 @@
     entriesEl.insertBefore(renderEntry(entry), entriesEl.firstChild);
   }
 
-  // Reads the entry list and adds whatever this page has not seen. It runs
-  // whenever the stream connects: at load, so nothing that arrived before
-  // the subscription is missed, and after a reconnect, so a gap in the
-  // stream does not silently swallow traffic.
+  // Fetch existing entries on every connection. SSE does not replay traffic missed before
+  // subscription or during disconnects.
   function syncEntries() {
     return fetch("/api/entries")
       .then(function (r) { return r.json(); })
@@ -357,8 +342,8 @@
           }
         }
         if (!added) return;
-        // Kept oldest first internally: the timeline reads it in order and
-        // the list renders it reversed.
+        // Store entries oldest first for the timeline. The list reverses them when
+        // rendering.
         entries.sort(function (a, b) { return a.id - b.id; });
         renderEntries();
       })
@@ -367,7 +352,6 @@
       });
   }
 
-  // SSE for live updates
   function connectSSE() {
     const es = new EventSource("/api/stream");
 

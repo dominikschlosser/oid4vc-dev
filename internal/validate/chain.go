@@ -25,7 +25,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/trustlist"
 )
 
-// ValidateCertChain verifies that the leaf certificate chains up to a trust list certificate.
 func ValidateCertChain(certs []*x509.Certificate, tlCerts []trustlist.CertInfo) (crypto.PublicKey, error) {
 	leaf := certs[0]
 
@@ -89,7 +88,6 @@ func X5CCertificates(header map[string]any) ([]*x509.Certificate, error) {
 	return parseX5CCerts(header)
 }
 
-// parseX5CCerts decodes the certificates of a JWT x5c header.
 func parseX5CCerts(header map[string]any) ([]*x509.Certificate, error) {
 	x5cRaw, ok := header["x5c"].([]any)
 	if !ok || len(x5cRaw) == 0 {
@@ -157,7 +155,6 @@ func parseMDOCX5ChainCerts(doc *mdoc.Document) ([]*x509.Certificate, error) {
 	// COSE x5chain label is 33
 	x5chainRaw, ok := doc.IssuerAuth.UnprotectedHeader[int64(33)]
 	if !ok {
-		// Try uint64 key variant
 		x5chainRaw, ok = doc.IssuerAuth.UnprotectedHeader[uint64(33)]
 		if !ok {
 			return nil, nil

@@ -24,8 +24,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// setupWalletWithCredential creates a temp wallet dir, generates a credential,
-// imports it, and returns the wallet dir and credential ID.
 func setupWalletWithCredential(t *testing.T) (string, string) {
 	t.Helper()
 	tmpDir := t.TempDir()

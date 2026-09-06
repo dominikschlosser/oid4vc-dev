@@ -117,7 +117,6 @@ func TestServerSetsForwardedPublicHost(t *testing.T) {
 }
 
 func TestServerEndToEnd(t *testing.T) {
-	// Create a target backend
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(200)
@@ -127,7 +126,6 @@ func TestServerEndToEnd(t *testing.T) {
 
 	targetURL, _ := url.Parse(backend.URL)
 
-	// Collect entries via a test writer
 	var captured []*TrafficEntry
 	writer := &testWriter{entries: &captured}
 
@@ -138,7 +136,6 @@ func TestServerEndToEnd(t *testing.T) {
 	}
 	srv := NewServer(cfg, writer)
 
-	// Make a request through the proxy
 	proxy := httptest.NewServer(srv)
 	defer proxy.Close()
 
@@ -207,7 +204,6 @@ func TestServerNilWriter(t *testing.T) {
 	proxy := httptest.NewServer(srv)
 	defer proxy.Close()
 
-	// Should not panic with nil writer
 	resp, err := http.Get(proxy.URL + "/test")
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -342,7 +338,6 @@ func TestServerCapturesMultilineBodyWithoutForwardingInternalHeaders(t *testing.
 func TestServerErrorHandler(t *testing.T) {
 	// The error handler answers 502 when the backend drops the connection
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Force close the connection immediately
 		hj, ok := w.(http.Hijacker)
 		if !ok {
 			w.WriteHeader(200)
@@ -369,7 +364,6 @@ func TestServerErrorHandler(t *testing.T) {
 	}
 }
 
-// testWriter is a simple EntryWriter that records all entries.
 type testWriter struct {
 	entries *[]*TrafficEntry
 }

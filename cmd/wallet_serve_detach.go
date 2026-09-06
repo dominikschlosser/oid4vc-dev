@@ -53,8 +53,8 @@ func spawnDetachedServe(cmd *cobra.Command, port int, register, noRegister bool)
 	if err != nil {
 		return err
 	}
-	// "auto" is decided by what the state directory holds, and the serve log
-	// below adds to it, so the child is told the parent's decision.
+	// Resolve auto storage before creating the log file, which would change the
+	// directory contents used by that decision.
 	if strings.TrimSpace(resolvedStorageSpec()) == "auto" {
 		flags = append(flags, "--storage", store.Backend().Kind())
 	}

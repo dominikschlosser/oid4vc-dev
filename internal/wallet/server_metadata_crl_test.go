@@ -20,9 +20,6 @@ import (
 	"testing"
 )
 
-// TestCRLEndpointServesSignedEmptyList checks the CRL endpoint the document
-// signer certificates' CRL distribution points name: a parseable DER CRL,
-// signed by the wallet CA, with no revoked certificates.
 func TestCRLEndpointServesSignedEmptyList(t *testing.T) {
 	srv := newTestServerWithStatusList(t)
 
@@ -49,9 +46,7 @@ func TestCRLEndpointServesSignedEmptyList(t *testing.T) {
 	}
 }
 
-// TestSigningChainCountryFollowsIssuingCountry checks that a signing chain
-// for issued credentials carries the credential's issuing_country as the
-// document signer subject countryName (ISO/IEC 18013-5 Table B.3).
+// ISO/IEC 18013-5 Table B.3 defines countryName in the document signer subject.
 func TestSigningChainCountryFollowsIssuingCountry(t *testing.T) {
 	w := generateTestWallet(t)
 

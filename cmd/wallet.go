@@ -42,10 +42,8 @@ import (
 var walletDir string
 var templatesDir string
 
-// storageSpec is the --storage flag.
 var storageSpec string
 
-// keySeed is the --seed flag.
 var keySeed string
 var walletValidationMode string
 
@@ -119,7 +117,6 @@ func init() {
 	}
 	walletCmd.AddCommand(listenAlias)
 
-	// Shell completion for knowable values
 	_ = walletCmd.RegisterFlagCompletionFunc("remote", completeRemoteFlag)
 	_ = walletCmd.RegisterFlagCompletionFunc("mode", staticCompletion("debug", "strict"))
 	_ = walletCmd.MarkPersistentFlagDirname("wallet-dir")
@@ -130,7 +127,6 @@ func init() {
 
 const storageFlagUsage = "Where the wallet state lives: 'file', 'memory', 'auto' (files when a state directory was given or exists, memory otherwise) or a postgres:// URL (default $EUDI_DEV_STORAGE)"
 
-// resolvedStorageSpec returns the --storage flag, else EUDI_DEV_STORAGE.
 func resolvedStorageSpec() string {
 	if storageSpec != "" {
 		return storageSpec
@@ -140,7 +136,6 @@ func resolvedStorageSpec() string {
 
 const seedFlagUsage = "Derive the wallet's generated keys from this string, so a wallet that stores nothing gets the same keys on every start. 'auto' seeds the memory backend only (default $EUDI_DEV_SEED)"
 
-// openStore opens the wallet store for --wallet-dir on the --storage backend.
 func openStore() (*wallet.WalletStore, error) {
 	store, err := wallet.OpenWalletStore(walletDir, resolvedStorageSpec())
 	if err != nil {
@@ -158,7 +153,6 @@ func resolvedWalletDir() string {
 	return wallet.ResolveWalletDir(walletDir)
 }
 
-// loadWallet loads the wallet from the store, creating it if needed.
 func loadWallet() (*wallet.Wallet, *wallet.WalletStore, error) {
 	store, err := openStore()
 	if err != nil {
@@ -186,8 +180,6 @@ func applyValidationMode(w *wallet.Wallet, raw string) error {
 	return nil
 }
 
-// applyVCIVersion sets the OpenID4VCI feature level the wallet uses as a
-// client.
 func applyVCIVersion(w *wallet.Wallet, raw string) error {
 	version, err := wallet.ParseVCIVersion(raw)
 	if err != nil {
@@ -197,9 +189,8 @@ func applyVCIVersion(w *wallet.Wallet, raw string) error {
 	return nil
 }
 
-// warnIssuedEndpointsOffline notes after a direct (unrouted) issuance that
-// the issuer and status list URLs embedded in the new credential only
-// resolve once a wallet server runs for this wallet directory.
+// After direct issuance, embedded issuer and status list URLs work only once a server
+// runs for this wallet directory.
 func warnIssuedEndpointsOffline(store *wallet.WalletStore, w *wallet.Wallet) {
 	if strings.TrimSpace(w.IssuerURL) == "" {
 		return
@@ -223,9 +214,7 @@ func deriveWalletIssuerURL(port int, baseURL string, docker bool) (string, error
 	return wallet.LocalIssuerURL(port+1, docker), nil
 }
 
-// issuerServedByBaseURL reports whether the issuer origin equals the base
-// URL, i.e. no separate HTTPS listener is needed because an external TLS
-// terminator serves both.
+// An external TLS terminator can serve both the base and issuer URLs on one origin.
 func issuerServedByBaseURL(issuerURL, baseURL string) bool {
 	trim := func(s string) string { return strings.TrimRight(strings.TrimSpace(s), "/") }
 	return trim(issuerURL) != "" && trim(issuerURL) == trim(baseURL)
@@ -239,8 +228,6 @@ func configureIssuerTLSCertificate(srv *wallet.Server, store *wallet.WalletStore
 	srv.SetIssuerTLSCertificate(cert)
 	return nil
 }
-
-// --- wallet list ---
 
 func walletListCmd() *cobra.Command {
 	return &cobra.Command{
@@ -265,8 +252,6 @@ func walletListCmd() *cobra.Command {
 		},
 	}
 }
-
-// --- wallet show ---
 
 func walletShowCmd() *cobra.Command {
 	var decoded bool
@@ -301,8 +286,6 @@ func walletShowCmd() *cobra.Command {
 	return cmd
 }
 
-// --- wallet import ---
-
 func walletImportCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "import [file-or-raw]",
@@ -333,8 +316,6 @@ func walletImportCmd() *cobra.Command {
 		},
 	}
 }
-
-// --- wallet remove ---
 
 func walletRemoveCmd() *cobra.Command {
 	var all bool
@@ -376,8 +357,6 @@ func walletRemoveCmd() *cobra.Command {
 	return cmd
 }
 
-// --- wallet register ---
-
 func walletRegisterCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:                "register [wallet-serve-flags...]",
@@ -401,8 +380,6 @@ func walletRegisterCmd() *cobra.Command {
 	return cmd
 }
 
-// walletRegisterInheritedServeArgs forwards the wallet flags of the register
-// command to the wallet the handler starts.
 func walletRegisterInheritedServeArgs(cmd *cobra.Command) []string {
 	args := []string{}
 	cmd.Flags().Visit(func(flag *pflag.Flag) {
@@ -433,8 +410,6 @@ func walletRegisterOptions(args []string) (wallet.RegisterOptions, error) {
 	}, nil
 }
 
-// --- wallet unregister ---
-
 func walletUnregisterCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "unregister",
@@ -444,8 +419,6 @@ func walletUnregisterCmd() *cobra.Command {
 		},
 	}
 }
-
-// --- wallet trust-list ---
 
 func walletTrustListCmd() *cobra.Command {
 	var (
@@ -481,10 +454,8 @@ what they declare it to be, so pick the one matching what is being verified.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// The trust list belongs to the wallet that serves it, and every
-			// wallet has its own CA. Reading the local store while the CLI is
-			// pointed at a remote one would print an anchor that validates
-			// nothing it issues.
+			// A remote wallet has its own CA. Reading the local store would return the
+			// wrong trust anchor.
 			client, err := remoteClientIfConfigured()
 			if err != nil {
 				return err
@@ -552,9 +523,6 @@ what they declare it to be, so pick the one matching what is being verified.`,
 	return cmd
 }
 
-// certificateExportFormat maps the --pem/--jwks flags to the certificate
-// export format shared by the walletService backends: PEM is the default,
-// JWKS is a document with the leaf public key and the chain as x5c.
 func certificateExportFormat(asPEM, asJWKS bool) (string, error) {
 	if asPEM && asJWKS {
 		return "", fmt.Errorf("--pem and --jwks are mutually exclusive")
@@ -565,8 +533,6 @@ func certificateExportFormat(asPEM, asJWKS bool) (string, error) {
 	return "pem", nil
 }
 
-// writeCertificateExport writes exported certificate data to --out (printing
-// the path) or to stdout.
 func writeCertificateExport(cmd *cobra.Command, kind string, data []byte, outPath string) error {
 	if outPath != "" {
 		if err := os.WriteFile(outPath, data, 0644); err != nil {
@@ -667,10 +633,6 @@ chain).`,
 	return cmd
 }
 
-// --- helpers ---
-
-// typeLabel returns the best human-readable type label from a VCT or DocType,
-// falling back to the format string if both are empty.
 func typeLabel(vct, docType, fmt_ string) string {
 	if vct != "" {
 		return vct
@@ -708,10 +670,8 @@ func applySessionTranscriptMode(w *wallet.Wallet, mode string) error {
 	return nil
 }
 
-// openBrowser hands a URL to the user's browser. The scheme is checked here
-// rather than at the call sites: some of these URLs come from a remote
-// wallet's response, and `open` launches file:// paths and any registered
-// application scheme.
+// Some URLs come from a remote wallet. Restrict their schemes because the system
+// opener can also launch files and applications.
 func openBrowser(rawURL string) bool {
 	if !isWebURL(rawURL) {
 		fmt.Fprintf(os.Stderr, "refusing to open %q: only http and https URLs\n", rawURL)
@@ -731,12 +691,9 @@ func openBrowser(rawURL string) bool {
 	return false
 }
 
-// hasDesktopSession reports whether there is a desktop to open a browser on.
-// A wallet server on a headless host has none.
 func hasDesktopSession() bool {
 	switch runtime.GOOS {
 	case "darwin":
-		// A Mac has a desktop unless this process arrived over SSH.
 		return os.Getenv("SSH_CONNECTION") == "" && os.Getenv("SSH_TTY") == ""
 	case "linux":
 		return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
@@ -745,8 +702,8 @@ func hasDesktopSession() bool {
 	}
 }
 
-// isWebURL reports whether a URL can be navigated to safely. url.Parse counts
-// javascript: and data: as absolute, so the scheme has to be named.
+// url.Parse accepts javascript: and data: as absolute URLs. Browser navigation must
+// allow only HTTP and HTTPS.
 func isWebURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil || !u.IsAbs() {
@@ -778,7 +735,6 @@ func loadWalletECKey(path, label string) (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
-// printTrustListIndex lists the trust list profiles a wallet serves.
 func printTrustListIndex(client *remote.Client) error {
 	var entries []map[string]any
 	if client != nil {
@@ -792,8 +748,6 @@ func printTrustListIndex(client *remote.Client) error {
 		if err != nil {
 			return err
 		}
-		// Through the same shape the endpoint returns, so local and remote
-		// listings render from one path rather than two.
 		data, err := json.Marshal(wallet.BuildTrustListIndexEntries(w, w.IssuerURL))
 		if err != nil {
 			return err
@@ -804,8 +758,6 @@ func printTrustListIndex(client *remote.Client) error {
 	}
 
 	if jsonOutput {
-		// The same shape as GET /api/trustlists, so a caller parsing one
-		// parses the other.
 		data, err := json.MarshalIndent(map[string]any{"trust_lists": entries}, "", "  ")
 		if err != nil {
 			return err
@@ -834,8 +786,6 @@ func printTrustListIndex(client *remote.Client) error {
 	}
 	return tw.Flush()
 }
-
-// --- wallet refresh ---
 
 func walletRefreshCmd() *cobra.Command {
 	return &cobra.Command{

@@ -25,8 +25,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// issuerSignedMap returns a freshly issued credential as the CBOR map a
-// DeviceResponse carries it as.
 func issuerSignedMap(t *testing.T) map[any]any {
 	t.Helper()
 	key, err := mock.GenerateKey()
@@ -53,8 +51,6 @@ func issuerSignedMap(t *testing.T) map[any]any {
 	return issuerSigned
 }
 
-// deviceResponse wraps an issuerSigned the way a wallet answers a request, so
-// the DeviceResponse branch of the parser sees the shape a wallet produces.
 func deviceResponse(t *testing.T, resp map[any]any) string {
 	t.Helper()
 	encoded, err := cbor.Marshal(resp)

@@ -1,6 +1,6 @@
 # Architecture
 
-The package layout and how a request passes through it. The reasons are in the [decision records](#decisions).
+This guide describes the packages and request flows. The [decision records](#decisions) explain the design choices.
 
 For the vocabulary these documents use, see [CONTEXT.md](CONTEXT.md).
 
@@ -39,19 +39,27 @@ examples/      Keycloak and web-wallet integration examples
 | `remote` | Remote wallet control (REST client, instance discovery) |
 | `sdjwt` | SD-JWT parsing, disclosure resolution, verification |
 | `statuslist` | Token Status List encoding and decoding, in JWT and CWT form |
-| `storage` | The persistence layer: blobs under keys, on files, in memory or in Postgres (ADR-0016) |
+| `storage` | Blob storage backed by files, memory or Postgres (ADR-0016) |
 | `trustlist` | ETSI TS 119 602 trust list parsing |
-| `validate` | Orchestrates verification (signature, expiry, revocation) |
+| `validate` | Checks signatures, expiry and revocation |
 | `wallet` | Wallet state (persisted through `storage`), HTTP server, OID4VP and OID4VCI protocol logic |
 | `web` | Decoder and validator web UI |
 
 ## Flows
 
-**Decode and validate.** Input arrives from a file, URL, stdin or a QR scan. Format detection picks the parser. The parser produces a token or document. The result is printed or carried into verification (signature, validity period, revocation).
+**Decode and validate.** The tool accepts a file, URL, stdin or QR scan. It detects the format and parses the input. It then displays the result or checks its signature, validity period and revocation status.
 
-**Presentation (OID4VP).** An authorization request arrives as a URI, an HTTP request to the wallet, or a browser API call. Its parameters may be inside a request object, fetched by reference and possibly encrypted. A request object replaces the parameter set, so the wallet acts on what the verifier signed. The wallet validates the request (client identifier, request object, signature, required parameters) and handles findings according to the active validation mode (ADR-0001). With `--haip` it also checks the request against HAIP, and those violations are errors in either mode. It then matches the request against held credentials with DCQL. The wallet answers a request for a type with a credential of that type or of one extending it. The user consents or the wallet auto-accepts. The wallet builds a VP token (SD-JWT with a key binding JWT, or an mdoc DeviceResponse) and sends it to the verifier, encrypted when the response mode asks for it.
+**Presentation (OID4VP).** The wallet receives an authorization request through a URI, HTTP endpoint or browser API. It fetches and decrypts a request object when needed. Parameters inside the request object replace the outer parameters.
 
-**Issuance (OID4VCI).** A credential offer arrives by URI or by reference. The wallet fetches issuer metadata and authorization server metadata. It then runs the pre-authorized code flow or the authorization code flow (PAR, PKCE, DPoP and client attestation as the issuer's metadata requires). At OpenID4VCI feature level 1.1, the wallet runs the interactive flow instead when the issuer publishes an authorization challenge endpoint. The wallet answers the challenge with an OpenID4VP presentation or sends the user to a browser sign-in (`auth_via_web`) and exchanges the resulting code as usual. It proves possession of its holder key, receives the credential, and imports it. An issuer that defers returns a transaction id, and the wallet collects the credential in the background.
+The wallet checks the client identifier, signature and required parameters. Debug mode reports findings and continues. Strict mode stops on findings. `--haip` adds the profile checks. DCQL selects matching credentials, including credentials whose type extends the requested type.
+
+After consent or automatic approval, the wallet creates an SD-JWT with a key binding JWT or an mdoc DeviceResponse. It sends the VP token to the verifier and encrypts it when the response mode requires encryption.
+
+**Issuance (OID4VCI).** The wallet resolves a credential offer and fetches issuer and authorization server metadata. It follows the pre-authorized code flow or authorization code flow, using PAR, PKCE, DPoP and client attestation as required.
+
+At feature level 1.1, an advertised authorization challenge endpoint selects the interactive flow. The wallet responds with an OpenID4VP presentation or opens browser authentication through `auth_via_web`. It then exchanges the authorization code.
+
+The wallet proves possession of its holder key, receives the credential and imports it. If the issuer defers issuance, the wallet saves the transaction ID and collects the credential later.
 
 **Proxy.** The wallet connects to a verifier or issuer through the proxy. The proxy classifies each exchange as an OID4VP or OID4VCI step and shows it on a dashboard.
 
@@ -76,6 +84,7 @@ examples/      Keycloak and web-wallet integration examples
 | [0015](docs/adr/0015-the-web-ui-lays-out-at-phone-width.md) | The web UI lays out at phone width |
 | [0016](docs/adr/0016-state-goes-through-one-storage-layer.md) | State goes through one storage layer |
 | [0017](docs/adr/0017-generated-keys-can-derive-from-a-seed.md) | Generated keys can derive from a seed |
+| [0018](docs/adr/0018-postgres-stores-wallet-entities-as-keyed-blobs.md) | Postgres stores wallet entities as keyed blobs |
 
 ## Related
 

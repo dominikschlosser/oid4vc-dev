@@ -62,18 +62,16 @@ var definedRequestObjectMembers = func() map[string]bool {
 	return merged
 }()
 
-// undefinedRequestParameterFindings lists request parameters the specs do
-// not define. RFC 6749 §3.1 has unrecognized parameters ignored, so these
-// stay warnings in every mode and never fail a strict flow.
+// RFC 6749 §3.1 requires ignoring unrecognized parameters. Report them as warnings
+// even in strict mode.
 func undefinedRequestParameterFindings(params *AuthorizationRequestParams) []string {
 	if params == nil {
 		return nil
 	}
 	undefined := map[string]bool{}
 	if params.RequestObject != nil && params.RequestObject.Payload != nil {
-		// The outer query parameters are still checked below: they are the
-		// place testers put stray fields, even though a signed request only
-		// uses its object's members (OID4VP 1.0 §5.10.1).
+		// Check outer parameters for diagnostics even though signed requests use only
+		// Request Object members (OID4VP 1.0 §5.10.1).
 		for name := range params.RequestObject.Payload {
 			if !definedRequestObjectMembers[name] {
 				undefined[name] = true
@@ -105,15 +103,12 @@ func undefinedRequestParameterFindings(params *AuthorizationRequestParams) []str
 	return findings
 }
 
-// warnUndefinedRequestParameters records the undefined-parameter findings of
-// a presentation request.
 func (w *Wallet) warnUndefinedRequestParameters(scope string, params *AuthorizationRequestParams) {
 	w.warnFindings(scope, "The request contains parameters OID4VP 1.0 does not define", undefinedRequestParameterFindings(params))
 }
 
-// undefinedResponseMembers lists fields of an accepted response that OID4VP
-// 1.0 §8.2 does not define (redirect_uri is its only one). A non-2xx answer
-// is an OAuth error response with its own members, not a §8.2 body.
+// OID4VP 1.0 §8.2 defines only redirect_uri in successful responses. Non-2xx responses
+// use OAuth error members instead.
 func undefinedResponseMembers(result *DirectPostResult) []string {
 	if result == nil || result.StatusCode < 200 || result.StatusCode >= 300 {
 		return nil

@@ -37,7 +37,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// dispatchOID4Opts holds options for dispatching an OID4VP/VCI URI.
 type dispatchOID4Opts struct {
 	port              int
 	portExplicit      bool
@@ -58,7 +57,6 @@ type dispatchOID4Opts struct {
 	resolvedOffer *oid4vc.CredentialOffer
 }
 
-// dispatchURI detects the URI type and dispatches to the appropriate wallet flow.
 func dispatchURI(uri string, opts dispatchOID4Opts) error {
 	detected := format.Detect(uri)
 
@@ -105,8 +103,6 @@ func dispatchURI(uri string, opts dispatchOID4Opts) error {
 	}
 }
 
-// runPresent handles an OID4VP authorization request: evaluates credentials,
-// optionally shows a consent UI, creates VP tokens, and submits the response.
 func runPresent(w *wallet.Wallet, store *wallet.WalletStore, uri string, port int, docker bool) error {
 	parsed, err := wallet.ParseAuthorizationRequestWithOptions(uri, oid4vc.ParseOptions{
 		FetchRequestURI: wallet.MakeFetchRequestURI(w, nil),
@@ -361,8 +357,6 @@ func runningWalletServerBaseURLs(opts dispatchOID4Opts) []string {
 }
 
 func registeredWalletListenerBaseURL() string {
-	// config.BaseDir resolves the state directory itself (EUDI_DEV_HOME, then
-	// the home directory).
 	raw, err := os.ReadFile(filepath.Join(config.BaseDir(), "url-handler.sh"))
 	if err != nil {
 		return ""
@@ -424,9 +418,8 @@ func isLocalWalletIssuerURL(raw string) bool {
 	return u.Scheme == "https" && (u.Hostname() == "localhost" || u.Hostname() == "host.docker.internal")
 }
 
-// isLocalhostIssuerURL is the narrower check used when realigning the issuer
-// URL to a registered wallet listener. Docker host URLs are a deliberate
-// serving config and must not be rewritten to localhost.
+// A Docker hostname may be intentional. Only realign localhost issuer URLs to the
+// registered listener.
 func isLocalhostIssuerURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -504,7 +497,6 @@ func waitForConsent(w *wallet.Wallet, matches []wallet.CredentialMatch, parsed *
 	return matches, consentReq.SubmissionCh, false
 }
 
-// submitPresentation creates VP tokens, submits them to the verifier, and prints the result.
 func submitPresentation(w *wallet.Wallet, store *wallet.WalletStore, matches []wallet.CredentialMatch, parsed *oid4vc.AuthorizationRequest, responseURI string, submissionCh chan wallet.SubmissionResult, dim *color.Color) error {
 	params := wallet.PresentationParams{
 		Nonce:         parsed.Nonce,
@@ -613,7 +605,6 @@ func authorizationRequestParamsFromParsed(parsed *oid4vc.AuthorizationRequest, r
 	}
 }
 
-// processCredentialOffer fetches and stores a credential from an OID4VCI offer URI.
 func processCredentialOffer(uri string, opts dispatchOID4Opts) error {
 	w, store, err := loadWallet()
 	if err != nil {
@@ -660,11 +651,9 @@ func processCredentialOffer(uri string, opts dispatchOID4Opts) error {
 	return nil
 }
 
-// followVerifierRedirect takes the user back to the verifier once the
-// presentation is in: the wallet sends the user agent to the redirect_uri the
-// verifier answers with (OpenID4VP 1.0 section 8.2). The URL is always
-// printed and only opened when a person runs the command. browserWaiting
-// says the consent tab already holds this flow and navigates there itself.
+// OpenID4VP 1.0 section 8.2 returns the browser to the verifier. Print the redirect
+// URL, but open it only for an interactive CLI when the consent tab is not already
+// navigating there.
 func followVerifierRedirect(redirectURI string, browserWaiting bool) {
 	if redirectURI == "" {
 		return
@@ -675,13 +664,9 @@ func followVerifierRedirect(redirectURI string, browserWaiting bool) {
 	}
 }
 
-// navigatesHere reports whether this process sends the user's browser to a URL
-// the flow hands over. It does not when a browser is already holding the flow,
-// because that browser is being sent to the same place and what waits there
-// survives one arrival: a PAR request_uri has one use (RFC 9126 §4, "the
-// client MUST only use a `request_uri` value once"), and a verifier's
-// redirect_uri leads to a session it consumes and invalidates (OpenID4VP 1.0
-// §13.3, steps 7 to 10). The second arrival lands on an error.
+// Navigate only when no browser tab owns the flow. PAR request_uri values can be used
+// once (RFC 9126 §4), and verifier redirect sessions are consumed after use (OpenID4VP
+// 1.0 §13.3, steps 7 to 10). A second navigation can fail.
 func navigatesHere(browserWaiting bool) bool {
 	return !noOpen && !browserWaiting
 }

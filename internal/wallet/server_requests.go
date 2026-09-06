@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Pending consent requests and the event stream the UI follows them on.
-
 package wallet
 
 import (
@@ -27,23 +25,19 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/config"
 )
 
-// handleListRequests returns the pending consent requests this caller may see.
 func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store, private")
 	w.Header().Set("Vary", "Cookie, "+OwnerHeader)
 	writeJSON(w, http.StatusOK, s.wallet.PendingRequestDocsFor(callerOwners(r), namedRequest(r)))
 }
 
-// streamWriteTimeout bounds one write to an event stream. It outlasts the
-// keepalive, so a reading client never hits it, while a client that stopped
-// reading stops holding a goroutine and its subscriptions.
+// Limit each stream write so disconnected readers release their goroutine and
+// subscriptions. Allow enough time for the keepalive interval.
 var streamWriteTimeout = 2 * time.Minute
 
-// sseKeepaliveInterval is how often an otherwise idle event stream sends a
-// comment line. A variable so tests do not have to wait for it.
+// A variable lets tests shorten the keepalive interval.
 var sseKeepaliveInterval = 25 * time.Second
 
-// handleRequestStream provides SSE for new consent requests and error events.
 func (s *Server) handleRequestStream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -51,10 +45,8 @@ func (s *Server) handleRequestStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The server's write timeout covers the whole response and would end the
-	// stream mid-session. The deadline is pushed forward before every write
-	// rather than removed, so a client that stops reading still releases the
-	// handler and its subscriptions.
+	// The server's normal write timeout would end the stream. Extend the deadline
+	// before each write while retaining a timeout for clients that stop reading.
 	rc := http.NewResponseController(w)
 	extendDeadline := func() {
 		if err := rc.SetWriteDeadline(time.Now().Add(streamWriteTimeout)); err != nil {
@@ -66,10 +58,8 @@ func (s *Server) handleRequestStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	// No Access-Control-Allow-Origin: this stream carries the claims a
-	// verifier asked for, and the only browser client is the wallet's own
-	// same-origin UI. A wildcard would let any page the user visits subscribe.
-	// Non-browser clients do not enforce CORS.
+	// Only the wallet UI should read these consent events. A wildcard CORS header
+	// would let other sites subscribe to the requested claims.
 	flusher.Flush()
 
 	owners := callerOwners(r)
@@ -83,8 +73,8 @@ func (s *Server) handleRequestStream(w http.ResponseWriter, r *http.Request) {
 	authCh, authUnsub := s.wallet.SubscribeAuthorization()
 	defer authUnsub()
 
-	// Proxies drop idle connections and each reconnect is another request, so
-	// a comment line keeps the connection up.
+	// Keepalives prevent proxies from dropping idle streams and causing repeated
+	// reconnects.
 	keepalive := time.NewTicker(sseKeepaliveInterval)
 	defer keepalive.Stop()
 
@@ -97,9 +87,7 @@ func (s *Server) handleRequestStream(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case req := <-reqCh:
-			// A request belongs to the browser that started it. Another
-			// visitor's stream carries neither the event nor the claims the
-			// verifier asked for.
+			// Send consent details only to the browser that owns the request.
 			if !ownsRequest(owners, req, "") {
 				continue
 			}
@@ -113,9 +101,8 @@ func (s *Server) handleRequestStream(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case walletErr := <-errCh:
-			// A failure belongs to the flow that raised it, so it reaches the
-			// browser that started that flow. One with no owner came from a
-			// client that named no browser, and is everyone's to see.
+			// Send failures to the flow's browser. Errors from unowned flows remain
+			// visible to everyone.
 			if walletErr.Owner != "" && !ownedBy(owners, walletErr.Owner) {
 				continue
 			}
@@ -124,9 +111,8 @@ func (s *Server) handleRequestStream(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			extendDeadline()
-			// Not "error": an EventSource dispatches a named event of that
-			// type at itself, where it would also run the handler for a lost
-			// connection and tear the stream down on every reported error.
+			// Using the event name error would also trigger EventSource's connection
+			// failure handler and close the stream.
 			if _, err := fmt.Fprintf(w, "event: wallet-error\ndata: %s\n\n", data); err != nil {
 				return
 			}
@@ -138,14 +124,13 @@ func (s *Server) handleRequestStream(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case prompt := <-authCh:
-			// The sign-in navigates a tab to the issuer, so it goes to the
-			// browser whose issuance it is and to no other.
+			// Only the browser that owns the issuance should navigate to the sign-in
+			// URL.
 			if !ownedBy(owners, prompt.Owner) {
 				continue
 			}
-			// An issuance is waiting for the user to authenticate at the
-			// issuer. The UI navigates there and comes back through
-			// /callback, which resumes the flow already in progress.
+			// The issuer redirects to /callback after sign-in, resuming the existing
+			// flow.
 			data, err := json.Marshal(map[string]string{"url": prompt.URL})
 			if err != nil {
 				continue
@@ -161,22 +146,17 @@ func (s *Server) handleRequestStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// allowSlowResponse pushes this response's write deadline past a wait longer
-// than config.SlowRequestTimeout. Without it the answer is written to a
-// connection Go already closed, and a URL handler takes the dropped connection
-// for a failure and dispatches the same offer again.
+// Consent can outlast the normal write timeout. Extend it so URL handlers receive the
+// result and do not retry an offer after a dropped connection.
 func (s *Server) allowSlowResponse(w http.ResponseWriter, wait time.Duration) {
 	err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(wait + config.SlowRequestTimeout))
-	// A browser redirected on its way in leaves the flow running against a
-	// writer that carries no deadline, so there is none to miss either.
+	// Detached browser flows use a writer with no deadline.
 	if err != nil && !errors.Is(err, http.ErrNotSupported) {
 		s.log("  WARNING: write deadline not extended, a slow answer may not reach the caller: %v", err)
 	}
 }
 
-// refusalReason says why a request can no longer be answered. A request that
-// ran out of time was not answered by anybody, and saying it was sends the
-// user looking for the tab that did it.
+// Distinguish timeout from an answer in another tab so the user knows what happened.
 func refusalReason(status string) string {
 	if status == statusExpired {
 		return "This request timed out before it was answered"
@@ -184,15 +164,13 @@ func refusalReason(status string) string {
 	return "This request was already answered"
 }
 
-// handleApproveRequest approves a consent request and waits for the submission result.
 func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	var body struct {
 		SelectedClaims map[string][]string `json:"selected_claims"`
 		TxCode         string              `json:"tx_code"`
-		// Picks and SetChoices are the credential selection made in the
-		// dialog's Edit view, referencing the request's credential_options.
+		// References the credential options selected in the dialog.
 		Picks      map[string]string `json:"picks"`
 		SetChoices []int             `json:"set_choices"`
 	}
@@ -200,8 +178,8 @@ func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 	}
 
-	// Checked against the pending request before it is resolved, so a bad
-	// selection leaves the dialog open instead of consuming the consent.
+	// Validate selection before resolving consent so an invalid choice leaves the
+	// dialog open.
 	if pending, ok := s.wallet.GetRequest(id); ok {
 		if !ownsRequest(callerOwners(r), pending, namedRequest(r)) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "request not found"})
@@ -232,7 +210,6 @@ func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 		SetChoices:     body.SetChoices,
 	}
 
-	// Wait for the submission so the UI gets its result.
 	s.allowSlowResponse(w, config.SlowRequestTimeout)
 	select {
 	case submission := <-req.SubmissionCh:
@@ -243,8 +220,8 @@ func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 			"status_code":  submission.StatusCode,
 		}
 		if submission.Pending {
-			// The issuer deferred the credential. Saying "approved" with no
-			// error would read as issued, so the outcome is named.
+			// Report deferred issuance explicitly. Approval does not mean the
+			// credential has arrived.
 			out["status"] = "pending"
 			out["pending"] = true
 			out["transaction_id"] = submission.TransactionID
@@ -259,7 +236,6 @@ func (s *Server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleDenyRequest denies a consent request.
 func (s *Server) handleDenyRequest(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if pending, ok := s.wallet.GetRequest(id); ok && !ownsRequest(callerOwners(r), pending, namedRequest(r)) {

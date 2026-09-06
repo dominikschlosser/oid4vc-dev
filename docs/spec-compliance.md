@@ -1,11 +1,11 @@
 # Spec Compliance
 
-Status of the implemented features against the specifications the EUDI Architecture and Reference Framework builds on. A mechanism none of them defines is recognised and reported, never used ([ADR-0013](adr/0013-only-the-eudi-stack-is-supported.md)).
+This page records support for specifications used by the EUDI Architecture and Reference Framework. Unsupported mechanisms are reported when encountered ([ADR-0013](adr/0013-only-the-eudi-stack-is-supported.md)).
 
-Two independent settings decide what a finding does to a flow:
+Two settings control validation:
 
-- `--mode` decides what a finding does. Findings are collected in both modes. Strict stops the flow, debug reports the finding and continues. Every finding starts with the specification and rule it cites (for example `OID4VP 1.0 §5.2: nonce is required`, `HAIP 1.0 §5.1: ...`, `ARF RPRC_19: ...`, `ETSI TS 119 475 GEN-5.2.4-08: ...`).
-- `--haip` turns on the HAIP 1.0 checks listed below. The validation mode decides what a violation does, as for every other finding.
+- `--mode strict` rejects validation violations. `--mode debug` reports them and continues where the flow can proceed. Advisory findings remain warnings in either mode. Findings identify the specification and rule they refer to.
+- `--haip` enables the HAIP 1.0 profile checks listed below.
 
 `--vci-version` selects the OpenID4VCI version the wallet follows as a client. `--vci-version 1.0` (the default) uses the published version alone. `--vci-version 1.1` adds the 1.1 draft features listed in the OID4VCI 1.1 section below, each only where the issuer's metadata offers it (see [OpenID4VCI feature level](wallet/issuing.md#openid4vci-feature-level)).
 
@@ -15,7 +15,7 @@ Two independent settings decide what a finding does to a flow:
 |---------|--------|-------|
 | Authorization request parsing | Implemented | `openid4vp://`, `haip-vp://`, `eudi-openid4vp://` schemes |
 | Request Object parameter extraction | Enforced | The Request Object replaces the parameter set (§5.10.1: "The Wallet MUST only use the parameters in this Request Object, even if the same parameter was provided in an Authorization Request query parameter"). A parameter the Request Object omits is absent, and a Request Object whose `client_id` differs from the outer one stops the flow |
-| Validation findings | Implemented | Collected in every mode. Strict makes each finding an error, debug reports it as a warning and continues |
+| Validation findings | Implemented | Strict rejects violations. Debug reports them and continues where possible. Advisory findings remain warnings |
 | Undefined parameters | Warned | Request parameters OID4VP 1.0 does not define, and response fields other than `redirect_uri` (§8.2), produce a warning in every mode (RFC 6749 §3.1 requires ignoring unrecognized parameters) |
 | Required request parameters | Enforced | `nonce` (§5.2), exactly one of `dcql_query` and `scope` on a `vp_token` request (§5.1), and no `redirect_uri` alongside `response_uri` (§8.2) |
 | `request_uri` (GET) | Implemented | Fetches and parses signed request objects |
@@ -99,7 +99,7 @@ None of these run at the default feature level. Each row also needs the issuer's
 
 ## HAIP 1.0 (High Assurance Interoperability Profile)
 
-Every row is a MUST in the profile and runs under `--haip`. In strict mode a request that fails any of them is answered with HTTP 400 naming the failed checks. In debug mode the findings are logged as warnings and the flow continues.
+`--haip` enables the checks below. Strict mode rejects violations and debug mode logs them while continuing the flow. A verifier that offers only one supported AES content encryption algorithm produces an advisory in either mode.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -111,7 +111,7 @@ Every row is a MUST in the profile and runs under `--haip`. In strict mode a req
 | VP signed request object (JAR) | Enforced | §5.1 requires JAR with the `request_uri` parameter, so an inline request object over redirects is refused. Unsigned requests are accepted only over the Digital Credentials API, where §5.2 requires them and they carry no `client_id` |
 | VP DCQL query | Enforced | §5: "The DCQL query and response MUST be used as defined in Section 6 of [OIDF.OID4VP]" |
 | VP credential formats | Enforced | `mso_mdoc` (§5.3.1) or `dc+sd-jwt` (§5.3.2). Any other format identifier in the query is refused |
-| VP Verifier response encryption metadata | Enforced | §5: a Verifier must list both `A128GCM` and `A256GCM` in `encrypted_response_enc_values_supported` |
+| VP Verifier response encryption metadata | Advisory | §5 requires both `A128GCM` and `A256GCM`. Offering only one produces a warning in either mode when the wallet can use it |
 | VP `expected_origins` | Enforced | A signed Digital Credentials API request must list the caller origin (OpenID4VP Appendix A.2, which §5.2 incorporates) |
 | VP Request Object `alg` | Enforced | `ES256`, the minimum §7 sets and the value the wallet advertises in `request_object_signing_alg_values_supported` |
 | DPoP proof shape | Implemented | `htm` and `htu` per RFC 9449 §4.2, with `htu` carrying the target URI "without query and fragment parts", `ath` (the SHA-256 of the access token) wherever a proof accompanies one, a fresh `jti` per proof, and the server's `DPoP-Nonce` echoed and retried once when it asks for one |

@@ -1,6 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <!-- eudi-dev logo: an original mark (open wallet, ID credential, terminal
-       prompt). Drawn from scratch, no relation to official EU emblems. -->
+  <!-- Original EUDI Dev logo. Independent of official EU emblems. -->
   <defs>
     <linearGradient id="gb" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#7aa2f7"/><stop offset="1" stop-color="#5a7ec9"/>

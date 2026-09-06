@@ -15,9 +15,8 @@ COPY --from=build /app/eudi /usr/local/bin/
 RUN ln -s /usr/local/bin/eudi /usr/local/bin/oid4vc-dev
 USER app
 ENV PORT=8085
-# State in memory, keys from a public fixed seed: no volume, the same keys and
-# CA on every start. A persisting deployment sets EUDI_DEV_STORAGE=file or a
-# postgres:// URL and EUDI_DEV_SEED= for random keys.
+# Memory storage and a public seed give each restart the same keys. For persistence,
+# select file or Postgres storage and clear EUDI_DEV_SEED to generate random keys.
 ENV EUDI_DEV_STORAGE=memory
 ENV EUDI_DEV_SEED=eudi-dev
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \

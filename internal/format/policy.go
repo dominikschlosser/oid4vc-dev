@@ -38,8 +38,6 @@ func SetFetchPolicy(policy FetchPolicy) {
 	fetchPolicy.Store(policy)
 }
 
-// dialControl is the net.Dialer.Control hook consulting the active policy.
-// It runs per connection attempt with the already-resolved address.
 func dialControl(network, address string, _ syscall.RawConn) error {
 	policy, _ := fetchPolicy.Load().(FetchPolicy)
 	if policy == nil {
@@ -48,14 +46,9 @@ func dialControl(network, address string, _ syscall.RawConn) error {
 	return policy(network, address)
 }
 
-// AllowOwnOrigins wraps a policy so the wallet can reach its own advertised
-// origins, whatever they resolve to. A wallet legitimately fetches from itself
-// (its own demo verifier's response_uri, its own issuer's offer), and those
-// URLs are operator configuration rather than visitor input, while without the
-// exemption a demo on localhost cannot complete its own flows.
-//
-// The allowance is by exact resolved address and port, so a visitor-supplied
-// URL that merely points at loopback is still blocked.
+// AllowOwnOrigins permits demo requests to its configured issuer and verifier URLs.
+// Exceptions come from operator configuration and match the exact resolved address and
+// port. Other private destinations stay blocked.
 func AllowOwnOrigins(next FetchPolicy, urls ...string) FetchPolicy {
 	allowed := make(map[string]bool)
 	for _, raw := range urls {
@@ -77,8 +70,6 @@ func AllowOwnOrigins(next FetchPolicy, urls ...string) FetchPolicy {
 	}
 }
 
-// resolveOriginAddresses expands a URL into the "ip:port" strings a dial to
-// it can produce.
 func resolveOriginAddresses(raw string) []string {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Host == "" {

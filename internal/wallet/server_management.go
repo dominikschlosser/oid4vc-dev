@@ -14,11 +14,8 @@
 
 package wallet
 
-// Management API handlers mirroring the wallet CLI commands (show, remove,
-// issue, generate-pid, ca-cert, tls-cert), so a hosted instance can be driven
-// over HTTP. Like the rest of the server they have no authentication:
-// internet-facing deployments run the demo profile (demo.go), which disables
-// the destructive ones.
+// These handlers also serve remote CLI commands. They have no authentication. Demo
+// mode disables destructive operations for public deployments.
 
 import (
 	"encoding/json"
@@ -34,7 +31,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/statuslist"
 )
 
-// handleGetCredential returns a single stored credential by ID.
 func (s *Server) handleGetCredential(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	cred, ok := s.wallet.GetCredential(id)
@@ -45,9 +41,8 @@ func (s *Server) handleGetCredential(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.wallet.CredentialSummaryWithBatch(cred))
 }
 
-// handleGetCredentialStatus resolves the live status of a credential: from
-// the wallet's own status list when the entry is managed here, otherwise by
-// fetching the external status list referenced by the credential.
+// Use the local status list for managed entries. Otherwise fetch the list referenced
+// by the credential.
 func (s *Server) handleGetCredentialStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	cred, ok := s.wallet.GetCredential(id)
@@ -76,21 +71,17 @@ func (s *Server) handleGetCredentialStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if ref.Invalid != "" {
-		// The credential carries a status_list object that does not meet
-		// section 6.2, which is a broken credential rather than an
-		// unreachable Status Provider.
+		// A malformed status_list object violates section 6.2. Report a credential
+		// error, not an unreachable provider.
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": ref.Invalid})
 		return
 	}
 
-	// This runs for credentials the wallet did not issue, where there is no
-	// anchor to hold the Status Issuer to. The signature is still verified
-	// against the key the token resolves to, and whether that key was anchored
-	// is reported, so a self-asserted list is distinguishable.
+	// For externally issued credentials, report whether the status issuer's key is
+	// trusted. A valid signature alone does not establish trust.
 	result, err := statuslist.Check(ref)
 	if err != nil {
-		// The UI shows the failure only as a transient badge, so the activity
-		// log keeps the reason.
+		// The UI badge is temporary. Keep the failure reason in the activity log.
 		s.wallet.addProtocolWarning("wallet", "status_list_check_failed",
 			fmt.Sprintf("Status list of credential %s could not be checked: %s", credentialLabel(cred), err),
 			map[string]any{
@@ -119,7 +110,6 @@ func (s *Server) handleGetCredentialStatus(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// handleDeleteAllCredentials removes all stored credentials.
 func (s *Server) handleDeleteAllCredentials(w http.ResponseWriter, r *http.Request) {
 	count := s.wallet.ClearCredentials()
 	kept := len(s.wallet.GetCredentials())
@@ -132,10 +122,8 @@ func (s *Server) handleDeleteAllCredentials(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]int{"deleted": count, "kept_protected": kept})
 }
 
-// IssueAPIRequest is the POST /api/issue request body. The server handler
-// and the CLI's local wallet backend both interpret issuance requests
-// through it, so `issue --wallet` behaves identically against the local
-// store and a running instance.
+// IssueAPIRequest is shared by HTTP and local CLI issuance so issue --wallet behaves
+// consistently.
 type IssueAPIRequest struct {
 	Format          string                `json:"format"`
 	Template        string                `json:"template"`
@@ -155,21 +143,17 @@ type IssueAPIRequest struct {
 	Trust           IssuedAttestationSpec `json:"trust"`
 	Display         *IssueDisplay         `json:"display"`
 	Batch           int                   `json:"batch"`
-	// DisplayTemplate names the template whose display (logo and background
-	// image in particular) the credential wears, when the form flattened a
-	// template's claims but its embedded art could not travel in a form field.
+	// Identifies the template containing display images that could not be included in
+	// the form fields.
 	DisplayTemplate string `json:"display_template"`
-	// Unbound issues the credential without a holder key (a bearer credential).
-	// The default is bound to the wallet.
+	// Defaults to binding the credential to the wallet's holder key.
 	Unbound bool `json:"unbound"`
-	// SigningKey and SigningCert replace the wallet's issuer key and
-	// certificate chain: a PEM or JWK private key, and a PEM certificate
-	// chain with the leaf first.
+	// The private key accepts PEM or JWK. The certificate chain uses PEM with the leaf
+	// first.
 	SigningKey  string `json:"signing_key"`
 	SigningCert string `json:"signing_cert"`
 }
 
-// Options converts the API request into IssueOptions.
 func (req IssueAPIRequest) Options() (IssueOptions, error) {
 	opts := IssueOptions{
 		Format:          req.Format,
@@ -214,8 +198,7 @@ func (req IssueAPIRequest) Options() (IssueOptions, error) {
 	return opts, nil
 }
 
-// IssueSummary runs IssueCredential and returns the credential summary
-// document served by POST /api/issue. The caller persists the wallet.
+// IssueSummary requires the caller to persist the wallet after issuance.
 func (w *Wallet) IssueSummary(opts IssueOptions) (map[string]any, error) {
 	result, err := w.IssueCredential(opts)
 	if err != nil {
@@ -228,17 +211,14 @@ func (w *Wallet) IssueSummary(opts IssueOptions) (map[string]any, error) {
 	if result.TemplatePath != "" {
 		summary["template_path"] = result.TemplatePath
 	}
-	// The echo lets a caller notice a server that dropped the override as an
-	// unknown field (an older release decodes leniently and would sign with
-	// its own key).
+	// Echo the override so callers can detect older servers that silently ignore it
+	// and use their own signing key.
 	if opts.SigningKey != nil {
 		summary["signing_override"] = true
 	}
 	return summary, nil
 }
 
-// handleIssueCredential issues a credential with the wallet's issuer key and
-// imports it, mirroring `issue <format> --wallet`.
 func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request) {
 	var req IssueAPIRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -254,23 +234,20 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if name := req.DisplayTemplate; name != "" && !credtemplate.IsBareName(name) {
-		// The name reaches a template load, so it stays a plain name resolved
-		// against the template directory, never a path.
+		// Accept only a template name. A path could escape the template directory.
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid display template name %q", name)})
 		return
 	}
 
 	if s.demo != nil && (strings.TrimSpace(req.SigningKey) != "" || strings.TrimSpace(req.SigningCert) != "") {
-		// A shared demo signs with its own key only.
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "overriding the signing key is disabled in public demo mode"})
 		return
 	}
 
 	if s.demo != nil && req.Display != nil &&
 		(strings.TrimSpace(req.Display.Logo) != "" || strings.TrimSpace(req.Display.BackgroundImage) != "") {
-		// A shared demo must not carry an image a visitor supplied. A template's
-		// own art still applies, and a normally issued credential keeps the
-		// appearance its issuer declared.
+		// Shared demos allow images from bundled templates and credential issuers.
+		// Visitors cannot supply images through this endpoint.
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "setting a logo or background image is disabled in public demo mode (a template's own art still applies)"})
 		return
 	}
@@ -298,8 +275,6 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, summary)
 }
 
-// credentialTypeLabel names a credential summary for log entries: the vct for
-// SD-JWT credentials, the doc type for mDocs, the id otherwise.
 func credentialTypeLabel(summary map[string]any) string {
 	for _, key := range []string{"vct", "doctype", "id"} {
 		if v, ok := summary[key].(string); ok && v != "" {
@@ -314,11 +289,8 @@ type generatePIDRequest struct {
 	VCT    string         `json:"vct"`
 }
 
-// handleGeneratePID regenerates the default EUDI PID credentials, mirroring
-// `wallet generate-pid`.
-//
-// Deprecated: use POST /api/issue with the pre-defined PID templates. This
-// goes away with `wallet generate-pid` in a future release.
+// Deprecated: use POST /api/issue with a PID template. This endpoint will be removed
+// together with wallet generate-pid.
 func (s *Server) handleGeneratePID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Deprecation", "true")
 	var req generatePIDRequest
@@ -350,8 +322,6 @@ func (s *Server) handleGeneratePID(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-// handleCACertificate exports the shared wallet CA certificate, mirroring
-// `wallet ca-cert`.
 func (s *Server) handleCACertificate(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
 	if store == nil {
@@ -366,8 +336,6 @@ func (s *Server) handleCACertificate(w http.ResponseWriter, r *http.Request) {
 	writeCertificateExport(w, r, certPEM)
 }
 
-// handleTLSCertificate exports the wallet's HTTPS leaf certificate, mirroring
-// `wallet tls-cert`.
 func (s *Server) handleTLSCertificate(w http.ResponseWriter, r *http.Request) {
 	store := s.currentStore()
 	if store == nil {
@@ -387,8 +355,6 @@ func (s *Server) handleTLSCertificate(w http.ResponseWriter, r *http.Request) {
 	writeCertificateExport(w, r, certPEM)
 }
 
-// writeCertificateExport writes certificate PEM bytes in the requested format:
-// PEM by default, or a JWKS document via ?format=jwks.
 func writeCertificateExport(w http.ResponseWriter, r *http.Request, certPEM []byte) {
 	switch r.URL.Query().Get("format") {
 	case "", "pem":
@@ -411,8 +377,6 @@ func (s *Server) currentStore() *WalletStore {
 	return s.store.Load()
 }
 
-// parseTimeOrDuration parses a value as an RFC3339 timestamp or a relative
-// duration (e.g. "-1h").
 func parseTimeOrDuration(val string) (*time.Time, error) {
 	if d, err := time.ParseDuration(val); err == nil {
 		t := time.Now().Add(d)

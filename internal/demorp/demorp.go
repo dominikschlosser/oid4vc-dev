@@ -12,16 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package demorp provides a minimal demo issuer (OpenID4VCI) and demo verifier
-// (OpenID4VP) mounted on the wallet server, so a deployment can demonstrate
-// complete protocol flows out of the box.
-//
-// Both are deliberately small. The issuer offers pre-authorized and
-// authorization code grants and is its own authorization server (one hardcoded
-// demo account). The verifier sends a signed request object by reference and
-// takes an encrypted direct_post.jwt response, verifying SD-JWT VC and mdoc.
-// Credentials are signed with the wallet's issuer key under a leaf from the
-// wallet CA, so the wallet's own trust list closes the loop.
+// Package demorp runs a demo OpenID4VCI issuer and OpenID4VP verifier on the wallet
+// server. The issuer supports pre-authorized and authorization code grants with a
+// built-in demo account. The verifier serves signed request objects by reference and
+// checks encrypted direct_post.jwt responses. Both use the wallet CA.
 package demorp
 
 import (
@@ -48,12 +42,10 @@ const (
 	entryTTL = 10 * time.Minute
 	// maxEntries caps each state map so anonymous visitors cannot grow
 	// memory without bound between TTL sweeps.
-	maxEntries = 500
-	// maxBodyBytes caps request bodies on all POST endpoints.
+	maxEntries   = 500
 	maxBodyBytes = 64 << 10
 )
 
-// DemoRP holds the shared state of the demo issuer and verifier.
 type DemoRP struct {
 	wallet  *wallet.Wallet
 	baseURL func() string
@@ -63,10 +55,8 @@ type DemoRP struct {
 	// clientAuth is what the demo authorization server demands of a wallet.
 	// The zero value is ClientAuthRequired.
 	clientAuth ClientAuthMode
-	// verifierTrustAnchors are CAs the demo verifier accepts issuer
-	// certificate chains under, next to the wallet's own CA. They admit
-	// presentations issued outside this wallet, such as the ones a conformance
-	// suite signs when it plays the wallet against the demo verifier.
+	// Additional CAs allow the demo verifier to check credentials from external
+	// issuers, including conformance tests. The wallet CA is always trusted.
 	verifierTrustAnchors []*x509.Certificate
 
 	mu       sync.Mutex
@@ -80,9 +70,8 @@ type DemoRP struct {
 	// interactive holds the Authorization Challenge conversations of
 	// OpenID4VCI 1.1 §6, keyed by auth_session.
 	interactive map[string]*interactiveSession
-	// nonces are the challenges handed out by the Nonce Endpoint, each held
-	// until it expires. It is where a wallet built to OpenID4VCI 1.0 asks for
-	// the challenge it signs into a key proof.
+	// Keep Nonce Endpoint challenges until expiry so a wallet can use one nonce for a
+	// batch of proofs.
 	nonces map[string]time.Time
 	// deferred holds issuances the credential endpoint accepted but did not
 	// hand over yet, keyed by the transaction id a wallet polls with.
@@ -221,9 +210,7 @@ func parseCompactJWT(raw string) (*compactJWT, error) {
 	return jwt, nil
 }
 
-// verifyES256 checks a JOSE ES256 signature. The parsed form keeps the
-// signing input and the decoded signature rather than the string they came
-// from, so the compact form is put back together for the shared verifier.
+// Rebuild the compact JWT because the shared verifier expects its encoded form.
 func verifyES256(pub *ecdsa.PublicKey, signingInput string, sig []byte) bool {
 	if len(sig) != 64 {
 		return false
@@ -231,8 +218,6 @@ func verifyES256(pub *ecdsa.PublicKey, signingInput string, sig []byte) bool {
 	return jws.Valid(signingInput+"."+base64.RawURLEncoding.EncodeToString(sig), pub)
 }
 
-// holderKeyFromJWK converts a JWK map (e.g. a proof header jwk or a cnf.jwk
-// claim) into an ECDSA public key.
 func holderKeyFromJWK(jwk map[string]any) (*ecdsa.PublicKey, error) {
 	data, err := json.Marshal(jwk)
 	if err != nil {

@@ -33,8 +33,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
-// demoIssuerID is what newDemoRP's base URL makes of the issuer, and what
-// every audience and DPoP htu in these tests has to name.
 const demoIssuerID = "http://demo.example/issuer"
 
 func postForm(t *testing.T, h http.Handler, target string, form url.Values) *httptest.ResponseRecorder {
@@ -46,9 +44,8 @@ func postForm(t *testing.T, h http.Handler, target string, form url.Values) *htt
 	return rec
 }
 
-// The pushed authorization request is where the wallet authenticates, so
-// every requirement it fails has to be refused before the request is stored
-// and turned into a request_uri somebody can redeem.
+// Reject invalid client authentication before saving a pushed request or issuing a
+// request_uri.
 func TestPushedAuthorizationRequestRejections(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 	h := d.IssuerHandler()
@@ -122,8 +119,6 @@ func TestAuthorizeRejectsAMissingRequestURI(t *testing.T) {
 	}
 }
 
-// Signing in is what turns a pushed request into a code, so a submission
-// naming no request has nothing to complete.
 func TestAuthorizeSubmitRejectsAnUnknownRequest(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 
@@ -151,8 +146,6 @@ func TestAuthorizeSubmitRejectsAMissingRequestURI(t *testing.T) {
 	}
 }
 
-// walletProvider is an attester with a certificate authority of its own, the
-// way an external wallet's is.
 type walletProvider struct {
 	key  *ecdsa.PrivateKey
 	leaf *x509.Certificate
@@ -277,11 +270,8 @@ func TestPushedAuthorizationRequestWithoutDPoP(t *testing.T) {
 	}
 }
 
-// An attestation signed by a wallet provider this issuer was never given is
-// what an external wallet brings, and refusing every one of them would leave
-// the authorization code flow completable by this project's own wallet alone.
-// It is accepted, and what the issuer could not establish about it travels with
-// the credential instead.
+// External wallets may use unknown attestation CAs. Accept them for interoperability
+// testing and record the missing trust on the ticket.
 func TestPushedAuthorizationRequestAcceptsAnUntrustedAttester(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 	provider := foreignWalletProvider(t)
@@ -339,8 +329,8 @@ func TestPushedAuthorizationRequestAcceptsADPoPCombinedProof(t *testing.T) {
 	})
 }
 
-// An attestation that was presented and did not verify is a different answer
-// from no attestation at all, and draft -10 §7.4 has a code for it.
+// ABCA draft-10 §7.4 distinguishes an invalid attestation from missing client
+// authentication.
 func TestPushedAuthorizationRequestNamesABrokenAttestation(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 	provider := foreignWalletProvider(t)
@@ -394,9 +384,7 @@ func TestPushedAuthorizationRequestNamesABrokenAttestation(t *testing.T) {
 	}
 }
 
-// A client that presents nothing is the general case of no client
-// authentication, which is invalid_client rather than a complaint about an
-// attestation nobody sent.
+// Requests without client authentication return invalid_client.
 func TestPushedAuthorizationRequestWithoutClientAuthentication(t *testing.T) {
 	clientKey, err := mock.GenerateKey()
 	if err != nil {
@@ -525,9 +513,8 @@ func TestAuthorizationCodeTokenExchangeWithoutClientIDParameter(t *testing.T) {
 	}
 }
 
-// The whole authorization code flow driven by a wallet that authenticates with
-// nothing, which is what an interoperability test against another wallet needs
-// and what the optional mode is for. The ticket says how it was collected.
+// Optional mode allows the full authorization code flow without client authentication.
+// The ticket records that choice.
 func TestAuthorizationCodeFlowWithoutClientAuthentication(t *testing.T) {
 	d, _, holderKey := newDemoRP(t)
 	d.SetClientAuthMode(ClientAuthOptional)
@@ -610,12 +597,10 @@ func TestAuthorizationCodeFlowWithoutClientAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing the issued credential: %v", err)
 	}
-	// A credential collected by a client that never authenticated says so, so
-	// that it cannot be mistaken for one backed by a wallet attestation.
+	// The ticket must state that the client supplied no wallet attestation.
 	if got := issued.ResolvedClaims["wallet_attestation"]; got != "none" {
 		t.Errorf("wallet_attestation = %v, want none", got)
 	}
-	// The login still happened, and it is what the ticket is made out to.
 	if got := issued.ResolvedClaims["given_name"]; got != demoAccountGivenName {
 		t.Errorf("given_name = %v, want %q", got, demoAccountGivenName)
 	}
@@ -672,10 +657,8 @@ func TestAuthorizeSpendsTheRequestURI(t *testing.T) {
 	}
 }
 
-// The login page must widen form-action to the client's redirect_uri. Under
-// the toolkit's global form-action 'self', a browser enforcing form-action
-// across the post-login redirect blocks a cross-origin or custom-scheme
-// redirect_uri (every real mobile wallet), so the login silently does nothing.
+// Allow the redirect URI in form-action so browser policy does not block the
+// post-login redirect to another origin or a mobile wallet scheme.
 func TestLoginPageAllowsTheRedirectTarget(t *testing.T) {
 	d, _, holderKey := newDemoRP(t)
 	d.SetClientAuthMode(ClientAuthOptional)
@@ -699,17 +682,13 @@ func TestLoginPageAllowsTheRedirectTarget(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("serving the login page: %d %s", rec.Code, rec.Body.String())
 	}
-	// The helper pushes redirect_uri http://wallet.example/cb, so the login must
-	// let its form submission reach that origin.
 	csp := rec.Header().Get("Content-Security-Policy")
 	if !strings.Contains(csp, "form-action 'self' http://wallet.example;") {
 		t.Errorf("login CSP must allow the redirect origin, got %q", csp)
 	}
 }
 
-// The sign-in page's debug panel shows the client authentication the wallet
-// sent, so a wallet developer can inspect the client_id, the attestation and
-// the attestation PoP their client presented.
+// Keep the submitted client authentication visible in the sign-in debug panel.
 func TestLoginPageDebugPanelShowsClientAuthentication(t *testing.T) {
 	d, _, holderKey := newDemoRP(t)
 	h := d.IssuerHandler()
@@ -767,8 +746,6 @@ func TestRedirectFormActionSource(t *testing.T) {
 	}
 }
 
-// The authorization server metadata is what tells a wallet where to push its
-// request and that PKCE with S256 is required.
 func TestAuthorizationServerMetadata(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 
@@ -796,9 +773,8 @@ func TestAuthorizationServerMetadata(t *testing.T) {
 	}
 }
 
-// What the endpoints accept and what the metadata says have to be the same
-// thing: the auth methods list is where a wallet reads whether it has to
-// authenticate here at all.
+// Advertised authentication methods must match the endpoints, because wallets use this
+// list to choose how to authenticate.
 func TestAuthorizationServerMetadataFollowsTheClientAuthMode(t *testing.T) {
 	authMethods := func(d *DemoRP) []string {
 		t.Helper()

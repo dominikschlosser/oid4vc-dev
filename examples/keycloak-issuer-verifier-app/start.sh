@@ -65,9 +65,8 @@ cd "${SCRIPT_DIR}"
 ensure_oid4vc_dev
 ./scripts/download-extension.sh
 
-# Seed the wallet with the country-independent EUDI PID and serve its trust and
-# status lists under host.docker.internal, so Keycloak reaches them from its
-# container. The wallet CA is handed to Keycloak's truststore for the status list.
+# Use host.docker.internal so Keycloak can fetch wallet trust and status lists from its
+# container. Add the wallet CA to its truststore.
 echo "Seeding the wallet with a PID..."
 eudi wallet remove --all >/dev/null 2>&1 || true
 eudi wallet generate-pid --docker --base-url "${WALLET_BASE_URL}"

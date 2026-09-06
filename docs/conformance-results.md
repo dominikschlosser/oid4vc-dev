@@ -6,15 +6,19 @@ Reproduce these runs with [Running OIDF Wallet Conformance](./conformance-run.md
 
 The demo issuer and demo verifier are tested with the suite acting as the wallet. Use [the demo runbook](./conformance-run-demorp.md) to reproduce. Suite `release-v5.2.4` (revision `ab35a8d`), 9 plans (4 issuer, 5 verifier), 101 modules: **61 `PASSED`, 36 `REVIEW`, 4 `WARNING`, 0 `FAILED`, 0 `SKIPPED`**, 7645 condition successes against 0 condition failures.
 
-The 36 `REVIEW` are every verifier module. The suite cannot observe whether the verifier under test verified, so its verifier modules end in `REVIEW` after an uploaded screenshot. The harness reads the demo verifier's own verdict per module instead: 36 of 36 as expected, every tampered presentation refused, every clean one verified.
+All 36 verifier modules ended in `REVIEW`, as expected after screenshot upload. The harness separately checked the demo verifier's verdicts. All 36 matched: tampered presentations failed and valid presentations verified.
 
-The 4 `WARNING` are one condition, four times: `CheckForUnexpectedParametersInServerMetadata` flags `client_attestation_pop_methods_supported` in the demo issuer's authorization server metadata as unknown. The parameter comes from the proof of possession methods registry of draft-ietf-oauth-attestation-based-client-auth-10, which the suite's RFC 8414 schema does not know (it knows the two signing algorithm parameters from the same document).
+The four warnings report the same metadata field: `client_attestation_pop_methods_supported`. ABCA draft-10 defines it, but the suite's RFC 8414 schema does not recognize it.
 
 Suite defect in `release-v5.2.4`: under the pre-authorized code grant the client attestation negative modules keep running after their expected token refusal and interrupt themselves ("This is a bug in the test module"). Those six modules are excluded there and covered by the authorization code scenarios.
 
 ## Run of 2026-09-06 (2.4.0 storage backends)
 
-The 2.4.0 storage layer keeps the wallet on files, in memory or in Postgres. The ten certifiable HAIP plans (4 VP HAIP, and per format the VCI HAIP plan issuer-initiated `by_value`, issuer-initiated `by_reference` and wallet-initiated) ran once per backend against a local suite `release-v5.2.4` (revision `ab35a8d`), wallet strict throughout. The three runs are identical: 228 modules each, 26962 condition successes, 4 condition failures, 0 wallet condition failures. The 4 failures are the multisigned suite NullPointerException described below, two per `dc_api.jwt` plan. The wallets under test ran as containers of the 2.4.0 image with `EUDI_DEV_STORAGE` set per backend and random keys, driven by the wrapper through `OIDF_WALLET_URL`. Run directories `/tmp/oidf-file-2.4.0`, `/tmp/oidf-memory-2.4.0` and `/tmp/oidf-postgres-2.4.0`.
+The ten HAIP plans ran once on each storage backend: files, memory and Postgres. All used suite `release-v5.2.4` (revision `ab35a8d`) with strict wallet validation.
+
+Each run had the same result: 228 modules, 26962 condition successes and 4 condition failures. All four failures came from the suite's multisigned request NullPointerException described below. There were no wallet condition failures.
+
+The wallets ran in 2.4.0 containers with random keys and a different `EUDI_DEV_STORAGE` value for each run. The harness connected through `OIDF_WALLET_URL`. Artifacts are in `/tmp/oidf-file-2.4.0`, `/tmp/oidf-memory-2.4.0` and `/tmp/oidf-postgres-2.4.0`.
 
 ## Runs of 2026-09-02 and 2026-09-04 (production certification and expanded matrix)
 

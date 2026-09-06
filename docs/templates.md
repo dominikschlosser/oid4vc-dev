@@ -1,6 +1,6 @@
 # Credential Templates
 
-Credential templates are named, reusable claim sets for issuing test credentials. A template carries the credential type (VCT or doc type), a default claim set, an optional expiry, and an optional list of claims issued without selective disclosure. Templates work in the CLI, the HTTP API, and the wallet UI.
+A credential template gives test credentials a name, type (VCT or doc type) and default claims. It can also set an expiry and claims that are always disclosed. Use the same templates from the CLI, HTTP API and wallet UI.
 
 Four pre-defined templates ship with the binary:
 
@@ -25,7 +25,7 @@ Regenerating a PID replaces the mdoc PID with the same namespaces. Give an overr
 
 ## Template files and storage
 
-Pre-defined templates are compiled into the binary. User templates are JSON files in the wallet directory's `templates/` subdirectory (`~/.eudi-dev/wallet/templates/` by default, or `<dir>/templates/` with `--wallet-dir <dir>`). Both `.json` and `.template` extensions are recognized. A `name` field inside the document names the template. Without one, the file name without extension is used.
+Pre-defined templates are compiled into the binary. User templates are JSON documents under the wallet's `templates/` prefix in the selected storage backend. With file storage, the default directory is `~/.eudi-dev/wallet/templates/`, or `<dir>/templates/` with `--wallet-dir <dir>`. Both `.json` and `.template` extensions are recognized. The template name comes from its `name` field, falling back to the file name without its extension.
 
 `--templates-dir` points the wallet, the issue commands, and the `templates` commands at another directory, for example a folder in your project or a container mount.
 
@@ -131,7 +131,7 @@ eudi templates show german-pid-sdjwt
 eudi issue sdjwt --template pid-sdjwt
 eudi issue sdjwt --template german-pid-sdjwt --claims '{"given_name": "MAX"}'
 
-# Make claims non disclosable at issuance time
+# Make claims always visible
 eudi issue sdjwt --pid --always-disclosed issuing_country,address.country
 
 # Save the current issuance as a template while issuing
@@ -194,6 +194,6 @@ curl -X POST http://localhost:8085/api/issue \
 
 ## Wallet UI
 
-The issue dialog has a template dropdown that pre-fills the form (format, type, expiry, claims, and non disclosable claims). Everything stays editable. Each claims builder row has an SD checkbox (uncheck it to issue that claim without selective disclosure). In JSON mode the same list is the "Always visible" field, which also accepts dotted paths for nested claims. A name in "Save as template" stores the dialog contents as a template on successful issuance.
+Choose a template in the issue dialog to fill in the form, then edit any values you need. Uncheck a claim's SD checkbox to make it always visible. In JSON mode, use the "Always visible" field. Dotted paths select nested claims. Enter a name in "Save as template" to save the form after successful issuance.
 
 The Templates button opens a manager for listing, editing, importing (paste the JSON), and deleting templates.

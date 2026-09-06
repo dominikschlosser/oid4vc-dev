@@ -34,8 +34,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// startRemoteTestWallet starts a real wallet server on a random port and
-// returns its base URL.
 func startRemoteTestWallet(t *testing.T) (string, *wallet.Server) {
 	t.Helper()
 	holderKey, err := mock.GenerateKey()
@@ -51,7 +49,7 @@ func startRemoteTestWallet(t *testing.T) (string, *wallet.Server) {
 	w.Templates = credtemplate.FileLocation(t.TempDir())
 
 	srv := wallet.NewServer(w, 0, nil)
-	srv.ShutdownFunc = func() {} // never exit the test process
+	srv.ShutdownFunc = func() {}
 	addr, err := srv.ListenAndServeBackground()
 	if err != nil {
 		t.Fatalf("starting wallet server: %v", err)
@@ -72,7 +70,6 @@ func TestRemoteWalletLifecycleViaCLI(t *testing.T) {
 	resetRemoteTestState(t)
 	url, _ := startRemoteTestWallet(t)
 
-	// wallet use verifies reachability and persists the target
 	rootCmd.SetArgs([]string{"wallet", "use", url})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("wallet use: %v", err)
@@ -81,14 +78,12 @@ func TestRemoteWalletLifecycleViaCLI(t *testing.T) {
 		t.Fatalf("active remote not persisted: %q", remote.Active())
 	}
 
-	// issue on the remote wallet from a pre-defined template
 	remoteFlag = ""
 	rootCmd.SetArgs([]string{"issue", "sdjwt", "--wallet", "--template", "german-pid-sdjwt"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("remote issue: %v", err)
 	}
 
-	// the credential is on the remote wallet, not in a local store
 	client := remote.NewClient(url)
 	creds, err := client.Credentials()
 	if err != nil {
@@ -99,7 +94,6 @@ func TestRemoteWalletLifecycleViaCLI(t *testing.T) {
 	}
 	id, _ := creds[0]["id"].(string)
 
-	// remove it through the CLI remote path
 	rootCmd.SetArgs([]string{"wallet", "remove", id})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("remote remove: %v", err)
@@ -112,7 +106,6 @@ func TestRemoteWalletLifecycleViaCLI(t *testing.T) {
 		t.Fatalf("expected empty remote wallet, got %d credentials", len(creds))
 	}
 
-	// switch back to local
 	rootCmd.SetArgs([]string{"wallet", "use", "local"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("wallet use local: %v", err)
@@ -155,7 +148,6 @@ func TestAutoRouteThroughInstanceForSameWalletDir(t *testing.T) {
 		t.Error("auto-routed issue must not write the local store")
 	}
 
-	// --remote local opts out and writes the local store directly.
 	resetIssueFlagChanges(t)
 	rootCmd.SetArgs([]string{"issue", "sdjwt", "--wallet", "--template", "german-pid-sdjwt", "--remote", "local"})
 	if err := rootCmd.Execute(); err != nil {
@@ -174,7 +166,6 @@ func TestAutoRouteThroughInstanceForSameWalletDir(t *testing.T) {
 		t.Fatalf("instance credentials must be untouched by --remote local: %v %v", creds, err)
 	}
 
-	// An explicit --templates-dir also forces the local store.
 	resetIssueFlagChanges(t)
 	tplDir := t.TempDir()
 	rootCmd.SetArgs([]string{"issue", "sdjwt", "--wallet", "--template", "german-pid-sdjwt", "--templates-dir", tplDir})
@@ -259,7 +250,6 @@ func TestWalletUseChecksVersionCompatibility(t *testing.T) {
 		t.Errorf("an incompatible instance must not become the target, got %q", remote.Active())
 	}
 
-	// --force is the escape hatch for a user who knows better.
 	rootCmd.SetArgs([]string{"wallet", "use", url, "--force"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("wallet use --force: %v", err)
@@ -272,7 +262,6 @@ func TestWalletUseChecksVersionCompatibility(t *testing.T) {
 		_ = rootCmd.Execute()
 	})
 
-	// Within the major release the two are compatible, in either direction.
 	srv.SetVersion("1.18.0")
 	if err := remote.ClearActive(); err != nil {
 		t.Fatal(err)
@@ -308,7 +297,6 @@ func TestWalletPsShowsInstanceVersion(t *testing.T) {
 		t.Errorf("the listing must report the instance version, got:\n%s", out)
 	}
 
-	// The deprecated `wallet instances` spelling lists the same.
 	out = captureStdout(t, func() {
 		rootCmd.SetArgs([]string{"wallet", "instances", "list"})
 		if err := rootCmd.Execute(); err != nil {
@@ -320,7 +308,6 @@ func TestWalletPsShowsInstanceVersion(t *testing.T) {
 	}
 }
 
-// withCLIVersion pins the version this CLI reports for the test.
 func withCLIVersion(t *testing.T, version string) {
 	t.Helper()
 	previous := Version
@@ -359,7 +346,6 @@ func TestWalletKillViaShutdownEndpoint(t *testing.T) {
 	shutdownCalled := make(chan struct{})
 	srv.ShutdownFunc = func() { close(shutdownCalled) }
 
-	// Register the instance so discovery finds it without a process scan.
 	port := portFromURL(t, url)
 	if err := remote.RegisterInstance(remote.Instance{PID: 999999, Port: port, URL: url, StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
@@ -395,7 +381,6 @@ func TestRemoteShowImportLogsInfoViaCLI(t *testing.T) {
 	remoteFlag = url
 	t.Cleanup(func() { remoteFlag = "" })
 
-	// Seed one credential on the remote wallet.
 	rootCmd.SetArgs([]string{"issue", "sdjwt", "--wallet", "--template", "german-pid-sdjwt", "--remote", url})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("remote issue: %v", err)
@@ -414,7 +399,6 @@ func TestRemoteShowImportLogsInfoViaCLI(t *testing.T) {
 	}
 	raw, _ := one["raw"].(string)
 
-	// show (raw and decoded) must succeed against the remote wallet
 	rootCmd.SetArgs([]string{"wallet", "show", id, "--remote", url})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("remote show: %v", err)
@@ -424,7 +408,6 @@ func TestRemoteShowImportLogsInfoViaCLI(t *testing.T) {
 		t.Fatalf("remote show --decoded: %v", err)
 	}
 
-	// import: wipe and re-import the raw credential from a file
 	if _, err := client.RemoveAllCredentials(); err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +424,6 @@ func TestRemoteShowImportLogsInfoViaCLI(t *testing.T) {
 		t.Fatalf("expected re-imported credential: %v %v", creds, err)
 	}
 
-	// logs and info must succeed. --follow is rejected remotely
 	rootCmd.SetArgs([]string{"wallet", "logs", "--remote", url})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("remote logs: %v", err)
@@ -460,7 +442,6 @@ func TestRemoteTemplatesListShowUseRemoteStore(t *testing.T) {
 	resetRemoteTestState(t)
 	url, _ := startRemoteTestWallet(t)
 
-	// One template exists only on the remote wallet, another only locally.
 	client := remote.NewClient(url)
 	if _, err := client.PutTemplate("remote-only", map[string]any{"format": "sdjwt", "claims": map[string]any{"a": 1}}); err != nil {
 		t.Fatal(err)
@@ -471,8 +452,6 @@ func TestRemoteTemplatesListShowUseRemoteStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// show resolves against the remote store: the remote-only template is
-	// found, the local-only one is not.
 	rootCmd.SetArgs([]string{"templates", "show", "remote-only", "--remote", url})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("remote show must find the remote template: %v", err)
@@ -482,7 +461,6 @@ func TestRemoteTemplatesListShowUseRemoteStore(t *testing.T) {
 		t.Fatal("remote show must not fall back to the local store")
 	}
 
-	// list runs against the remote store
 	rootCmd.SetArgs([]string{"templates", "list", "--remote", url})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("remote list: %v", err)
@@ -492,7 +470,6 @@ func TestRemoteTemplatesListShowUseRemoteStore(t *testing.T) {
 func TestCompletionFunctions(t *testing.T) {
 	resetRemoteTestState(t)
 
-	// Template completion lists pre-defined templates locally.
 	names, directive := completeTemplateNames(nil, nil, "")
 	if directive != cobra.ShellCompDirectiveNoFileComp {
 		t.Errorf("unexpected directive: %v", directive)
@@ -511,7 +488,6 @@ func TestCompletionFunctions(t *testing.T) {
 		t.Error("completion must not create a wallet store")
 	}
 
-	// With a remote configured, completions come from the remote wallet.
 	url, _ := startRemoteTestWallet(t)
 	remoteFlag = url
 	client := remote.NewClient(url)
@@ -523,7 +499,6 @@ func TestCompletionFunctions(t *testing.T) {
 		t.Errorf("expected remote template in completion, got %v", names)
 	}
 
-	// Instance completion offers running instances plus local for use.
 	if err := remote.RegisterInstance(remote.Instance{PID: 424242, Port: portFromURL(t, url), URL: url, StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +513,6 @@ func TestCompletionInstall(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// zsh: appends the source line once, second run is a no-op
 	rootCmd.SetArgs([]string{"completion", "install", "zsh"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("completion install zsh: %v", err)
@@ -555,7 +529,6 @@ func TestCompletionInstall(t *testing.T) {
 		t.Errorf("expected exactly one source line, got %d:\n%s", count, rc)
 	}
 
-	// fish: writes the completion file
 	rootCmd.SetArgs([]string{"completion", "install", "fish"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("completion install fish: %v", err)
@@ -564,20 +537,18 @@ func TestCompletionInstall(t *testing.T) {
 		t.Errorf("fish completion file missing: %v", err)
 	}
 
-	// unsupported shell errors
 	rootCmd.SetArgs([]string{"completion", "install", "tcsh"})
 	if err := rootCmd.Execute(); err == nil {
 		t.Error("expected error for unsupported shell")
 	}
 }
 
-// Every wallet has its own CA, so a trust list read from the local store while
-// the CLI is pointed at a remote wallet anchors nothing the remote issues.
+// A remote wallet may use a different CA. Its trust list must come from the remote
+// API.
 func TestTrustListFollowsTheRemoteWallet(t *testing.T) {
 	resetRemoteTestState(t)
 	url, _ := startRemoteTestWallet(t)
 
-	// A local wallet with its own CA.
 	localHolder, err := mock.GenerateKey()
 	if err != nil {
 		t.Fatal(err)
@@ -595,8 +566,7 @@ func TestTrustListFollowsTheRemoteWallet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetching the remote trust list: %v", err)
 	}
-	// Compared by anchor rather than by JWT: each list is signed when it is
-	// asked for, so two fetches never match byte for byte.
+	// Compare CA certificates because each fetch signs a new trust list JWT.
 	wantAnchors := trustListAnchors(t, served)
 
 	out := captureStdout(t, func() {
@@ -620,8 +590,6 @@ func TestTrustListFollowsTheRemoteWallet(t *testing.T) {
 	}
 }
 
-// trustListAnchors returns the DER of every certificate a trust list JWT
-// carries, keyed for lookup.
 func trustListAnchors(t *testing.T, jwt string) map[string]bool {
 	t.Helper()
 	parts := strings.Split(jwt, ".")
@@ -659,7 +627,6 @@ func trustListAnchors(t *testing.T, jwt string) map[string]bool {
 	return found
 }
 
-// --list names every trust list profile the wallet serves.
 func TestTrustListListsProfiles(t *testing.T) {
 	resetRemoteTestState(t)
 	url, _ := startRemoteTestWallet(t)
@@ -684,10 +651,8 @@ func TestTrustListListsProfiles(t *testing.T) {
 	}
 }
 
-// The same document reaches these renderers from two directions: through JSON
-// from a remote instance (every number a float64) and straight out of the
-// wallet in this process (numbers keep their Go type). Both read as the same
-// status.
+// Remote JSON numbers become float64. Local documents retain Go types. Both must
+// produce the same status label.
 func TestCredentialLabelsReadBothNumberShapes(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -712,14 +677,11 @@ func TestCredentialLabelsReadBothNumberShapes(t *testing.T) {
 	}
 }
 
-// A batch credential is marked in the status column with its copy count, the
-// CLI's text stand-in for the stacked card art the wallet UI draws.
 func TestCredStatusLabelMarksBatch(t *testing.T) {
 	batch := map[string]any{"batch": true, "batch_size": float64(3)}
 	if got := credStatusLabel(batch); got != "batch of 3" {
 		t.Errorf("credStatusLabel for a batch = %q, want %q", got, "batch of 3")
 	}
-	// Without a size the marker still reports that it is a batch.
 	if got := credStatusLabel(map[string]any{"batch": true}); got != "batch" {
 		t.Errorf("credStatusLabel for a batch without a size = %q, want %q", got, "batch")
 	}
@@ -760,8 +722,7 @@ func TestCredDisplayReadsMapAndStruct(t *testing.T) {
 	}
 }
 
-// The validity column answers "is this still good", so it has to distinguish
-// an expired credential from one that never states a lifetime.
+// Distinguish an expired credential from one with no expiry claim.
 func TestCredentialValidityLabel(t *testing.T) {
 	// RFC 3339 carries whole seconds, and the label floors rather than
 	// overstating what is left, so the stamps get a second of slack.
@@ -795,8 +756,6 @@ func TestMatchInstance(t *testing.T) {
 		{Instance: remote.Instance{PID: 4242, Port: 8085, URL: "http://localhost:8085"}},
 	}
 
-	// A number that is one instance's port and another's pid resolves to the
-	// port match, not the pid match.
 	got, err := matchInstance(instances, "8085")
 	if err != nil {
 		t.Fatalf("matchInstance(8085): %v", err)
@@ -805,7 +764,6 @@ func TestMatchInstance(t *testing.T) {
 		t.Fatalf("kill 8085 matched %q, want the server on port 8085", got.URL)
 	}
 
-	// A pid with no colliding port still resolves.
 	got, err = matchInstance(instances, "4242")
 	if err != nil {
 		t.Fatalf("matchInstance(4242): %v", err)
@@ -814,7 +772,6 @@ func TestMatchInstance(t *testing.T) {
 		t.Fatalf("kill 4242 matched pid %d, want 4242", got.PID)
 	}
 
-	// A bare host:port with no dot normalizes and matches by URL.
 	got, err = matchInstance(instances, "localhost:9090")
 	if err != nil {
 		t.Fatalf("matchInstance(localhost:9090): %v", err)

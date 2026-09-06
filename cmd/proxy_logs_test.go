@@ -31,9 +31,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/proxy"
 )
 
-// runProxyLogs runs the command against a dashboard, capturing what it prints
-// to the terminal. The entry renderer writes to stdout and to the color
-// package's writer, which is what the proxy prints with itself.
+// The renderer writes to both stdout and the color package writer. Capture both to
+// check the terminal output.
 func runProxyLogs(t *testing.T, args ...string) string {
 	t.Helper()
 
@@ -73,7 +72,6 @@ func proxyDashboardWith(t *testing.T, entries ...*proxy.TrafficEntry) *httptest.
 	return srv
 }
 
-// A proxy with no terminal of its own, read from one that has.
 func TestProxyLogsPrintsWhatTheProxyRecorded(t *testing.T) {
 	srv := proxyDashboardWith(t,
 		&proxy.TrafficEntry{Method: "POST", URL: "http://issuer.example/token", StatusCode: 200, ClassLabel: "VCI Token"},
@@ -94,8 +92,8 @@ func TestProxyLogsPrintsWhatTheProxyRecorded(t *testing.T) {
 	}
 }
 
-// The decode links have to name the dashboard the traffic came from: a proxy
-// in a container is not reachable at localhost from outside it.
+// Decode links must use the proxy's dashboard URL. A container's localhost address is
+// not reachable from the host.
 func TestProxyLogsLinksDecodeAtTheProxyItRead(t *testing.T) {
 	srv := proxyDashboardWith(t, &proxy.TrafficEntry{
 		Method: "POST", URL: "http://verifier.example/response", StatusCode: 200,
@@ -130,8 +128,7 @@ func TestProxyLogsJSON(t *testing.T) {
 	}
 }
 
-// A proxy that is not there, or an address that is not a dashboard, has to
-// say so rather than print nothing and exit clean.
+// Connection failures must report an error instead of returning empty output.
 func TestProxyLogsReportsAnUnreachableProxy(t *testing.T) {
 	cmd := proxyLogsCmd()
 	cmd.SetOut(&bytes.Buffer{})
@@ -163,9 +160,8 @@ func TestProxyLogsRefusesJSONWithFollow(t *testing.T) {
 	}
 }
 
-// Following prints what arrives while it runs, and prints the traffic
-// recorded before it started exactly once: the subscription predates the
-// read of that traffic, so the first streamed entries can repeat it.
+// Subscribing before reading history can deliver the same entry twice. Follow must
+// print it only once.
 func TestProxyLogsFollowsWithoutRepeatingWhatItAlreadyPrinted(t *testing.T) {
 	store := proxy.NewStore(50)
 	store.Add(&proxy.TrafficEntry{Method: "GET", URL: "http://target/recorded", StatusCode: 200})
@@ -192,8 +188,6 @@ func TestProxyLogsFollowsWithoutRepeatingWhatItAlreadyPrinted(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Execute() }()
 
-	// Give the follow time to print the recorded entry and subscribe, then
-	// record one more.
 	time.Sleep(300 * time.Millisecond)
 	store.Add(&proxy.TrafficEntry{Method: "POST", URL: "http://target/live", StatusCode: 201})
 	time.Sleep(300 * time.Millisecond)
@@ -223,9 +217,8 @@ func TestProxyLogsFollowsWithoutRepeatingWhatItAlreadyPrinted(t *testing.T) {
 	}
 }
 
-// followProxyEntries against a dashboard whose store is swapped underneath
-// it, which is what a restarted proxy looks like from here: the stream ends,
-// and the entries that follow are numbered from the beginning again.
+// Swapping the store simulates a proxy restart. The old stream closes and entry IDs
+// start over.
 func TestProxyLogsFollowSurvivesARestartedProxy(t *testing.T) {
 	proxyLogsReconnectDelay = 10 * time.Millisecond
 	defer func() { proxyLogsReconnectDelay = 2 * time.Second }()
@@ -265,8 +258,6 @@ func TestProxyLogsFollowSurvivesARestartedProxy(t *testing.T) {
 	go func() { done <- cmd.Execute() }()
 	time.Sleep(300 * time.Millisecond)
 
-	// The proxy restarts: a fresh store, numbering from 1 again, and the
-	// stream the follow was reading ends with the old one.
 	mu.Lock()
 	store = proxy.NewStore(50)
 	mu.Unlock()

@@ -56,7 +56,6 @@ func TestDecodeQR_BlankImage(t *testing.T) {
 }
 
 func TestScanFile_InvalidImage(t *testing.T) {
-	// A file that exists but isn't a valid image
 	_, err := ScanFile("scan.go")
 	if err == nil {
 		t.Fatal("expected error for non-image file")

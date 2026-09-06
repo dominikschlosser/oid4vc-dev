@@ -29,14 +29,9 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// resolveTxCode returns the transaction code for an offer: the one passed on
-// the command line, or one typed at the terminal when the offer requires it,
-// since the issuer delivers it out of band. Anything that goes wrong leaves
-// the code empty and lets the flow run, where the issuer's error is clearer.
-//
-// It also returns the offer it read. The issuance reads the URI again, and an
-// issuer that serves it once fails that read, so the offer read here is the
-// fallback.
+// The terminal prompt fetches the offer to learn whether a transaction code is
+// required. Return that copy so issuance can reuse it if the issuer serves the URI
+// only once. Prompt failures leave the code empty for the flow to report.
 func resolveTxCode(uri, given string) (string, *oid4vc.CredentialOffer) {
 	if strings.TrimSpace(given) != "" {
 		return given, nil
@@ -68,7 +63,6 @@ func resolveTxCode(uri, given string) (string, *oid4vc.CredentialOffer) {
 	return strings.TrimSpace(line), offer
 }
 
-// describeTxCodePrompt summarizes a tx_code object for the prompt.
 func describeTxCodePrompt(txCode map[string]any) string {
 	if description, _ := txCode["description"].(string); strings.TrimSpace(description) != "" {
 		return strings.TrimSpace(description)
@@ -91,18 +85,14 @@ func describeTxCodePrompt(txCode map[string]any) string {
 	}
 }
 
-// stdinIsTerminal reports whether there is someone to answer a prompt.
 func stdinIsTerminal() bool {
 	info, err := os.Stdin.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-// acceptOID4URI processes an OID4VP request or OID4VCI offer. Routing comes
-// first and reading second, which is the order [ADR-0012] asks for: a wallet
-// that is going to read the URI is left to read it. `wallet scan` shares this,
-// so a scanned request behaves exactly like a supplied one.
-//
-// [ADR-0012]: docs/adr/0012-every-entry-point-runs-the-same-flow.md
+// Choose the wallet before fetching the URI. Reading an offer here could consume it
+// before the selected wallet starts issuance. Both accept and scan use this route. See
+// docs/adr/0012-every-entry-point-runs-the-same-flow.md.
 func acceptOID4URI(uri string, opts dispatchOID4Opts) error {
 	if _, err := wallet.ParseKeyAttestationLevel(opts.keyAttestationLevel); err != nil {
 		return fmt.Errorf("--key-attestation-level: %w", err)
@@ -112,9 +102,8 @@ func acceptOID4URI(uri string, opts dispatchOID4Opts) error {
 		return err
 	}
 	if c != nil {
-		// A credential_offer_uri is spent by whoever reads it first, and the
-		// wallet is the one that reads it. Its consent dialog asks for the
-		// transaction code, and an issuance given none says what to supply.
+		// The selected wallet fetches the offer and collects the transaction code.
+		// Some offers can be fetched only once.
 		return remoteAccept(c, uri, opts.txCode, !opts.autoAccept)
 	}
 	opts.txCode, opts.resolvedOffer = resolveTxCode(uri, opts.txCode)
@@ -225,7 +214,6 @@ func walletScanCmd() *cobra.Command {
 				return nil
 			}
 
-			// Accept the scanned request exactly like `wallet accept`.
 			return acceptOID4URI(content, dispatchOID4Opts{
 				port:                port,
 				portExplicit:        cmd.Flags().Changed("port"),

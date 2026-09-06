@@ -1,14 +1,6 @@
-// Renders the project wordmark (logo mark + "EUDI Dev Wallet") into
-// docs/assets as PNGs: a banner card, the bare wordmark on a transparent
-// background (light, dark and plain black text), and a 1200x630 card for
-// social posts. The README uses the mark alone
-// (docs/assets/logo-mark.svg), not these.
-//
-// Run it with `node scripts/render-logo.js`. It borrows the Playwright
-// installed for the end-to-end tests (`cd e2e && npm install` if missing).
-//
-// The source of truth stays docs/assets/logo-mark.svg. Re-run this after
-// changing it.
+// Render wordmark and social images from docs/assets/logo-mark.svg. Run node
+// scripts/render-logo.js after changing the SVG. The script uses Playwright from
+// e2e/node_modules.
 const { createRequire } = require('module');
 const fs = require('fs');
 const path = require('path');
@@ -48,9 +40,7 @@ function page({ text, bg, cardBg, cardBorder, radius, markWidth, nameSize, gap, 
 
 const wordmark = { markWidth: 220, nameSize: 104, gap: 40 };
 
-// The wallet UI's two themes, so the logo matches the product either way,
-// plus plain black for a white page or print, where the UI's near-black
-// navy reads as slightly blue.
+// Generate versions for both UI themes and plain black text for print.
 const dark = { text: '#c0caf5', surface: '#1a1b26', border: 'transparent' };
 const light = { text: '#24283b', surface: '#ffffff', border: '#d0d0d0' };
 const black = { text: '#000000', surface: '#ffffff', border: '#d0d0d0' };
@@ -59,11 +49,8 @@ const black = { text: '#000000', surface: '#ffffff', border: '#d0d0d0' };
   const browser = await chromium.launch();
 
   for (const variant of [
-    // Banner cards, content-sized with rounded corners. The README uses the
-    // bare mark, these are for posts and slides.
     { file: 'logo-banner-dark.png', theme: dark, card: true },
     { file: 'logo-banner-light.png', theme: light, card: true },
-    // The same wordmark without a card, to drop on your own background.
     { file: 'logo-wordmark-dark.png', theme: dark, card: false },
     { file: 'logo-wordmark-light.png', theme: light, card: false },
     { file: 'logo-wordmark-black.png', theme: black, card: false },
@@ -82,8 +69,6 @@ const black = { text: '#000000', surface: '#ffffff', border: '#d0d0d0' };
     await p.close();
   }
 
-  // Social cards: the wordmark in the 1200x630 frame link previews expect,
-  // filling it rather than floating in the middle of it.
   for (const variant of [
     { file: 'logo-social-dark.png', theme: dark },
     { file: 'logo-social-light.png', theme: light },

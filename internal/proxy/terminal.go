@@ -35,7 +35,6 @@ var (
 	classColor   = color.New(color.FgMagenta, color.Bold)
 )
 
-// TerminalWriter writes traffic entries to the terminal with color formatting.
 type TerminalWriter struct {
 	AllTraffic    bool
 	DashboardPort int // if > 0, print /decode links
@@ -58,8 +57,6 @@ func (tw *TerminalWriter) WriteEntry(entry *TrafficEntry) {
 	PrintEntry(entry, tw.DashboardPort)
 }
 
-// PrintEntry prints a traffic entry to the terminal with color formatting.
-// If dashboardPort > 0, decode links are printed for each credential.
 func PrintEntry(entry *TrafficEntry, dashboardPort int) {
 	base := ""
 	if dashboardPort > 0 {
@@ -68,11 +65,8 @@ func PrintEntry(entry *TrafficEntry, dashboardPort int) {
 	PrintEntryWithDecodeBase(entry, base)
 }
 
-// PrintEntryWithDecodeBase prints an entry, building the decode links against
-// the dashboard at decodeBase. It is what reading a remote proxy needs: the
-// links have to name the dashboard the traffic came from, which is not
-// localhost when the proxy runs in a container. An empty base prints the CLI
-// hint instead, for a proxy running without a dashboard.
+// PrintEntryWithDecodeBase uses the remote dashboard origin in decode links. Its localhost
+// address may not be reachable by the CLI. With no dashboard, print a CLI command instead.
 func PrintEntryWithDecodeBase(entry *TrafficEntry, decodeBase string) {
 	ts := entry.Timestamp.Format("15:04:05")
 

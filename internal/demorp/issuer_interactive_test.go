@@ -32,8 +32,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// interactiveTestWallet is a wallet at the feature level that uses Interactive
-// Authorization, holding the PID the demo issuer asks for.
 func interactiveTestWallet(t *testing.T) *wallet.Wallet {
 	t.Helper()
 
@@ -53,11 +51,8 @@ func interactiveTestWallet(t *testing.T) *wallet.Wallet {
 	return w
 }
 
-// The whole of OpenID4VCI 1.1 §6 between this toolkit's own wallet and its own
-// issuer: the wallet asks the Authorization Challenge Endpoint, the issuer
-// answers that a PID must be presented first, the wallet presents one, the
-// issuer verifies it as a Verifier would, and only then hands over the
-// authorization code the credential is collected with. No browser is involved.
+// Exercise OpenID4VCI 1.1 §6 with a PID presentation. The issuer must verify it before
+// returning an authorization code, without browser sign-in.
 func TestInteractiveAuthorizationEndToEnd(t *testing.T) {
 	w := interactiveTestWallet(t)
 	d, ts := serveDemoStack(t, w)
@@ -80,8 +75,6 @@ func TestInteractiveAuthorizationEndToEnd(t *testing.T) {
 		t.Errorf("credential count = %d, want %d", got, before+1)
 	}
 
-	// The ticket names the holder of the PID that was presented, which is the
-	// only thing that authorized this issuance.
 	issued, ok := w.GetCredential(result.CredentialID)
 	if !ok {
 		t.Fatalf("credential %s is not in the wallet", result.CredentialID)
@@ -90,7 +83,6 @@ func TestInteractiveAuthorizationEndToEnd(t *testing.T) {
 		t.Errorf("issued credential family_name = %q, want the presented holder", got)
 	}
 
-	// The issuer verified a presentation bound to its challenge endpoint.
 	if got := d.challengeEndpoint(); !strings.HasSuffix(got, "/issuer/authorize-challenge") {
 		t.Errorf("challenge endpoint = %q", got)
 	}
@@ -223,8 +215,7 @@ func TestBrowserOfferAsksForTheAuthViaWebInteraction(t *testing.T) {
 	}
 }
 
-// A wallet at 1.0 is offered the same credential by the same issuer and takes
-// the redirect flow, so the feature level is the only thing that decides.
+// Feature level 1.0 uses the redirect flow for the same offer.
 func TestInteractiveAuthorizationIsNotOfferedAtFeatureLevel10(t *testing.T) {
 	w := interactiveTestWallet(t)
 	w.VCIVersion = wallet.VCIVersion10
@@ -272,9 +263,6 @@ func TestAuthorizationChallengeReportsAMissingInteractionType(t *testing.T) {
 	}
 }
 
-// createOfferState creates an authorization code offer with the given
-// authorization mode and returns its issuer_state, so a challenge request can
-// name a real offer instead of falling back to the no-offer default.
 func createOfferState(t *testing.T, d *DemoRP, authorization string) string {
 	t.Helper()
 	status, created := doJSON(t, d.IssuerHandler(), http.MethodPost, "/api/offers?grant="+authCodeGrant+"&authorization="+authorization, "{}", nil)
@@ -299,11 +287,8 @@ func createOfferState(t *testing.T, d *DemoRP, authorization string) string {
 	return issuerState
 }
 
-// postAuthorizationChallenge sends a minimal challenge request with a valid
-// DPoP proof, whatever client authentication the headers carry, and any extra
-// form values. Without extras the form names no offer, so it lands on the
-// browser sign-in path, whose redirect_to_web answer runs after client
-// authentication: reaching it is proof the authentication passed.
+// Without an issuer_state, the challenge uses browser sign-in. Reaching
+// redirect_to_web proves client authentication succeeded.
 func postAuthorizationChallenge(t *testing.T, d *DemoRP, headers map[string]string, extra url.Values) *httptest.ResponseRecorder {
 	t.Helper()
 	dpopKey, err := mock.GenerateKey()
@@ -380,11 +365,8 @@ func TestAuthorizationChallengeRequiresClientAttestation(t *testing.T) {
 	})
 }
 
-// The whole auth_via_web flow of §6.2.1.2 against the demo issuer: the wallet
-// asks the challenge endpoint, is handed a request_uri, sends the user to the
-// authorization endpoint with it, and the login's redirect back to the wallet
-// carries the code the ticket is issued with. The ticket names the account
-// that signed in, which is only knowable if the login drove the flow.
+// Exercise auth_via_web under OpenID4VCI 1.1 §6.2.1.2. The ticket must identify the
+// account authenticated through the returned browser URL.
 func TestAuthViaWebFlowEndToEnd(t *testing.T) {
 	w := interactiveTestWallet(t)
 	_, ts := serveDemoStack(t, w)
@@ -405,7 +387,6 @@ func TestAuthViaWebFlowEndToEnd(t *testing.T) {
 		t.Fatalf("unexpected authorization URL %q", authURL)
 	}
 
-	// The URL came from the auth_via_web interaction, not from redirect_to_web.
 	sawInteraction := false
 	for _, entry := range w.GetLog() {
 		if entry.Details == nil {
@@ -487,8 +468,6 @@ func TestAuthViaWebFlowEndToEnd(t *testing.T) {
 	}
 }
 
-// signPID issues a holder-bound PID under the wallet's CA, the credential the
-// interactive request asks for.
 func signPID(t *testing.T, d *DemoRP, holderKey *ecdsa.PrivateKey) string {
 	t.Helper()
 	chain, err := d.wallet.DefaultSigningCertChain()
@@ -510,9 +489,6 @@ func signPID(t *testing.T, d *DemoRP, holderKey *ecdsa.PrivateKey) string {
 	return raw
 }
 
-// startInteractiveSession runs an attested initial challenge request for a
-// presentation offer and returns the auth_session and the nonce of the
-// presentation request the issuer asked for.
 func startInteractiveSession(t *testing.T, d *DemoRP, provider walletProvider, clientKey *ecdsa.PrivateKey, issuerState string) (session, nonce string) {
 	t.Helper()
 	rec := postAuthorizationChallenge(t, d, map[string]string{
@@ -545,10 +521,8 @@ func startInteractiveSession(t *testing.T, d *DemoRP, provider walletProvider, c
 	return session, nonce
 }
 
-// The presentation request names the issuer's own CA as a trusted authority by
-// its key identifier, and a credential issued under that CA carries the same
-// identifier as its leaf's AuthorityKeyId. So the aki filter never holds back a
-// credential this issuer would have accepted.
+// The query's aki must match the issued credential's AuthorityKeyId so the wallet can
+// select a credential this issuer trusts.
 func TestInteractiveRequestPinsTheIssuerCA(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 
@@ -557,8 +531,6 @@ func TestInteractiveRequestPinsTheIssuerCA(t *testing.T) {
 		t.Fatal("the demo issuer has no trust anchor key identifier")
 	}
 
-	// A leaf issued under the issuer's CA carries that CA's key identifier as its
-	// AuthorityKeyId, which is what the wallet matches the aki against.
 	caCert := d.wallet.CertChain[len(d.wallet.CertChain)-1]
 	holderKey, err := mock.GenerateKey()
 	if err != nil {
@@ -572,7 +544,6 @@ func TestInteractiveRequestPinsTheIssuerCA(t *testing.T) {
 		t.Errorf("a credential issued under this CA carries aki %q, but the request pins %q", got, aki)
 	}
 
-	// Both credential entries of the presentation request carry that aki.
 	request := d.interactivePresentationRequest(&requestState{
 		queryID: "pid", mdocQueryID: "pid_mdoc", nonce: "n",
 		vct: mock.DefaultPIDVCT, docType: "org.iso.18013.5.1.mDL",
@@ -601,7 +572,6 @@ func TestInteractiveRequestPinsTheIssuerCA(t *testing.T) {
 	}
 }
 
-// signedRequestClaims decodes the payload of a signed request object JWT.
 func signedRequestClaims(t *testing.T, jar string) map[string]any {
 	t.Helper()
 	parts := strings.Split(jar, ".")
@@ -619,11 +589,8 @@ func signedRequestClaims(t *testing.T, jar string) map[string]any {
 	return claims
 }
 
-// The presentation an interactive session hands back is verified as a
-// verifier would verify it, and a presentation that fails any check is
-// answered with access_denied and no authorization code. The passing case
-// runs last, so the refusals cannot be the harness getting the exchange
-// wrong.
+// Failed presentation checks must return access_denied without a code. Run the valid
+// case last to prove the helper can complete the flow.
 func TestInteractiveAuthorizationVerifiesThePresentation(t *testing.T) {
 	d, _, holderKey := newDemoRP(t)
 	issuerState := createOfferState(t, d, authorizationPresentation)

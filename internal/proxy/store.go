@@ -31,7 +31,6 @@ type Store struct {
 	subID       int64
 }
 
-// NewStore creates a new store with the given maximum entry count.
 func NewStore(maxSize int) *Store {
 	return &Store{
 		maxSize:     maxSize,
@@ -41,14 +40,11 @@ func NewStore(maxSize int) *Store {
 	}
 }
 
-// Add stores a traffic entry, evicting the oldest if the buffer is full,
-// and notifies all SSE subscribers.
 func (s *Store) Add(entry *TrafficEntry) {
 	s.mu.Lock()
 	s.nextID++
 	entry.ID = s.nextID
 
-	// Flow correlation
 	if keys := ExtractCorrelationKeys(entry); len(keys) > 0 {
 		for _, key := range keys {
 			if flowID, ok := s.flows[key]; ok {
@@ -68,16 +64,13 @@ func (s *Store) Add(entry *TrafficEntry) {
 	if len(s.entries) >= s.maxSize {
 		evicted := s.entries[0]
 		s.entries = s.entries[1:]
-		// Drop the evicted entry's correlation keys so flows does not grow
-		// without bound over a long session. A logical flow spans a handful of
-		// entries within seconds, far fewer than maxSize, so the keys removed
-		// here belong to flows that are long finished.
+		// Remove evicted correlation keys to bound memory use during long proxy
+		// sessions.
 		for _, key := range ExtractCorrelationKeys(evicted) {
 			delete(s.flows, key)
 		}
 	}
 	s.entries = append(s.entries, entry)
-	// Snapshot subscribers under lock
 	subs := make([]chan *TrafficEntry, 0, len(s.subscribers))
 	for _, ch := range s.subscribers {
 		subs = append(subs, ch)
@@ -94,7 +87,6 @@ func (s *Store) Add(entry *TrafficEntry) {
 	}
 }
 
-// Entries returns a snapshot of all stored entries.
 func (s *Store) Entries() []*TrafficEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -103,7 +95,6 @@ func (s *Store) Entries() []*TrafficEntry {
 	return out
 }
 
-// FlowEntries returns all entries belonging to the given flow.
 func (s *Store) FlowEntries(flowID string) []*TrafficEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -116,7 +107,6 @@ func (s *Store) FlowEntries(flowID string) []*TrafficEntry {
 	return out
 }
 
-// SubscriberCount returns the number of active SSE subscribers.
 func (s *Store) SubscriberCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -136,7 +126,6 @@ func (s *Store) Subscribe() (<-chan *TrafficEntry, func()) {
 		s.mu.Lock()
 		delete(s.subscribers, id)
 		s.mu.Unlock()
-		// Drain any buffered entries (non-blocking)
 		for {
 			select {
 			case _, ok := <-ch:

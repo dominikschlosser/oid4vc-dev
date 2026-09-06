@@ -90,8 +90,7 @@ func TestWallet_LastError(t *testing.T) {
 		t.Errorf("wrong message: %s", e.Message)
 	}
 
-	// The endpoint peeks, so the error survives a read and is dropped by the
-	// tab that decided not to show it.
+	// Polling leaves the error available until the browser dismisses it.
 	if again := w.PeekLastError(nil); again == nil {
 		t.Error("expected the error to survive being read")
 	}
@@ -180,7 +179,6 @@ func TestWallet_ResolveRequest(t *testing.T) {
 		t.Errorf("expected approved, got %s", req.Status)
 	}
 
-	// Cannot resolve again (no longer pending)
 	_, ok = w.ResolveRequest("r1", "denied")
 	if ok {
 		t.Error("expected failed resolve on non-pending request")
@@ -217,14 +215,11 @@ func TestWallet_Subscribe_Unsubscribe(t *testing.T) {
 	ch, unsub := w.Subscribe()
 	unsub()
 
-	// After unsubscribe, new requests should not block or panic
 	w.CreateConsentRequest(&ConsentRequest{ID: "after-unsub", Status: "pending"})
 
 	select {
 	case <-ch:
-		// Drain anything that was buffered before unsub
 	default:
-		// Expected: nothing received
 	}
 }
 
@@ -234,14 +229,11 @@ func TestWallet_SubscribeErrors_Unsubscribe(t *testing.T) {
 	ch, unsub := w.SubscribeErrors()
 	unsub()
 
-	// After unsubscribe, errors should not block or panic
 	w.NotifyError(WalletError{Message: "after unsub"})
 
 	select {
 	case <-ch:
-		// Drain anything buffered
 	default:
-		// Expected: nothing received
 	}
 }
 
@@ -341,7 +333,6 @@ func TestStateSubscription(t *testing.T) {
 	default:
 		t.Fatal("expected a state change signal")
 	}
-	// Bursts coalesce into the one-slot channel without blocking.
 	w.NotifyStateChanged()
 	w.NotifyStateChanged()
 }

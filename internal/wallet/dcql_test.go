@@ -482,8 +482,8 @@ func TestEvaluateDCQL_ClaimSets_StringIDs(t *testing.T) {
 					map[string]any{"id": "birth", "path": []any{"birthdate"}},
 				},
 				"claim_sets": []any{
-					[]any{"family", "given", "birth"}, // all three
-					[]any{"family", "given"},          // just name
+					[]any{"family", "given", "birth"},
+					[]any{"family", "given"},
 				},
 			},
 		},
@@ -494,8 +494,6 @@ func TestEvaluateDCQL_ClaimSets_StringIDs(t *testing.T) {
 		t.Fatalf("expected 1 match, got %d", len(matches))
 	}
 
-	// The first satisfiable claim_set wins, so all three of its claims are
-	// selected.
 	if len(matches[0].SelectedKeys) != 3 {
 		t.Errorf("expected 3 selected keys (first claim_set), got %d: %v",
 			len(matches[0].SelectedKeys), matches[0].SelectedKeys)
@@ -531,7 +529,6 @@ func TestEvaluateDCQL_ClaimSets_FallbackToSecond(t *testing.T) {
 		t.Fatalf("expected 1 match, got %d", len(matches))
 	}
 
-	// The first claim_set is unsatisfiable, so the second one is selected.
 	if len(matches[0].SelectedKeys) != 2 {
 		t.Errorf("expected 2 selected keys (second claim_set), got %d: %v",
 			len(matches[0].SelectedKeys), matches[0].SelectedKeys)
@@ -570,7 +567,6 @@ func TestEvaluateDCQL_ClaimSets_NoneMatchable(t *testing.T) {
 func TestEvaluateDCQL_ClaimSets_IntegerIndicesRejected(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
-	// A claim_sets entry references claims by their string ids.
 	query := map[string]any{
 		"credentials": []any{
 			map[string]any{
@@ -675,8 +671,6 @@ func TestEvaluateDCQL_PartialClaimMatch_StrictModeRejected(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 	w.ValidationMode = ValidationModeStrict
 
-	// A requested claim is required by default, so a credential missing one
-	// does not match in strict mode.
 	query := map[string]any{
 		"credentials": []any{
 			map[string]any{
@@ -702,7 +696,6 @@ func TestEvaluateDCQL_PartialClaimMatch_StrictModeRejected(t *testing.T) {
 func TestEvaluateDCQL_OptionalClaimMissing_Accepted(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
-	// A credential missing only an optional claim still matches.
 	query := map[string]any{
 		"credentials": []any{
 			map[string]any{
@@ -848,7 +841,6 @@ func TestClaimKeyFromPath(t *testing.T) {
 	}
 }
 
-// serveTrustList creates an httptest.Server serving the given trust list JWT.
 func serveTrustList(t *testing.T, tlJWT string) *httptest.Server {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -862,7 +854,6 @@ func serveTrustList(t *testing.T, tlJWT string) *httptest.Server {
 func TestEvaluateDCQL_TrustedAuthorities_Match(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
-	// The trust list names the CA that signed the credentials.
 	tlJWT, err := GenerateTrustListJWT(w.IssuerKey, w.CertChain[len(w.CertChain)-1])
 	if err != nil {
 		t.Fatalf("generating trust list: %v", err)
@@ -897,8 +888,6 @@ func TestEvaluateDCQL_TrustedAuthorities_Match(t *testing.T) {
 func TestEvaluateDCQL_TrustedAuthorities_NoMatch(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
-	// The trust list names a CA unrelated to the one that signed the
-	// credentials.
 	otherKey, _ := mock.GenerateKey()
 	otherCACert, _ := mock.GenerateCACert(otherKey)
 	tlJWT, err := GenerateTrustListJWT(otherKey, otherCACert)
@@ -926,9 +915,7 @@ func TestEvaluateDCQL_TrustedAuthorities_NoMatch(t *testing.T) {
 	assertUntrustedAuthorityBehavior(t, w, query)
 }
 
-// assertUntrustedAuthorityBehavior checks the two modes for a query whose
-// trusted_authorities the wallet's credential does not match: debug offers the
-// credential once, flagged UntrustedAuthority, and strict returns none.
+// Debug mode offers an untrusted match with a flag. Strict mode returns no match.
 func assertUntrustedAuthorityBehavior(t *testing.T, w *Wallet, query map[string]any) {
 	t.Helper()
 	w.ValidationMode = ValidationModeDebug
@@ -971,14 +958,12 @@ func TestEvaluateDCQL_TrustedAuthorities_AKIMatch(t *testing.T) {
 	}
 }
 
-// In debug mode, when the wallet holds both a credential the trusted_authorities
-// match and one they do not, the matching credential is the auto-pick and the
-// other is offered as an alternative flagged UntrustedAuthority.
+// Prefer trusted matches automatically while still offering untrusted alternatives
+// with a warning in debug mode.
 func TestEvaluateDCQL_TrustedAuthorities_TrustedIsTheDefault(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 	aki := w.CertChain[0].AuthorityKeyId
 
-	// A second PID with no x5c cannot match the aki trusted authority.
 	untrusted, err := mock.GenerateSDJWT(mock.SDJWTConfig{
 		Issuer: "https://issuer.example", VCT: mock.DefaultPIDVCT,
 		Claims: mock.SDJWTPIDClaims, Key: w.IssuerKey, CertChain: nil,
@@ -1101,9 +1086,8 @@ func TestEvaluateDCQL_TrustedAuthorities_NoCertChain(t *testing.T) {
 	assertUntrustedAuthorityBehavior(t, w, query)
 }
 
-// credential_sets does two jobs: several entries ask for several credentials
-// at once, and the options inside one entry are alternatives. These cover the
-// first job.
+// Separate credential sets require separate credentials. Options within one set are
+// alternatives.
 func TestEvaluateDCQL_CredentialSets_MultipleRequiredSets(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
@@ -1206,10 +1190,8 @@ func TestEvaluateDCQL_CredentialSets_OptionalSetIsSkipped(t *testing.T) {
 	}
 }
 
-// Preferred-format sorting has to group without disturbing what it does not
-// need to move. A comparator that only asks whether the left side is the
-// preferred format claims i before j and j before i when both are, which sort
-// may resolve either way, so equally preferred matches keep their order.
+// Preserve order among equally preferred formats. A comparator that checks only the
+// left item can report both i before j and j before i.
 func TestEvaluateDCQL_PreferredFormatSortIsStable(t *testing.T) {
 	w := generateTestWallet(t)
 	w.PreferredFormat = "dc+sd-jwt"
@@ -1234,11 +1216,8 @@ func TestEvaluateDCQL_PreferredFormatSortIsStable(t *testing.T) {
 	}
 }
 
-// A DCQL credential query asks for one credential, and this wallet does not
-// implement `multiple`, so two credentials of the same type must not both be
-// reported as matches: every candidate would be signed into a presentation and
-// written to the same key of the vp_token map, and only the last would
-// survive.
+// Keep one credential per query because multiple is unsupported. Otherwise
+// presentations would overwrite the same vp_token map entry.
 func addSDJWTPID(t *testing.T, w *Wallet, id string, iat int64) {
 	t.Helper()
 	key, err := mock.GenerateKey()
@@ -1311,8 +1290,6 @@ func TestEvaluateDCQL_NewestWinsEvenWhenStoredFirst(t *testing.T) {
 	}
 }
 
-// The log names every matched credential. A query nothing answers logs the
-// skipped credentials grouped by reason.
 func TestEvaluateDCQL_LogsMatchesAndGroupedSkipReasons(t *testing.T) {
 	w := generateTestWallet(t)
 	for i := 0; i < 3; i++ {
@@ -1336,8 +1313,8 @@ func TestEvaluateDCQL_LogsMatchesAndGroupedSkipReasons(t *testing.T) {
 	}
 }
 
-// Reducing to one is per query id, not overall: a verifier asking for two
-// different credentials still gets both.
+// Reduce matches per query ID so requests for multiple credential types still return
+// each one.
 func TestEvaluateDCQL_DistinctQueriesEachKeepAMatch(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 

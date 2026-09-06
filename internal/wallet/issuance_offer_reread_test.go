@@ -42,8 +42,6 @@ func TestApprovingAnOfferSurvivesASingleUseOfferURI(t *testing.T) {
 	httpClient = srv.Client()
 	defer func() { httpClient = oldClient }()
 
-	// What the consent dialog does: resolve the offer so it can name what is
-	// being offered.
 	consentReq, _, err := generateTestWallet(t).prepareIssuanceConsentRequest(offerURI, "")
 	if err != nil {
 		t.Fatalf("preparing the consent request: %v", err)
@@ -52,8 +50,6 @@ func TestApprovingAnOfferSurvivesASingleUseOfferURI(t *testing.T) {
 		t.Fatal("the consent dialog resolved no offer to carry into the approval")
 	}
 
-	// What approving does: run the offer, whose second read of the URI the
-	// issuer refuses.
 	result, err := w.ProcessCredentialOfferWithOptions(offerURI, OfferOptions{
 		ResolvedOffer: consentReq.ResolvedOffer,
 	})
@@ -67,8 +63,8 @@ func TestApprovingAnOfferSurvivesASingleUseOfferURI(t *testing.T) {
 		t.Errorf("the offer URI was read %d times, want the dialog's read and the approval's attempt", offerFetches)
 	}
 
-	// The issuer's behavior is worth reporting: it is why a second wallet
-	// reading the same offer would fail.
+	// Log the failed second fetch so users can identify issuers that serve offers
+	// once.
 	var warned bool
 	for _, entry := range w.GetLog() {
 		if entry.Severity == severityWarning && strings.Contains(entry.Detail, "credential_offer_uri") {
@@ -80,8 +76,7 @@ func TestApprovingAnOfferSurvivesASingleUseOfferURI(t *testing.T) {
 	}
 }
 
-// Without an offer resolved earlier there is nothing to fall back on, so a
-// failing read is still the end of the flow.
+// Without a previously approved copy, a failed offer fetch ends issuance.
 func TestAnUnreadableOfferURIStillFailsWithoutAResolvedOffer(t *testing.T) {
 	w := generateTestWallet(t)
 
@@ -92,8 +87,6 @@ func TestAnUnreadableOfferURIStillFailsWithoutAResolvedOffer(t *testing.T) {
 	httpClient = srv.Client()
 	defer func() { httpClient = oldClient }()
 
-	// The first read consumes the offer, so this stands in for a wallet that
-	// never saw it.
 	if _, err := w.ProcessCredentialOffer(offerURI); err != nil {
 		t.Fatalf("the first read should succeed: %v", err)
 	}
@@ -102,9 +95,8 @@ func TestAnUnreadableOfferURIStillFailsWithoutAResolvedOffer(t *testing.T) {
 	}
 }
 
-// The wallet UI's path: the offer arrives, the dialog resolves it, the user
-// approves, and the issuer refuses to serve the offer again. The approval
-// carries what the dialog resolved, so the issuance completes.
+// The UI must complete issuance from its approved offer when the issuer refuses a
+// second fetch.
 func TestApproveRequestCompletesWhenTheIssuerServesTheOfferOnce(t *testing.T) {
 	w := generateTestWallet(t)
 
@@ -141,9 +133,8 @@ func TestApproveRequestCompletesWhenTheIssuerServesTheOfferOnce(t *testing.T) {
 	}
 }
 
-// The user approves what the dialog described. An offer URI that answers the
-// approval with a different issuer does not get to redirect the issuance:
-// nothing asked the user about that one.
+// Reject changes to the issuer after consent. Approval covered the original offer
+// only.
 func TestASwappedOfferDoesNotReplaceTheApprovedOne(t *testing.T) {
 	w := generateTestWallet(t)
 
@@ -191,9 +182,8 @@ func TestASwappedOfferDoesNotReplaceTheApprovedOne(t *testing.T) {
 	}
 }
 
-// An issuer that answers a spent offer with an error body and HTTP 200 is the
-// same case as one that answers with a status code: there is no offer in that
-// response, so the approved one stands.
+// Treat an error body with HTTP 200 as a failed offer fetch and retain the approved
+// copy.
 func TestAnOfferRereadWithoutAnIssuerKeepsTheApprovedOne(t *testing.T) {
 	w := generateTestWallet(t)
 
@@ -233,9 +223,8 @@ func TestAnOfferRereadWithoutAnIssuerKeepsTheApprovedOne(t *testing.T) {
 	}
 }
 
-// The fallback belongs to an approved issuance. An offer submitted through
-// the API or accepted automatically carries none, so nothing can stand in for
-// a read that failed.
+// Automatic and API flows have no approved fallback copy. A failed fetch must fail
+// issuance.
 func TestUnattendedIssuanceCarriesNoApprovedOffer(t *testing.T) {
 	w := generateTestWallet(t)
 	w.AutoAccept = true
@@ -254,8 +243,6 @@ func TestUnattendedIssuanceCarriesNoApprovedOffer(t *testing.T) {
 		t.Fatalf("the first, unattended run failed: %d %s", rec.Code, rec.Body.String())
 	}
 
-	// The offer is spent now, and an unattended run has nothing to fall back
-	// on, so this one has to fail rather than reuse anything.
 	rec = httptest.NewRecorder()
 	server.processOfferURI(rec, offerURI, "", "", false, true)
 	if rec.Code == http.StatusOK {

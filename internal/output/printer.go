@@ -42,12 +42,10 @@ var (
 	errorColor   = color.New(color.FgRed)
 	warnColor    = color.New(color.FgYellow)
 
-	// timeNow is the function used to get the current time. Override in tests.
+	// Tests replace timeNow to control time-dependent output.
 	timeNow = time.Now
 )
 
-// relativeTime returns a human-readable relative duration string for t.
-// Future times return "in X units", past times return "X units ago".
 func relativeTime(t time.Time) string {
 	now := timeNow()
 	d := t.Sub(now)
@@ -83,7 +81,6 @@ func formatDuration(d time.Duration) string {
 	}
 }
 
-// addTokenNotes copies a decoded token's structural findings onto out.
 func addTokenNotes(out map[string]any, token *sdjwt.Token) {
 	if len(token.Warnings) > 0 {
 		out["warnings"] = token.Warnings
@@ -93,8 +90,6 @@ func addTokenNotes(out map[string]any, token *sdjwt.Token) {
 	}
 }
 
-// printTokenNotes prints a decoded token's structural findings, each under its
-// own section.
 func printTokenNotes(token *sdjwt.Token) {
 	if len(token.Warnings) > 0 {
 		printSection("Warnings")
@@ -110,7 +105,6 @@ func printTokenNotes(token *sdjwt.Token) {
 	}
 }
 
-// BuildSDJWTJSON returns the JSON-serializable map for an SD-JWT token.
 func BuildSDJWTJSON(token *sdjwt.Token) map[string]any {
 	out := map[string]any{
 		"format":         "dc+sd-jwt",
@@ -129,7 +123,6 @@ func BuildSDJWTJSON(token *sdjwt.Token) map[string]any {
 	return out
 }
 
-// PrintSDJWT prints a decoded SD-JWT to the terminal.
 func PrintSDJWT(token *sdjwt.Token, opts Options) {
 	if opts.JSON {
 		PrintJSON(BuildSDJWTJSON(token))
@@ -178,7 +171,6 @@ func PrintSDJWT(token *sdjwt.Token, opts Options) {
 	fmt.Println()
 }
 
-// BuildJWTJSON returns the JSON-serializable map for a plain JWT token.
 func BuildJWTJSON(token *sdjwt.Token) map[string]any {
 	out := map[string]any{
 		"format":  "jwt",
@@ -189,7 +181,6 @@ func BuildJWTJSON(token *sdjwt.Token) map[string]any {
 	return out
 }
 
-// PrintJWT prints a decoded plain JWT to the terminal.
 func PrintJWT(token *sdjwt.Token, opts Options) {
 	if opts.JSON {
 		PrintJSON(BuildJWTJSON(token))
@@ -210,7 +201,6 @@ func PrintJWT(token *sdjwt.Token, opts Options) {
 	fmt.Println()
 }
 
-// BuildMDOCJSON returns the JSON-serializable map for an mDOC document.
 func BuildMDOCJSON(doc *mdoc.Document) map[string]any {
 	out := map[string]any{
 		"format":  "mso_mdoc",
@@ -268,9 +258,8 @@ func BuildMDOCJSON(doc *mdoc.Document) map[string]any {
 		}
 		out["mso"] = msoOut
 	}
-	// The holder binding, summarized. The raw COSE_Key stays under
-	// mso.deviceKeyInfo, but integer labels and byte strings are not something
-	// a reader can identify a key by.
+	// Summarize the holder key because raw COSE integer labels and bytes are hard to
+	// identify in the output.
 	out["deviceKey"] = buildDeviceKeyJSON(doc)
 	out["issuerAuth"] = buildIssuerAuthJSON(doc)
 	out["issuerSignedItems"] = buildIssuerSignedItemsJSON(doc)
@@ -281,9 +270,7 @@ func BuildMDOCJSON(doc *mdoc.Document) map[string]any {
 	return out
 }
 
-// buildIssuerAuthJSON describes the COSE_Sign1 the issuer signed the MSO
-// with. It is the mdoc counterpart of a JWT's header and signature, so it is
-// broken into the same parts rather than left as one blob.
+// Display issuerAuth as separate header and signature fields, matching the JWT view.
 func buildIssuerAuthJSON(doc *mdoc.Document) map[string]any {
 	if doc.IssuerAuth == nil {
 		return nil
@@ -303,8 +290,6 @@ func buildIssuerAuthJSON(doc *mdoc.Document) map[string]any {
 	return out
 }
 
-// cborKeyedMap turns a CBOR map with arbitrary keys into string keys, which
-// is what the naming helpers expect.
 func cborKeyedMap(m map[any]any) map[string]any {
 	if len(m) == 0 {
 		return nil
@@ -316,9 +301,8 @@ func cborKeyedMap(m map[any]any) map[string]any {
 	return out
 }
 
-// buildIssuerSignedItemsJSON describes each disclosed element the way mdoc
-// carries it: a salt, a digest id, and a value whose digest the issuer
-// signed. The result of recomputing that digest travels with it.
+// Show each disclosed element with its salt, digest ID, value and digest verification
+// result.
 func buildIssuerSignedItemsJSON(doc *mdoc.Document) map[string]any {
 	if len(doc.NameSpaces) == 0 {
 		return nil
@@ -356,7 +340,6 @@ func buildIssuerSignedItemsJSON(doc *mdoc.Document) map[string]any {
 	return out
 }
 
-// buildDeviceKeyJSON summarizes the holder binding, or reports its absence.
 func buildDeviceKeyJSON(doc *mdoc.Document) map[string]any {
 	if doc.IssuerAuth == nil || doc.IssuerAuth.MSO == nil || doc.IssuerAuth.MSO.DeviceKeyInfo == nil {
 		return map[string]any{"bound": false}
@@ -376,7 +359,6 @@ func buildDeviceKeyJSON(doc *mdoc.Document) map[string]any {
 	return out
 }
 
-// deviceKeyMap pulls the COSE_Key out of deviceKeyInfo.
 func deviceKeyMap(doc *mdoc.Document) map[string]any {
 	if doc.IssuerAuth == nil || doc.IssuerAuth.MSO == nil {
 		return nil
@@ -385,7 +367,6 @@ func deviceKeyMap(doc *mdoc.Document) map[string]any {
 	return key
 }
 
-// deviceAuthType names how the holder authenticated a presentation.
 func deviceAuthType(doc *mdoc.Document) string {
 	switch {
 	case doc.DeviceSigned == nil:
@@ -399,9 +380,8 @@ func deviceAuthType(doc *mdoc.Document) string {
 	}
 }
 
-// printDeviceKey reports the key the credential is bound to. An mdoc without
-// one cannot be presented with device authentication, so the absence is
-// reported too.
+// Report a missing device key because the credential cannot then be presented with
+// device authentication.
 func printDeviceKey(doc *mdoc.Document, mso *mdoc.MSO, opts Options) {
 	if mso.DeviceKeyInfo == nil {
 		printSection("Device Key")
@@ -424,9 +404,8 @@ func printDeviceKey(doc *mdoc.Document, mso *mdoc.MSO, opts Options) {
 	}
 }
 
-// printDeviceAuth reports whether a presentation carries the holder's own
-// signature. Only a DeviceResponse has one: a bare credential is what an
-// issuer handed over, before any holder proved anything about it.
+// Only a DeviceResponse carries holder authentication. A bare credential has not yet
+// been presented.
 func printDeviceAuth(doc *mdoc.Document, opts Options) {
 	if !doc.IsDeviceResponse {
 		return
@@ -447,7 +426,6 @@ func printDeviceAuth(doc *mdoc.Document, opts Options) {
 	}
 }
 
-// PrintMDOC prints a decoded mDOC to the terminal.
 func PrintMDOC(doc *mdoc.Document, opts Options) {
 	if opts.JSON {
 		PrintJSON(BuildMDOCJSON(doc))
@@ -494,7 +472,6 @@ func PrintMDOC(doc *mdoc.Document, opts Options) {
 			printMap(mso.Status, 1)
 		}
 
-		// The holder binding, the same fact cnf carries in an SD-JWT.
 		printDeviceKey(doc, mso, opts)
 	}
 
@@ -526,7 +503,6 @@ func PrintMDOC(doc *mdoc.Document, opts Options) {
 	fmt.Println()
 }
 
-// PrintVerifyResultSDJWT prints SD-JWT verification results.
 func PrintVerifyResultSDJWT(r *sdjwt.VerifyResult, opts Options) {
 	if opts.JSON {
 		PrintJSON(r)
@@ -558,7 +534,6 @@ func PrintVerifyResultSDJWT(r *sdjwt.VerifyResult, opts Options) {
 	}
 }
 
-// PrintVerifyResultMDOC prints mDOC verification results.
 func PrintVerifyResultMDOC(r *mdoc.VerifyResult, opts Options) {
 	if opts.JSON {
 		PrintJSON(r)
@@ -615,8 +590,6 @@ func printKV(key, value string, indent int) {
 	valueColor.Println(value)
 }
 
-// printMapFiltered prints a map but hides verbose-only keys unless verbose is true.
-// When a key is hidden, a summary line is shown instead.
 func printMapFiltered(m map[string]any, indent int, verbose bool, hiddenKeys ...string) {
 	if verbose {
 		printMap(m, indent)
@@ -737,7 +710,6 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// BuildCredentialOfferJSON returns the JSON-serializable map for a credential offer.
 func BuildCredentialOfferJSON(offer *oid4vc.CredentialOffer) map[string]any {
 	out := map[string]any{
 		"type":                         "OID4VCI Credential Offer",
@@ -770,7 +742,6 @@ func BuildCredentialOfferJSON(offer *oid4vc.CredentialOffer) map[string]any {
 	return out
 }
 
-// PrintCredentialOffer prints a decoded OID4VCI credential offer to the terminal.
 func PrintCredentialOffer(offer *oid4vc.CredentialOffer, opts Options) {
 	if opts.JSON {
 		PrintJSON(BuildCredentialOfferJSON(offer))
@@ -826,7 +797,6 @@ func PrintCredentialOffer(offer *oid4vc.CredentialOffer, opts Options) {
 	fmt.Println()
 }
 
-// BuildAuthorizationRequestJSON returns the JSON-serializable map for an authorization request.
 func BuildAuthorizationRequestJSON(req *oid4vc.AuthorizationRequest) map[string]any {
 	out := map[string]any{
 		"type": "OID4VP Authorization Request",
@@ -869,7 +839,6 @@ func BuildAuthorizationRequestJSON(req *oid4vc.AuthorizationRequest) map[string]
 	return out
 }
 
-// PrintAuthorizationRequest prints a decoded OID4VP authorization request to the terminal.
 func PrintAuthorizationRequest(req *oid4vc.AuthorizationRequest, opts Options) {
 	if opts.JSON {
 		PrintJSON(BuildAuthorizationRequestJSON(req))
@@ -937,7 +906,6 @@ func PrintAuthorizationRequest(req *oid4vc.AuthorizationRequest, opts Options) {
 	fmt.Println()
 }
 
-// BuildTrustListJSON returns a JSON-serializable map for a trust list.
 func BuildTrustListJSON(tl *trustlist.TrustList) map[string]any {
 	out := map[string]any{
 		"format": "trustlist",
@@ -976,7 +944,6 @@ func BuildTrustListJSON(tl *trustlist.TrustList) map[string]any {
 	return out
 }
 
-// PrintTrustList prints a trust list in terminal format.
 func PrintTrustList(tl *trustlist.TrustList, opts Options) {
 	if opts.JSON {
 		PrintJSON(BuildTrustListJSON(tl))
@@ -1014,7 +981,6 @@ func PrintTrustList(tl *trustlist.TrustList, opts Options) {
 	fmt.Println()
 }
 
-// PrintError prints an error message.
 func PrintError(msg string) {
 	fmt.Fprintf(os.Stderr, "%s %s\n", errorColor.Sprint("Error:"), msg)
 }

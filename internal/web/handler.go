@@ -27,24 +27,19 @@ import (
 
 const maxRequestBody = 1 << 20 // 1MB
 
-// MuxOptions configures the decoder handler.
 type MuxOptions struct {
 	Credential  string // pre-filled credential served via GET /api/prefill
 	Version     string // release version reported by GET /api/meta
 	ImprintHTML []byte // pre-rendered legal notice served at GET /imprint
 	Demo        bool   // public demo deployment, the UI shows a data disclaimer
-	// CredentialByID resolves a credential held by the wallet this decoder is
-	// mounted on. It backs the ?id= link form, which keeps a decoder link
-	// short (a credential is kilobytes of base64url). Nil on a decoder
-	// without a wallet, which then answers 404.
+	// Resolve ?id= links without putting the full credential in the URL. A decoder
+	// without a wallet returns 404.
 	CredentialByID func(id string) (string, bool)
-	// WalletStore is the store of the wallet this decoder is mounted on. Its
-	// CA and issuer key verify credentials that wallet issued. Nil opens the
-	// default wallet.
+	// Use the mounted wallet's CA and issuer key for local verification. Nil selects
+	// the default wallet.
 	WalletStore *wallet.WalletStore
 }
 
-// ListenAndServe starts the HTTP server on the given port.
 func ListenAndServe(port int, opts MuxOptions) error {
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
@@ -56,13 +51,10 @@ func ListenAndServe(port int, opts MuxOptions) error {
 	return srv.ListenAndServe()
 }
 
-// NewMux creates the HTTP handler with API and static file routes.
-// The credential is served via GET /api/prefill.
 func NewMux(credential string) http.Handler {
 	return NewMuxWithOptions(MuxOptions{Credential: credential})
 }
 
-// NewMuxWithOptions creates the HTTP handler with API and static file routes.
 func NewMuxWithOptions(opts MuxOptions) http.Handler {
 	mux := http.NewServeMux()
 
@@ -76,8 +68,7 @@ func NewMuxWithOptions(opts MuxOptions) http.Handler {
 			"version": opts.Version,
 			"imprint": len(opts.ImprintHTML) > 0,
 			"demo":    opts.Demo,
-			// Whether this decoder is mounted on a wallet the UI can link back to.
-			"wallet": opts.CredentialByID != nil,
+			"wallet":  opts.CredentialByID != nil,
 		})
 	})
 	mux.HandleFunc("GET /imprint", func(w http.ResponseWriter, r *http.Request) {
@@ -89,17 +80,13 @@ func NewMuxWithOptions(opts MuxOptions) http.Handler {
 		w.Write(opts.ImprintHTML)
 	})
 
-	// Static files. Embedded files carry no modtime, so http.FileServer
-	// sends no cache validators and browsers may keep stale assets across
-	// releases (HTML and JS from different versions). no-cache forces
-	// revalidation on every load.
+	// Embedded files have no modification time for cache validation. Require
+	// revalidation so browsers do not mix assets from different releases.
 	sub, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("/", noStaleCache(http.FileServer(http.FS(sub))))
 
-	// This UI decodes whatever it is handed, including a credential someone
-	// else chose and sent as a ?credential= link. The guard sits inside the
-	// returned handler, so a decoder mounted under a prefix on the wallet
-	// still sees its own /api/ paths after the prefix is stripped.
+	// Decoder links can contain attacker-selected credentials. Apply the guard inside
+	// the handler so mounted routes are checked after their prefix is stripped.
 	return httpsec.Headers(httpsec.GuardAPI(mux))
 }
 
@@ -117,8 +104,6 @@ func handlePrefill(credential string) http.HandlerFunc {
 	}
 }
 
-// handleCredentialByID resolves the ?id= form of a decoder link against the
-// wallet the decoder is mounted on.
 func handleCredentialByID(resolve func(string) (string, bool)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if resolve == nil {

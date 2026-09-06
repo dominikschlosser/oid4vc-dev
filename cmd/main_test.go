@@ -20,19 +20,16 @@ import (
 	"testing"
 )
 
-// TestMain isolates these tests from the developer's own configuration.
-// Commands resolve the active wallet through remote.json in the config
-// directory, so without a throwaway directory a test run would drive
-// whatever wallet `wallet use <url>` points at.
+// TestMain uses a temporary config directory so tests cannot control the developer's
+// active remote wallet.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "eudi-cmd-tests-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "creating temporary config directory: %v\n", err)
 		os.Exit(1)
 	}
-	// HOME rather than EUDI_DEV_HOME, so the tests that set HOME themselves
-	// resolve the config directory the same way. The explicit overrides are
-	// cleared so a developer's environment cannot put the real directory back.
+	// Tests that change HOME must still get an isolated config directory. Clear
+	// explicit overrides so they cannot restore the real directory.
 	os.Setenv("HOME", dir)
 	os.Setenv("USERPROFILE", dir)
 	os.Unsetenv("EUDI_DEV_HOME")

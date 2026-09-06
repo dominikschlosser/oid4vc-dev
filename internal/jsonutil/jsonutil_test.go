@@ -24,9 +24,9 @@ func TestGetString(t *testing.T) {
 		want string
 	}{
 		{"name", "alice"},
-		{"age", ""},     // wrong type
-		{"missing", ""}, // missing key
-		{"nil", ""},     // nil value
+		{"age", ""},
+		{"missing", ""},
+		{"nil", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {

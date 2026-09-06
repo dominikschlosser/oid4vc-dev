@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""URI-based issuance demo.
-
-Creates a pre-authorized credential offer in Keycloak and delivers it to the
-wallet's credential offer endpoint as a plain web URL — the same query
-parameters an openid-credential-offer:// link would carry, no custom URL
-scheme involved.
-"""
+"""Create a Keycloak offer and submit its query parameters to the wallet /credential-offer URL."""
 import sys
 
 import oid4vp_demo as demo
@@ -23,15 +17,11 @@ def main():
     print(f"1. Creating a pre-authorized credential offer in {demo.KEYCLOAK_BASE_URL}/realms/{demo.ISSUER_REALM}")
     credential_offer = demo.create_credential_offer()
 
-    # This is the whole point of the example: instead of building
-    #   openid-credential-offer://?credential_offer=<offer>
-    # the same query parameters go straight to the wallet's own URL.
+        # Use the wallet web endpoint with the same parameters as a custom URI offer.
     wallet_url = demo.offer_wallet_url(credential_offer)
     print("2. Invoking the wallet by URL:")
     print(f"   GET {wallet_url[:120]}...")
-    # The wallet runs interactively (no --auto-accept), so it waits for
-    # consent; the helper approves it via the consent API, as the user
-    # would in the wallet UI.
+        # The wallet waits for consent. The helper approves through the API used by the UI.
     status, result = demo.invoke_wallet_interactively(lambda: demo.http_json(wallet_url))
     if status != 200:
         raise demo.DemoError(f"Wallet invocation failed ({status}): {result}")

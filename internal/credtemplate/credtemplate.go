@@ -12,13 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package credtemplate manages credential templates: named, reusable claim
-// sets with per-format defaults (VCT, doc type, namespace, expiry) and the
-// claims embedded plainly instead of selectively disclosable. Pre-defined
-// templates compiled into the binary cover the EUDI PID and the German PID
-// that extends it. User templates are JSON documents under the wallet's
-// templates/ in the storage layer, and one with the same name replaces a
-// pre-defined template.
+// Package credtemplate stores reusable claim sets and issuance defaults. Built-in
+// templates cover EU and German PIDs. A user template with the same name overrides the
+// built-in version.
 package credtemplate
 
 import (
@@ -43,15 +39,12 @@ import (
 type Template struct {
 	// Name identifies the template. For file-based templates it defaults to
 	// the file name without extension.
-	Name string `json:"name,omitempty"`
-	// Description is free text shown in template listings.
+	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 	// Format is "sdjwt", "jwt", or "mdoc" (aliases "dc+sd-jwt", "jwt_vc_json",
 	// and "mso_mdoc" are accepted). Empty means any format.
-	Format string `json:"format,omitempty"`
-	// VCT applies to sdjwt/jwt.
-	VCT string `json:"vct,omitempty"`
-	// DocType and Namespace apply to mdoc.
+	Format    string `json:"format,omitempty"`
+	VCT       string `json:"vct,omitempty"`
 	DocType   string `json:"doctype,omitempty"`
 	Namespace string `json:"namespace,omitempty"`
 	// Exp is a Go duration string (e.g. "720h").
@@ -73,9 +66,6 @@ type Template struct {
 	Predefined bool `json:"predefined,omitempty"`
 }
 
-// TemplateDisplay is the appearance a template gives the credentials issued from
-// it. Colors are CSS colors. Logo and BackgroundImage are references the wallet
-// resolves to card art.
 type TemplateDisplay struct {
 	Name            string `json:"name,omitempty"`
 	Description     string `json:"description,omitempty"`
@@ -86,8 +76,6 @@ type TemplateDisplay struct {
 	BackgroundImage string `json:"background_image,omitempty"`
 }
 
-// templateExtensions are the file extensions recognized in the template
-// directory. Both hold the same JSON document format.
 var templateExtensions = []string{".json", ".template"}
 
 // Location is where user templates live: a prefix inside a store. The zero
@@ -97,7 +85,6 @@ type Location struct {
 	Prefix string
 }
 
-// FileLocation returns the Location of a template directory on disk.
 func FileLocation(dir string) Location {
 	return Location{Store: storage.NewFile(dir)}
 }
@@ -109,8 +96,6 @@ func (l Location) orDefault() Location {
 	return l
 }
 
-// String describes the location for messages: the directory path on the file
-// backend.
 func (l Location) String() string {
 	l = l.orDefault()
 	return l.Store.Locate(l.Prefix)
@@ -137,13 +122,9 @@ func NormalizeFormat(format string) (string, error) {
 	}
 }
 
-// PredefinedTemplates returns the pre-defined templates compiled into the binary. Claims are deep
-// copies, so callers may modify them freely, and their dated claims are
-// recomputed per call so a long-running server does not keep issuing PIDs
-// dated the day it started.
+// PredefinedTemplates copies claims and recalculates dates for each issuance. Otherwise a
+// long-running server would keep issuing PIDs dated at startup.
 func PredefinedTemplates() []Template {
-	// Card art the wallet resolves from its embedded assets. The German PID adds
-	// the public Personalausweis specimen as its background.
 	pidDisplay := func(name, description string) *TemplateDisplay {
 		return &TemplateDisplay{
 			Name:            name,
@@ -154,9 +135,8 @@ func PredefinedTemplates() []Template {
 			LogoAltText:     "eudi-dev logo",
 		}
 	}
-	// Each description ends with the link to the rulebook it follows, so anyone
-	// holding the credential can check the claim set against its source. The
-	// wallet renders a bare URL in a description as a link.
+	// Descriptions link to their rulebooks so holders can check the claim definitions.
+	// The wallet renders bare URLs as links.
 	eudiPIDDisplay := func() *TemplateDisplay {
 		return pidDisplay("EUDI PID", "A demo Person Identification Data (PID) credential for testing PID verification flows. Its attributes follow the EUDI PID Rulebook v1.7 (the country-independent EU dataset), populated with the rulebook's own Jan Wijnand sample identity. Created by eudi-dev, not a real identity. Rulebook: https://github.com/eu-digital-identity-wallet/eudi-doc-attestation-rulebooks-catalog/blob/main/rulebooks/pid/pid-rulebook.md")
 	}
@@ -296,8 +276,6 @@ func Load(nameOrPath string, loc Location) (*Template, error) {
 	return nil, fmt.Errorf("template %q not found (looked in %s and the pre-defined templates, see `templates list`)", nameOrPath, loc)
 }
 
-// Save writes a user template to loc (the default directory for the zero
-// Location) as <name>.json and returns where it was written.
 func Save(loc Location, t Template) (string, error) {
 	name := strings.TrimSpace(t.Name)
 	if name == "" {
@@ -354,10 +332,8 @@ func hasTemplateExtension(name string) bool {
 	return false
 }
 
-// IsBareName reports whether s is a plain template name rather than a path or a
-// file with a template extension, so Load resolves it against the predefined
-// templates and the template directory, never the working directory. A name
-// reaching Load from an untrusted caller has to pass this first.
+// IsBareName restricts untrusted input to template names. Load also accepts file paths,
+// which could read outside template storage.
 func IsBareName(s string) bool {
 	return s != "" &&
 		!strings.ContainsRune(s, os.PathSeparator) &&
@@ -385,8 +361,6 @@ func loadStored(loc Location, name string) (*Template, error) {
 	return parse(data, loc.Store.Locate(key))
 }
 
-// parse decodes a template document. A document without a name is named
-// after its file.
 func parse(data []byte, file string) (*Template, error) {
 	var t Template
 	if err := json.Unmarshal(data, &t); err != nil {

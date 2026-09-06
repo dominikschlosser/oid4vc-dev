@@ -32,9 +32,6 @@ func NegotiateMediaType(accept string) string {
 	return MediaTypeJWT
 }
 
-// acceptQuality returns the q-value an Accept header assigns to a media type,
-// taking the most specific match. A header that mentions nothing matching
-// scores 0.
 func acceptQuality(accept, mediaType string) float64 {
 	if strings.TrimSpace(accept) == "" {
 		return 0

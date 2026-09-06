@@ -82,9 +82,8 @@ func TestParseJWTParts_TwoParts(t *testing.T) {
 }
 
 func TestParseJWTParts_FourParts(t *testing.T) {
-	// SplitN with 3 means the third part contains the rest, so "a.b.c.d" → ["a","b","c.d"]
-	// The third part "c.d" is not valid base64url for the signature, which is
-	// ignored. Header and payload still have to decode.
+	// SplitN leaves c.d in the third part. Signature bytes are ignored here, but
+	// header and payload must decode as JSON.
 	_, _, _, err := ParseJWTParts("not-base64.not-base64.c.d")
 	if err == nil {
 		t.Error("expected error for invalid base64url header")

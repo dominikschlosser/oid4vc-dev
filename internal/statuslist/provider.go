@@ -26,22 +26,19 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// tokenLifetime is how long a generated Status List Token stays valid. The
-// checker rejects an expired token, so a Status Provider that regenerates on
-// every request still has to say when a cached copy stops answering.
+// Set an expiry so a cached status list stops being accepted even though the provider
+// regenerates it on each request.
 const tokenLifetime = 24 * time.Hour
 
 // defaultTTL is the RECOMMENDED caching hint from Section 5.1, in seconds.
 const defaultTTL = 43200
 
-// StatusListConfig holds parameters for generating a Status List Token.
 type StatusListConfig struct {
 	// URI is the status list token URI, used as the "sub" claim. Section 5.1:
 	// "The sub (subject) claim MUST specify the URI of the Status List Token.
 	// The value MUST be equal to that of the uri claim contained in the
 	// status_list claim of the Referenced Token."
-	URI string
-	// Issuer is the "iss" claim value.
+	URI    string
 	Issuer string
 	// Bits is the number of bits per entry. Section 4.1 allows 1, 2, 4 and 8.
 	// Zero means 1.
@@ -127,9 +124,8 @@ func GenerateStatusListJWT(bitstring []byte, signingKey *ecdsa.PrivateKey, cfg S
 	// signing key keeps it consistent with the x5c leaf below.
 	header["jwk"] = mock.PublicKeyJWKMap(&signingKey.PublicKey)
 
-	// The trust anchor must not travel in x5c: a relying party has it out of
-	// band, and a chain that carries its own root proves nothing. HAIP 6.1
-	// rejects a status list token whose chain includes it.
+	// HAIP 6.1 excludes the trust anchor from x5c. Relying parties obtain it
+	// separately.
 	if chain := mock.WithoutSelfSignedTrustAnchor(cfg.CertChain); len(chain) > 0 {
 		x5c := make([]string, 0, len(chain))
 		for _, cert := range chain {

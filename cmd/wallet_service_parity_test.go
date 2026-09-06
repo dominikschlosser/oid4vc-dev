@@ -14,15 +14,8 @@
 
 package cmd
 
-// Every management command runs against either the local store or a remote
-// instance, and prints from the same document. The two backends build those
-// documents in different places: the local one from the wallet in memory, the
-// remote one from whatever the HTTP handler puts in its response. A field that
-// only one of them fills is invisible until a column shows an id where a type
-// belongs.
-//
-// These tests pin the shape rather than the values. Ids and timestamps differ
-// between two wallets. The set of keys a command can read must not.
+// Compare the document fields returned by local and remote management. Their IDs and
+// timestamps differ, but the CLI must be able to read the same fields from both.
 
 import (
 	"reflect"
@@ -35,16 +28,12 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// parityWallets returns the same wallet state behind both backends: one served
-// over HTTP, one read from a store.
 func parityWallets(t *testing.T, seed func(*wallet.Wallet)) (local walletService, remoteSvc walletService) {
 	t.Helper()
 
-	// The wallet comes out of its own store, so the holder key on disk is the
-	// one the credentials are bound to. A wallet built from ad-hoc keys and
-	// only saved as wallet.json would be reloaded by withFreshStore with a
-	// freshly generated holder key, and every seeded credential would come
-	// back bound to a key the reloaded wallet does not hold.
+	// Create the wallet through its store so the saved holder key matches the
+	// credentials. Saving only wallet.json would make a reload generate a different
+	// key.
 	newWallet := func(store *wallet.WalletStore) *wallet.Wallet {
 		w, err := store.LoadOrCreate()
 		if err != nil {
@@ -61,9 +50,8 @@ func parityWallets(t *testing.T, seed func(*wallet.Wallet)) (local walletService
 
 	servedStore := wallet.NewWalletStore(t.TempDir())
 	served := newWallet(servedStore)
-	// A store without a save hook is a trap: withFreshStore reloads from the
-	// store on every request while triggerSave only calls onSave, so writes
-	// would be dropped by the next reload.
+	// Without a save hook, triggerSave would write nothing and the next withFreshStore
+	// reload would discard the changes.
 	srv := wallet.NewServer(served, 0, func() {
 		if err := servedStore.Save(served); err != nil {
 			t.Errorf("saving the served wallet: %v", err)
@@ -148,28 +136,17 @@ func TestConfigDocumentsMatchAcrossBackends(t *testing.T) {
 	}
 }
 
-// --- every method, checked ---
-
-// parityCase observes one walletService method through a backend and reduces
-// the result to something comparable: document keys, a count, a normalized
-// value. Two backends return different ids, paths and timestamps. What a
-// caller can read from them must not differ.
-//
-// Cases seed through the service rather than the filesystem. The two backends
-// resolve their state differently (the local template store comes from a
-// global, the remote one from the server), and a test that reaches around
-// that would be testing its own plumbing.
+// Compare API fields and normalized values across local and remote backends. IDs,
+// paths and timestamps differ between independently created wallets. Seed through
+// walletService so the test uses each backend's normal storage route.
 type parityCase struct {
 	method  string
 	observe func(t *testing.T, svc walletService) any
 	skip    string
 }
 
-// credentialID returns the id of the first credential in the given format.
-// A positional pick would be unstable: the listing orders by issuance time,
-// and two independently seeded wallets do not share timestamps, so whether
-// the SD-JWT or the mdoc PID comes first depends on when seeding crossed a
-// second boundary.
+// Select by format because issuance timestamps can order independently created wallets
+// differently.
 func credentialID(t *testing.T, s walletService, format string) string {
 	t.Helper()
 	docs, err := s.Credentials()
@@ -361,8 +338,8 @@ func parityCases() []parityCase {
 	}
 }
 
-// Adding a walletService method without a parity case fails here, so the
-// duality cannot quietly grow another un-mirrored path.
+// Require a parity case for every walletService method so new methods are checked on
+// both backends.
 func TestEveryWalletServiceMethodHasAParityCase(t *testing.T) {
 	covered := make(map[string]bool)
 	for _, c := range parityCases() {

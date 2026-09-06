@@ -26,11 +26,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/format"
 )
 
-// These pin what DeviceKey reads out of an MSO and what it refuses.
-
-// msoWithDeviceKey builds the smallest document DeviceKey looks at: the
-// display map records that a deviceKey is present, and the CBOR beside it is
-// what gets decoded.
 func msoWithDeviceKey(t *testing.T, coseKey map[any]any) *Document {
 	t.Helper()
 	raw, err := cbor.Marshal(coseKey)
@@ -58,8 +53,6 @@ func coseEC2(x, y []byte) map[any]any {
 	}
 }
 
-// A holder-bound credential must resolve to exactly the key the issuer put
-// in it. Anything else and key binding checks the wrong key.
 func TestDeviceKey_ResolvesTheBoundKey(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -80,10 +73,8 @@ func TestDeviceKey_ResolvesTheBoundKey(t *testing.T) {
 	}
 }
 
-// A coordinate shorter than the curve size is where padding mistakes turn
-// into a different point. Real issuers emit these, because anything encoding
-// a big.Int directly drops the leading zero byte. The test searches for such
-// a key rather than skipping when the first one is not short.
+// Find a key with a leading zero coordinate byte to test padding. Encoders using
+// big.Int.Bytes() omit that byte.
 func TestDeviceKey_ShortCoordinate(t *testing.T) {
 	for attempt := 0; attempt < 20000; attempt++ {
 		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -111,8 +102,8 @@ func TestDeviceKey_ShortCoordinate(t *testing.T) {
 	t.Fatal("no key with a short X coordinate generated in 20000 attempts")
 }
 
-// What DeviceKey must refuse. Returning a key for any of these would report
-// a credential as holder-bound when it is not, or bind it to the wrong key.
+// Malformed device keys must fail instead of binding the credential to an invalid or
+// different key.
 func TestDeviceKey_Rejects(t *testing.T) {
 	valid := make([]byte, 32)
 	valid[31] = 1

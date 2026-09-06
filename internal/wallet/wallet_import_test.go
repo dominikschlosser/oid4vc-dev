@@ -28,9 +28,7 @@ func buildPlainJWTForTest(t *testing.T, payload map[string]any) string {
 		base64.RawURLEncoding.EncodeToString(body) + ".signature"
 }
 
-// A W3C JWT VC (jwt_vc_json) names its type in the type array, not a vct claim,
-// so the wallet reads the type from there for the listing rather than falling
-// back to the format.
+// W3C JWT VC uses a type array instead of the SD-JWT VC vct claim.
 func TestJWTVCType(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -51,8 +49,6 @@ func TestJWTVCType(t *testing.T) {
 	}
 }
 
-// Importing a W3C JWT VC stores its type, so the listing shows the credential
-// type and not "jwt_vc_json".
 func TestImportPlainJWTStoresTheVCType(t *testing.T) {
 	w := generateTestWallet(t)
 	jwt := buildPlainJWTForTest(t, map[string]any{

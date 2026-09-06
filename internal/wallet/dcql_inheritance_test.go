@@ -22,7 +22,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// sdjwtVCTQuery is a DCQL query for one SD-JWT credential of the given type.
 func sdjwtVCTQuery(vct string) map[string]any {
 	return map[string]any{
 		"credentials": []any{
@@ -36,9 +35,7 @@ func sdjwtVCTQuery(vct string) map[string]any {
 	}
 }
 
-// A wallet holding only the German PID answers a request for the
-// country-independent one: the German type extends it, so a credential of the
-// German type is a credential of both.
+// A German PID must match the base PID type it extends.
 func TestEvaluateDCQL_ExtendingTypeAnswersForTheTypeItExtends(t *testing.T) {
 	w := generateTestWallet(t)
 	if err := w.GenerateDefaultCredentials(nil, mock.GermanPIDVCT); err != nil {
@@ -58,8 +55,7 @@ func TestEvaluateDCQL_ExtendingTypeAnswersForTheTypeItExtends(t *testing.T) {
 	}
 }
 
-// Inheritance runs one way only. A verifier asking for the German PID wants
-// the German attributes, and the country-independent PID has not got them.
+// A base PID cannot satisfy a request for German attributes.
 func TestEvaluateDCQL_ExtendedTypeDoesNotAnswerForTheExtendingOne(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
@@ -68,8 +64,6 @@ func TestEvaluateDCQL_ExtendedTypeDoesNotAnswerForTheExtendingOne(t *testing.T) 
 	}
 }
 
-// A wallet holding both answers with one of them, because the query asks for
-// a single credential.
 func TestEvaluateDCQL_BothPIDTypesHeld(t *testing.T) {
 	w := generateTestWallet(t)
 	if err := w.GenerateProtectedDefaults(); err != nil {
@@ -81,7 +75,6 @@ func TestEvaluateDCQL_BothPIDTypesHeld(t *testing.T) {
 		t.Fatalf("expected exactly one credential to be presented, got %d", len(matches))
 	}
 
-	// Asking for the German type reaches only the German credential.
 	german := w.EvaluateDCQL(sdjwtVCTQuery(mock.GermanPIDVCT))
 	if len(german) != 1 {
 		t.Fatalf("expected the German PID to answer its own type, got %d matches", len(german))

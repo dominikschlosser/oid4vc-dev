@@ -51,26 +51,21 @@ type Server struct {
 	// that hold it.
 	store       atomic.Pointer[WalletStore]
 	storeSyncMu sync.Mutex
-	// lastWalletStamp lets a per-request reload skip reparsing a wallet.json
-	// that has not changed since the last load. lastReloadAt bounds how long
-	// that skip may hide a change a coarse-resolution filesystem reports with
-	// the same mtime and size (some container and network volumes), so a stale
-	// in-memory view self-corrects within reloadMaxStale. Guarded by
-	// storeSyncMu.
+	// Skip reparsing unchanged files. Periodic reloads also catch writes that leave
+	// the same modification time and size on filesystems with coarse timestamps.
+	// Guarded by storeSyncMu.
 	lastWalletStamp storage.Stamp
 	lastReloadAt    time.Time
 	staleClientOnce sync.Once
 	demo            *demoState
-	// renewalBackoff holds off retrying a credential whose renewal failed.
-	renewalBackoff map[string]time.Time
-	renewalMu      sync.Mutex
-	// deferredInFlight guards a single deferred issuance from being collected
-	// twice at once (the background poller racing an explicit collect, or two
-	// collects), which would send two requests and import the credential twice.
+	renewalBackoff  map[string]time.Time
+	renewalMu       sync.Mutex
+	// Prevents the background poller and explicit collection requests from collecting
+	// the same deferred credential concurrently.
 	deferredInFlight map[string]bool
 	deferredMu       sync.Mutex
-	// pendingOffers holds offers paused for an interactive sign-in, so the
-	// caller that started one can read how it ended.
+	// Keeps the outcome of offers waiting for interactive sign-in so callers can
+	// retrieve it.
 	pendingOffers map[string]*pendingOffer
 	offerMu       sync.Mutex
 	// tlsMu guards issuerTLSCert, which a renewal replaces under a live
@@ -82,9 +77,8 @@ type Server struct {
 	// sets it to deregister the instance and exit. When nil the process exits
 	// directly.
 	ShutdownFunc func()
-	// Startup conformance defaults, captured so DELETE /api/config/conformance
-	// can restore them after a local wallet's UI changed the runtime settings.
-	// Unused in demo mode, where that endpoint is refused.
+	// DELETE /api/config/conformance restores these startup settings. Demo mode
+	// disables that endpoint.
 	defaultValidationMode          ValidationMode
 	defaultRequireHAIP             bool
 	defaultRequireEncryptedRequest bool
@@ -92,8 +86,7 @@ type Server struct {
 	defaultKeyAttestationLevel     string
 }
 
-// NewServer creates a new wallet HTTP server.
-// onSave is called after credential-changing operations (import, delete, issuance).
+// NewServer calls onSave after operations that change credentials.
 func NewServer(w *Wallet, port int, onSave func()) *Server {
 	processBuildID()
 	s := &Server{
@@ -123,8 +116,7 @@ func NewServer(w *Wallet, port int, onSave func()) *Server {
 	}
 	s.mux = http.NewServeMux()
 	s.setupRoutes()
-	// Set up ParseOptions with wallet-aware request_uri fetcher.
-	// The logFunc is captured lazily so it works even if SetLogger is called after NewServer.
+	// Read logFunc lazily because SetLogger may run after NewServer.
 	s.parseOpts = oid4vc.ParseOptions{
 		FetchRequestURI: MakeFetchRequestURI(w, func(format string, args ...any) {
 			s.log(format, args...)
@@ -134,29 +126,24 @@ func NewServer(w *Wallet, port int, onSave func()) *Server {
 }
 
 func (s *Server) setupRoutes() {
-	// OID4VP Authorization Endpoint
 	s.mux.HandleFunc("GET /authorize", s.withFreshStore(s.handleAuthorize))
 	s.mux.HandleFunc("POST /authorize", s.withFreshStore(s.handleAuthorize))
 
-	// OID4VCI Credential Offer Endpoint: the web-URL counterpart of the
-	// openid-credential-offer:// custom scheme, so issuers can target the
-	// wallet's own URL where scheme registration is unavailable
+	// Issuers can use this URL when the platform cannot register the
+	// openid-credential-offer:// scheme.
 	s.mux.HandleFunc("GET /credential-offer", s.withFreshStore(s.handleCredentialOfferEndpoint))
 
-	// API: feed authorization request URIs
 	s.mux.HandleFunc("POST /api/presentations", s.withFreshStore(s.handlePresentationAPI))
 	s.mux.HandleFunc("POST /api/dc-api", s.withFreshStore(s.handleBrowserPresentationAPI))
 
-	// API: credential offers
 	s.mux.HandleFunc("POST /api/offers", s.withFreshStore(s.handleOfferAPI))
 	s.mux.HandleFunc("GET /api/offers/{id}", s.handleOfferStatus)
 	s.mux.HandleFunc("POST /api/credentials/{id}/refresh", s.withFreshStore(s.handleRefreshCredential))
 	s.mux.HandleFunc("GET /callback", s.withFreshStore(s.handleAuthorizationCodeCallback))
 
-	// API: build identity, used by the URL handler script to detect stale servers
+	// The URL handler checks this endpoint to detect outdated servers.
 	s.mux.HandleFunc("GET /api/version", s.handleVersion)
 
-	// API: credential management
 	s.mux.HandleFunc("GET /api/credentials", s.withFreshStore(s.handleListCredentials))
 	s.mux.HandleFunc("GET /api/deferred", s.withFreshStore(s.handleListDeferred))
 	s.mux.HandleFunc("POST /api/deferred/{id}/collect", s.withFreshStore(s.handleCollectDeferred))
@@ -164,49 +151,41 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/credentials", s.withFreshStore(s.handleImportCredential))
 	s.mux.HandleFunc("DELETE /api/credentials", s.withFreshStore(s.handleDeleteAllCredentials))
 	s.mux.HandleFunc("GET /api/credentials/{id}", s.withFreshStore(s.handleGetCredential))
-	// The display images are static per credential and cached hard, so this
-	// endpoint skips the per-request store reload the other routes take.
+	// Credential images are static and cached, so this route skips reloading the
+	// store.
 	s.mux.HandleFunc("GET /api/credentials/{id}/display/{kind}", s.handleCredentialDisplayImage)
 	s.mux.HandleFunc("DELETE /api/credentials/{id}", s.withFreshStore(s.handleDeleteCredential))
 
-	// API: credential issuance mirroring `issue ... --wallet` and `wallet generate-pid`
 	s.mux.HandleFunc("POST /api/issue", s.withFreshStore(s.handleIssueCredential))
 	s.mux.HandleFunc("POST /api/generate-pid", s.withFreshStore(s.handleGeneratePID))
 
-	// Credential templates
 	s.mux.HandleFunc("GET /api/templates", s.handleListTemplates)
 	s.mux.HandleFunc("GET /api/templates/{name}", s.handleGetTemplate)
 	s.mux.HandleFunc("PUT /api/templates/{name}", s.handlePutTemplate)
 	s.mux.HandleFunc("DELETE /api/templates/{name}", s.handleDeleteTemplate)
 
-	// API: certificate export mirroring `wallet ca-cert` and `wallet tls-cert`
 	s.mux.HandleFunc("GET /api/certificates/ca", s.handleCACertificate)
 	s.mux.HandleFunc("GET /api/certificates/tls", s.handleTLSCertificate)
 
-	// API: consent requests
 	s.mux.HandleFunc("GET /api/requests", s.withFreshStore(s.handleListRequests))
 	s.mux.HandleFunc("GET /api/requests/stream", s.withFreshStore(s.handleRequestStream))
 	s.mux.HandleFunc("POST /api/requests/{id}/approve", s.withFreshStore(s.handleApproveRequest))
 	s.mux.HandleFunc("POST /api/requests/{id}/deny", s.withFreshStore(s.handleDenyRequest))
 
-	// API: trust list
 	s.mux.HandleFunc("GET /api/trustlist", s.withFreshStore(s.handleTrustList))
 	s.mux.HandleFunc("GET /api/trustlists", s.withFreshStore(s.handleTrustListIndex))
 	s.mux.HandleFunc("GET /api/trustlists/{id}", s.withFreshStore(s.handleTrustListByID))
 	s.mux.HandleFunc("GET /api/registrar/wrp", s.withFreshStore(s.handleRegistrarWRPList))
 	s.mux.HandleFunc("GET /api/registrar/wrp/{identifier}", s.withFreshStore(s.handleRegistrarWRPByIdentifier))
 
-	// API: status list
 	s.mux.HandleFunc("GET /api/statuslist", s.withFreshStore(s.handleStatusList))
 	s.mux.HandleFunc("GET /api/crl", s.withFreshStore(s.handleCRL))
 	s.mux.HandleFunc("GET /api/credentials/{id}/status", s.withFreshStore(s.handleGetCredentialStatus))
 	s.mux.HandleFunc("POST /api/credentials/{id}/status", s.withFreshStore(s.handleSetCredentialStatus))
 
-	// SD-JWT VC issuer metadata
 	s.mux.HandleFunc("GET /.well-known/jwt-vc-issuer", s.withFreshStore(s.handleJWTVCIssuerMetadata))
 	s.mux.HandleFunc("GET /.well-known/openid-credential-issuer", s.withFreshStore(s.handleOpenIDCredentialIssuerMetadata))
 
-	// API: testing overrides
 	s.mux.HandleFunc("POST /api/next-error", s.withFreshStore(s.handleSetNextError))
 	s.mux.HandleFunc("DELETE /api/next-error", s.withFreshStore(s.handleClearNextError))
 	s.mux.HandleFunc("PUT /api/config/preferred-format", s.withFreshStore(s.handleSetPreferredFormat))
@@ -216,22 +195,19 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/config", s.withFreshStore(s.handleGetConfig))
 	s.mux.HandleFunc("POST /api/shutdown", s.handleShutdown)
 
-	// API: log
 	s.mux.HandleFunc("GET /api/log", s.withFreshLog(s.handleLog))
 	s.mux.HandleFunc("DELETE /api/log", s.withFreshLog(s.handleClearLog))
 
-	// API: last error (polled on page load)
 	s.mux.HandleFunc("GET /api/error", s.withFreshStore(s.handleLastError))
 	s.mux.HandleFunc("DELETE /api/error", s.withFreshStore(s.handleClearLastError))
 
-	// Operator-supplied legal notice (404 until SetImprint is called)
+	// Returns 404 until SetImprint supplies a legal notice.
 	s.mux.HandleFunc("GET /imprint", s.handleImprint)
 	s.mux.HandleFunc("GET /.well-known/security.txt", handleSecurityTxt)
 
-	// Static files. Embedded files carry no modtime, so http.FileServer
-	// sends no cache validators and browsers may keep stale assets across
-	// releases (HTML and JS from different versions). no-cache forces
-	// revalidation on every load.
+	// Embedded files have no modification time, so http.FileServer cannot provide
+	// cache validators. Require revalidation to prevent browsers from mixing HTML and
+	// JS from different releases.
 	sub, _ := fs.Sub(staticFiles, "static")
 	s.mux.Handle("/", noStaleCache(s.withBrowserSession(http.FileServer(http.FS(sub)))))
 }
@@ -243,7 +219,6 @@ func noStaleCache(h http.Handler) http.Handler {
 	})
 }
 
-// ListenAndServe starts the wallet server.
 func (s *Server) ListenAndServe() error {
 	s.httpSrv = &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
@@ -260,7 +235,6 @@ func (s *Server) ListenAndServe() error {
 	return s.httpSrv.ListenAndServe()
 }
 
-// ListenAndServeBackground starts the server on a random port and returns the address.
 func (s *Server) ListenAndServeBackground() (string, error) {
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {
@@ -284,24 +258,19 @@ func (s *Server) ListenAndServeBackground() (string, error) {
 	return addr, nil
 }
 
-// SetOnConsentRequest sets a callback invoked when a new consent request is created.
 func (s *Server) SetOnConsentRequest(fn func(req *ConsentRequest)) {
 	s.onConsentRequest = fn
 }
 
-// SetOnUIRequest sets a callback invoked when the interactive wallet UI should be shown.
 func (s *Server) SetOnUIRequest(fn func(requestID string)) {
 	s.onUIRequest = fn
 }
 
-// SetLogger sets a logging function for verbose terminal output.
 func (s *Server) SetLogger(fn func(format string, args ...any)) {
 	s.logFunc = fn
 }
 
-// SetStore makes the server reload the wallet store at request boundaries.
-// This keeps a long-running interactive server in sync with credentials and
-// logs written by other CLI invocations using the same wallet directory.
+// SetStore enables reloads at request boundaries to pick up changes from other commands.
 func (s *Server) SetStore(store *WalletStore) {
 	s.storeSyncMu.Lock()
 	defer s.storeSyncMu.Unlock()
@@ -321,13 +290,11 @@ func (s *Server) triggerUIRequest(requestID string) {
 	s.onUIRequest(requestID)
 }
 
-// withFreshStore reloads the wallet from the store before the handler runs.
 func (s *Server) withFreshStore(handler http.HandlerFunc) http.HandlerFunc {
 	return s.reloading(false, handler)
 }
 
-// withFreshLog also loads the activity log, which an entity backend loads
-// on demand.
+// Entity backends load the activity log only when requested.
 func (s *Server) withFreshLog(handler http.HandlerFunc) http.HandlerFunc {
 	return s.reloading(true, handler)
 }
@@ -346,9 +313,8 @@ func (s *Server) reloading(withLog bool, handler http.HandlerFunc) http.HandlerF
 	}
 }
 
-// reloadMaxStale bounds how long the per-request reload may skip reparsing an
-// unchanged store, so a change a coarse-mtime filesystem reports with the same
-// mtime and size still surfaces.
+// Force periodic reloads to catch changes with the same mtime and size on filesystems
+// with coarse timestamps.
 const reloadMaxStale = 2 * time.Second
 
 func (s *Server) reloadFromStore() error {
@@ -357,9 +323,8 @@ func (s *Server) reloadFromStore() error {
 	return s.reloadLocked(false)
 }
 
-// reloadLocked brings the wallet up to date with the store. Caller holds
-// storeSyncMu. On an entity backend only the sections that changed are
-// loaded, and the activity log only when withLog asks for it.
+// Caller must hold storeSyncMu. Entity backends load changed sections and load the
+// activity log only when withLog is true.
 func (s *Server) reloadLocked(withLog bool) error {
 	store := s.store.Load()
 	if store == nil {
@@ -387,11 +352,8 @@ func (s *Server) reloadLocked(withLog bool) error {
 		return store.loadSections(s.wallet, changed)
 	}
 
-	// The store is reloaded per request so several visitors of a shared demo
-	// see each other's changes. The parse is skipped when the stored document
-	// has not changed since the last load, and repeated at least every
-	// reloadMaxStale so a change a coarse-mtime filesystem hides (same mtime
-	// and size) still surfaces.
+	// Skip unchanged files briefly. The time limit catches changes hidden by coarse
+	// timestamps.
 	stamp, ok := store.WalletStamp()
 	if ok && stamp == s.lastWalletStamp && time.Since(s.lastReloadAt) < reloadMaxStale {
 		return nil
@@ -423,16 +385,13 @@ func (s *Server) applyPersistedWalletState(reloaded *Wallet) {
 	s.wallet.CertChain = append([]*x509.Certificate(nil), reloaded.CertChain...)
 	s.wallet.IssuedAttestations = append([]IssuedAttestationSpec(nil), reloaded.IssuedAttestations...)
 	s.wallet.Credentials = append([]StoredCredential(nil), reloaded.Credentials...)
-	// Deferred issuances are not copied from the reloaded state: the poller and
-	// the offer that records one own them in memory and persist them on change.
-	// Overwriting them here would let a reload between recording a deferral
-	// and the poller's first attempt wipe it.
+	// The poller and issuance flow manage deferred issuances in memory. Reloading them
+	// here could erase a new deferral before it has been saved.
 	s.wallet.StatusEntries = cloneStatusEntries(reloaded.StatusEntries)
 	s.wallet.StatusListCounter = reloaded.StatusListCounter
 	s.wallet.Log = append([]LogEntry(nil), reloaded.Log...)
-	// The snapshot moves with the state it describes. The deferred rows are
-	// left out, because the server keeps its own deferred issuances (kept
-	// above) and a save only writes and deletes rows for state it holds.
+	// Copy the snapshot with the loaded state. Keep deferred rows in the existing
+	// snapshot because the server manages them in memory.
 	if store := s.store.Load(); reloaded.persisted != nil && store != nil {
 		s.wallet.persisted = make(stateSnapshot, len(reloaded.persisted))
 		for key, blob := range reloaded.persisted {
@@ -447,7 +406,6 @@ func (s *Server) applyPersistedWalletState(reloaded *Wallet) {
 	s.wallet.allocateStatusIndex = reloaded.allocateStatusIndex
 }
 
-// Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown() {
 	s.stopDemoReset()
 	if s.httpSrv != nil {
@@ -458,18 +416,15 @@ func (s *Server) Shutdown() {
 	}
 }
 
-// Mount registers an additional handler under the given path prefix (no
-// trailing slash), e.g. the embedded credential decoder UI. The prefix is
-// stripped before the request reaches the handler. Call before ListenAndServe.
+// Mount strips the prefix before passing the request to the handler. Call before
+// ListenAndServe.
 func (s *Server) Mount(prefix string, h http.Handler) {
 	s.mux.Handle(prefix+"/", http.StripPrefix(prefix, h))
 	// The bare prefix would otherwise fall through to the UI file server.
 	s.mux.Handle("GET "+prefix, http.RedirectHandler(prefix+"/", http.StatusMovedPermanently))
 }
 
-// Handle registers an extra route on the server mux, e.g. a well-known
-// document a mounted handler needs at the server root. Call before
-// ListenAndServe.
+// Handle must be called before ListenAndServe.
 func (s *Server) Handle(pattern string, h http.Handler) {
 	s.mux.Handle(pattern, h)
 }
@@ -478,16 +433,12 @@ func (s *Server) triggerSave() {
 	if s.onSave != nil {
 		s.onSave()
 	}
-	// Every save is a state change other open UIs should see immediately.
 	s.wallet.NotifyStateChanged()
 }
 
-// saveMutation applies mutate and persists the result under storeSyncMu, so a
-// per-request reload (which replaces the credential, status and log state
-// wholesale from disk) cannot land between the change and its save and drop it.
-// mutate reports whether it changed anything: a no-op skips the save. The save
-// and the notify run after, outside any client I/O, so a slow reader never
-// holds the reload lock.
+// Hold storeSyncMu across the mutation and save. Otherwise a concurrent reload could
+// discard the unsaved change. A false result skips saving. Client I/O runs outside
+// this lock so slow readers cannot block reloading.
 func (s *Server) saveMutation(mutate func() bool) {
 	s.storeSyncMu.Lock()
 	changed := mutate()
@@ -500,21 +451,16 @@ func (s *Server) saveMutation(mutate func() bool) {
 	}
 }
 
-// saveIssuedCredential persists a credential an issuance flow just imported.
-// A long-running flow (an authorization code sign-in) is interleaved with
-// requests that reload the wallet from disk, and a reload landing between the
-// import and the save would drop the credential silently. So it is put back if
-// it went missing, under the same lock the reload takes.
+// A concurrent reload may have dropped the newly issued credential. Restore and save
+// it while holding the reload lock.
 func (s *Server) saveIssuedCredential(result *IssuanceResult) {
 	if result != nil && result.Imported != nil {
 		s.storeSyncMu.Lock()
 		if _, ok := s.wallet.GetCredential(result.Imported.ID); !ok {
 			s.wallet.RestoreCredential(*result.Imported)
 		}
-		// The same reload also wipes the status entry the import adopted for a
-		// credential on this wallet's own status list, leaving it labelled as
-		// externally governed with nothing able to flip its bit. Adoption is
-		// idempotent, so it is done again here.
+		// A reload may also remove the credential's local status entry. Adoption is
+		// idempotent, so restoring it here is safe.
 		s.wallet.adoptOwnStatusEntry(result.Imported)
 		if s.onSave != nil {
 			s.onSave()
@@ -526,11 +472,8 @@ func (s *Server) saveIssuedCredential(result *IssuanceResult) {
 	s.triggerSave()
 }
 
-// saveRenewedCredential persists a renewal. The flow holds no lock while it
-// talks to the issuer, so a concurrent store reload can put the stale copy
-// back before the save, losing the rotated refresh token with it. The
-// renewed copy is written back under the same lock the reload takes, like
-// saveIssuedCredential.
+// Restore the renewed credential while holding the reload lock, including its rotated
+// refresh token.
 func (s *Server) saveRenewedCredential(renewed *StoredCredential) {
 	if renewed == nil {
 		s.triggerSave()
@@ -538,9 +481,8 @@ func (s *Server) saveRenewedCredential(renewed *StoredCredential) {
 	}
 	s.storeSyncMu.Lock()
 	s.wallet.PutCredential(*renewed)
-	// Re-register the status entry from the renewed credential's own claim
-	// (a reload may have wiped or reverted it). A renewal is fresh, so
-	// status 0.
+	// A reload may have removed or reverted the status entry. The renewed credential
+	// starts with status 0.
 	if ref := CredentialStatusRef(*renewed); ref != nil && ref.URI == strings.TrimSpace(s.wallet.StatusListURL()) {
 		s.wallet.RegisterStatusEntry(renewed.ID, ref.Idx)
 	}

@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Reading a running proxy from outside it, through the two dashboard
-// endpoints the dashboard page itself uses: the recorded traffic and the
-// stream of what arrives.
+// Remote readers use the dashboard's traffic history and event stream endpoints.
 
 package proxy
 
@@ -30,12 +28,9 @@ import (
 	"time"
 )
 
-// entriesTimeout bounds a one-shot read of the recorded traffic. The stream
-// deliberately has no deadline, but a dashboard that accepts a connection and
-// then says nothing must not hang the command.
+// History reads need a timeout even though streaming has no deadline.
 var entriesTimeout = 30 * time.Second
 
-// DashboardClient reads traffic from a running proxy's dashboard.
 type DashboardClient struct {
 	// BaseURL is the dashboard origin, without a trailing slash.
 	BaseURL string
@@ -92,7 +87,6 @@ func (c *DashboardClient) get(ctx context.Context, path string) (*http.Response,
 	return resp, nil
 }
 
-// Entries returns the traffic the proxy has recorded so far, oldest first.
 func (c *DashboardClient) Entries(ctx context.Context) ([]*TrafficEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, entriesTimeout)
 	defer cancel()
@@ -110,7 +104,6 @@ func (c *DashboardClient) Entries(ctx context.Context) ([]*TrafficEntry, error) 
 	return entries, nil
 }
 
-// EntryStream delivers the entries a proxy records from now on.
 type EntryStream struct {
 	body   io.ReadCloser
 	reader *bufio.Reader
@@ -150,8 +143,7 @@ func (s *EntryStream) Next() (*TrafficEntry, error) {
 			data = nil
 			var entry *TrafficEntry
 			if err := json.Unmarshal([]byte(payload), &entry); err != nil || entry == nil {
-				// A malformed event, or a null one, is not worth ending the
-				// stream over: the next is likely fine.
+				// Skip malformed events so one bad entry does not end the stream.
 				continue
 			}
 			return entry, nil
@@ -164,7 +156,6 @@ func (s *EntryStream) Next() (*TrafficEntry, error) {
 	}
 }
 
-// Close ends the subscription.
 func (s *EntryStream) Close() error {
 	return s.body.Close()
 }

@@ -27,8 +27,6 @@ import (
 	"time"
 )
 
-// certPEM returns a trust anchor as the standard-base64 DER a trust list
-// carries in an X509Certificate "val".
 func certB64(t *testing.T, commonName string) string {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -153,8 +151,7 @@ func TestParseReadsEntitiesServicesAndCertificates(t *testing.T) {
 	}
 }
 
-// A single unreadable entry must not take the rest of the list with it: a
-// trust list is consumed for the anchors it does carry.
+// Keep valid trust anchors when another list entry cannot be parsed.
 func TestParseSkipsUnreadableEntries(t *testing.T) {
 	good := certB64(t, "Good CA")
 

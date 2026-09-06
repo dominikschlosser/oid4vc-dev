@@ -24,7 +24,6 @@ import (
 // setProcAttr is a no-op on Windows (no process groups via SysProcAttr).
 func setProcAttr(cmd *exec.Cmd) {}
 
-// Stop kills the subprocess on Windows.
 func (s *Subprocess) Stop() {
 	if s.cmd.Process == nil {
 		return

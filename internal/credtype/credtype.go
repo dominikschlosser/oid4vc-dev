@@ -50,18 +50,11 @@ const (
 // is also of (draft-ietf-oauth-sd-jwt-vc-19 §2.2.2.2).
 const AkaVCTsClaim = "aka_vcts"
 
-// PIDVCTPrefix is the URN namespace every PID type lives in.
 const PIDVCTPrefix = "urn:eudi:pid:"
 
-// Extends returns the type vct extends, and whether there is one.
-//
-// It applies PID_14's rule rather than a list of known types, so every
-// domestic PID type extends the country-independent one whether or not this
-// tool has heard of the country. The segment after the urn:eudi:pid: prefix
-// decides: a number names a version of the rulebook's own type, anything else
-// names a country or region (the convention PID_06 uses for mdoc namespaces).
-//
-// Types outside that namespace state their relationships in aka_vcts.
+// Extends applies ARF v3.0.0 Annex 2 PID_14 to domestic PID types. A numeric segment
+// after urn:eudi:pid: identifies a base PID version. Other segments identify a country
+// or region. Types outside this namespace declare inheritance through aka_vcts.
 func Extends(vct string) (string, bool) {
 	rest, ok := strings.CutPrefix(vct, PIDVCTPrefix)
 	if !ok || rest == "" {
@@ -74,7 +67,6 @@ func Extends(vct string) (string, bool) {
 	return PIDVCT, true
 }
 
-// isNumber reports whether s is a run of digits and nothing else.
 func isNumber(s string) bool {
 	for _, r := range s {
 		if r < '0' || r > '9' {
@@ -103,10 +95,8 @@ func Chain(vct string, akaVCTs []string) []string {
 	for _, aka := range akaVCTs {
 		add(aka)
 	}
-	// Walk the inheritance from every type reached so far, so a credential
-	// naming only its immediate parent in aka_vcts still answers for that
-	// parent's own parent. seen bounds the walk, so a rule that ever produced
-	// a cycle would stop rather than hang.
+	// Walk each parent's ancestry so a credential can match indirect base types. The
+	// seen set stops cycles.
 	for i := 0; i < len(chain); i++ {
 		if parent, ok := Extends(chain[i]); ok {
 			add(parent)
@@ -115,8 +105,6 @@ func Chain(vct string, akaVCTs []string) []string {
 	return chain
 }
 
-// Answers reports whether a credential of type vct, carrying akaVCTs, answers
-// a request for the type requested.
 func Answers(vct string, akaVCTs []string, requested string) bool {
 	if requested == "" || vct == "" {
 		return false

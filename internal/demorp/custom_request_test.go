@@ -53,8 +53,6 @@ func customTestWallet(t *testing.T) *wallet.Wallet {
 	return w
 }
 
-// driveWallet plays the wallet's side of a request by fetching the wallet URL,
-// which the demo wallet answers by presenting.
 func driveWallet(t *testing.T, ts *httptest.Server, walletURL string) {
 	t.Helper()
 	resp, err := ts.Client().Get(walletURL)
@@ -68,8 +66,6 @@ func driveWallet(t *testing.T, ts *httptest.Server, walletURL string) {
 	}
 }
 
-// customNationalities reads the nationalities the verifier saw under the first
-// custom credential query.
 func customNationalities(t *testing.T, status map[string]any) []any {
 	t.Helper()
 	claims, ok := status["claims"].(map[string]any)
@@ -134,8 +130,6 @@ func TestVerifierCustomRequestNullArrayDisclosesElements(t *testing.T) {
 	}
 }
 
-// A custom request can ask for an mdoc credential, which exercises the
-// mso_mdoc branch of the generic verification (doctype and element names).
 func TestVerifierCustomRequestMDoc(t *testing.T) {
 	w := customTestWallet(t)
 	_, ts := serveDemoStack(t, w)
@@ -160,8 +154,6 @@ func clientIDOf(walletURL string) string {
 	return u.Query().Get("client_id")
 }
 
-// signingKeyPEM makes a self-signed EC certificate and returns the private key
-// and the certificate as one PEM bundle, the shape the custom builder accepts.
 func signingKeyPEM(t *testing.T) string {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -218,8 +210,6 @@ func TestVerifierCustomRequestSigningKey(t *testing.T) {
 	}
 }
 
-// A custom request under the redirect_uri prefix is delivered unsigned as plain
-// query parameters, and the wallet still presents to it.
 func TestVerifierCustomRequestRedirectURIUnsigned(t *testing.T) {
 	w := customTestWallet(t)
 	_, ts := serveDemoStack(t, w)

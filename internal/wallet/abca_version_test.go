@@ -25,10 +25,7 @@ import (
 	"testing"
 )
 
-// abcaIssuerConfig shapes the authorization server a test wallet talks to:
-// which client authentication methods and proof of possession methods its
-// metadata advertises, whether it advertises DPoP, and whether the token
-// endpoint opens with a challenge demand.
+// Configure issuer metadata and authentication challenges independently for each test.
 type abcaIssuerConfig struct {
 	authMethods []string
 	// popMethods is client_attestation_pop_methods_supported. Nil omits the
@@ -38,9 +35,7 @@ type abcaIssuerConfig struct {
 	// requireCombined refuses a token request that carries a dedicated PoP
 	// header or lacks the attestation, the way a dpop_combined-only server
 	// does.
-	requireCombined bool
-	// requireAttestation refuses a token request that lacks the
-	// OAuth-Client-Attestation header.
+	requireCombined    bool
 	requireAttestation bool
 	// challengeValue makes the token endpoint demand a server-provided
 	// challenge: the first request is answered with use_attestation_challenge
@@ -53,7 +48,6 @@ type abcaIssuerConfig struct {
 	refuseFirstAsStale bool
 }
 
-// abcaCapture records what the token endpoint saw, JWT by JWT.
 type abcaCapture struct {
 	tokenRequests int
 	attestations  []string
@@ -61,8 +55,6 @@ type abcaCapture struct {
 	dpops         []string
 }
 
-// abcaTestIssuer serves a pre-authorized code issuer whose ABCA behavior the
-// config selects, and records what the wallet sent.
 func abcaTestIssuer(t *testing.T, w *Wallet, cfg abcaIssuerConfig) (*httptest.Server, string, *abcaCapture) {
 	t.Helper()
 
@@ -242,11 +234,9 @@ func TestAttestationShapeIsDraftUnion(t *testing.T) {
 	}
 }
 
-// TestCombinedModeAgainstDPoPOnlyServer covers a draft-10 server that offers
-// only attest_jwt_client_auth_dpop (§5.2): the DPoP proof is the possession
-// proof, so the wallet sends the attestation header and no dedicated PoP. The
-// configured version pins an earlier draft, so using the mechanism is warned
-// about and still done.
+// A server offering only draft-10 attest_jwt_client_auth_dpop (§5.2) gets the
+// attestation and a DPoP proof, without a dedicated PoP. Warn when the configured
+// draft predates that method.
 func TestCombinedModeAgainstDPoPOnlyServer(t *testing.T) {
 	w := generateTestWallet(t)
 	w.VCIVersion = VCIVersion11
@@ -302,11 +292,8 @@ func TestPopMethodsMetadataSelectsCombined(t *testing.T) {
 	}
 }
 
-// TestUseAttestationChallengeRetry covers the header-based challenge
-// conversation every supported draft defines: a server may demand a
-// server-provided challenge with the use_attestation_challenge error and hand
-// it over in the OAuth-Client-Attestation-Challenge header, and the client
-// MUST use that challenge for the next PoP.
+// When the server returns use_attestation_challenge, include its
+// OAuth-Client-Attestation-Challenge value in the next PoP.
 func TestUseAttestationChallengeRetry(t *testing.T) {
 	w := generateTestWallet(t)
 	w.VCIVersion = VCIVersion11
@@ -341,9 +328,7 @@ func sortedKeys(m map[string]any) []string {
 	return keys
 }
 
-// TestUseFreshAttestationRetry covers the second §7.4 retry signal: a server
-// refusing the attestation as stale gets one retried request, carrying a
-// freshly issued attestation.
+// Retry once with a fresh attestation after use_fresh_attestation (§7.4).
 func TestUseFreshAttestationRetry(t *testing.T) {
 	w := generateTestWallet(t)
 	w.VCIVersion = VCIVersion11
@@ -365,9 +350,8 @@ func TestUseFreshAttestationRetry(t *testing.T) {
 	}
 }
 
-// TestClientAttestorChallengeUse pins the challenge lifecycle: a challenge
-// served in a response header goes into exactly the next PoP, and the request
-// after that carries one from the challenge endpoint.
+// Use a response header challenge once. Later requests fetch a challenge from the
+// endpoint.
 func TestClientAttestorChallengeUse(t *testing.T) {
 	w := generateTestWallet(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
@@ -398,10 +382,8 @@ func TestClientAttestorChallengeUse(t *testing.T) {
 	}
 }
 
-// TestCombinedModeWithoutDPoPMetadata covers a server whose only client
-// authentication method is attest_jwt_client_auth_dpop while its metadata
-// names no DPoP algorithms: the method itself says the request carries a DPoP
-// proof, so the wallet sends one, with the attestation and no dedicated PoP.
+// attest_jwt_client_auth_dpop requires a DPoP proof even when metadata omits DPoP
+// algorithms.
 func TestCombinedModeWithoutDPoPMetadata(t *testing.T) {
 	w := generateTestWallet(t)
 	w.VCIVersion = VCIVersion11
@@ -423,9 +405,8 @@ func TestCombinedModeWithoutDPoPMetadata(t *testing.T) {
 	}
 }
 
-// TestDedicatedPoPPreferredWhenBothMethodsOffered pins the method choice: the
-// dedicated PoP JWT works with and without DPoP, so a server offering both
-// attestation methods gets attest_jwt_client_auth.
+// Prefer dedicated PoP when both methods are offered because it works with or without
+// DPoP.
 func TestDedicatedPoPPreferredWhenBothMethodsOffered(t *testing.T) {
 	w := generateTestWallet(t)
 	w.VCIVersion = VCIVersion11
@@ -444,9 +425,8 @@ func TestDedicatedPoPPreferredWhenBothMethodsOffered(t *testing.T) {
 	}
 }
 
-// TestStoredABCADraftDrivesEmission pins the persistence contract of
-// ClientAuthentication.ABCADraft: a refresh emits the shape of the draft the
-// issuance was resolved under, whatever the wallet is configured to now.
+// Refresh must retain the ABCA draft selected during issuance even if wallet settings
+// later change.
 func TestStoredABCADraftDrivesEmission(t *testing.T) {
 	w := generateTestWallet(t)
 	w.VCIVersion = VCIVersion11
@@ -465,9 +445,7 @@ func TestStoredABCADraftDrivesEmission(t *testing.T) {
 	}
 }
 
-// TestCombinedModeChallengeInDPoPProof pins where the challenge travels in
-// combined mode: the DPoP proof is the possession proof, so the served
-// challenge lands in its challenge claim on the retried request.
+// In combined mode, put the returned challenge in the retried DPoP proof.
 func TestCombinedModeChallengeInDPoPProof(t *testing.T) {
 	w := generateTestWallet(t)
 	w.VCIVersion = VCIVersion11

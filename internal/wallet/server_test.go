@@ -71,9 +71,8 @@ func serverRequest(t testing.TB, srv *Server, method, path string, body string) 
 	return w
 }
 
-// signedIssuerMetadataRequest asks for the signed form of the Credential Issuer
-// Metadata. §12.2.2 makes the unsigned JSON document the default and serves the
-// signed one to a client that asks for application/jwt.
+// OpenID4VCI 1.0 §12.2.2 serves signed metadata when the client requests
+// application/jwt.
 func signedIssuerMetadataRequest(t *testing.T, srv *Server) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest("GET", "/.well-known/openid-credential-issuer", nil)
@@ -159,8 +158,6 @@ func verifyCompactJWTSignatureWithX5CLeaf(t *testing.T, raw string, header map[s
 		t.Fatal("expected compact JWT signature to verify with x5c leaf")
 	}
 }
-
-// --- Credential Management API Tests ---
 
 func TestListCredentials(t *testing.T) {
 	srv := newTestServer(t, false)
@@ -389,8 +386,6 @@ func TestDeleteCredentialAPI_NotFound(t *testing.T) {
 	}
 }
 
-// --- Consent Request API Tests ---
-
 func TestListPendingRequests_Empty(t *testing.T) {
 	srv := newTestServer(t, false)
 	w := serverRequest(t, srv, "GET", "/api/requests", "")
@@ -429,8 +424,6 @@ func TestDenyRequest_NotFound(t *testing.T) {
 	}
 }
 
-// --- Activity Log API Tests ---
-
 func TestLogAPI_Empty(t *testing.T) {
 	srv := newTestServer(t, false)
 	w := serverRequest(t, srv, "GET", "/api/log", "")
@@ -439,8 +432,6 @@ func TestLogAPI_Empty(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 }
-
-// --- Static Files Tests ---
 
 func TestStaticFiles_Index(t *testing.T) {
 	srv := newTestServer(t, false)
@@ -482,8 +473,6 @@ func TestStaticFiles_JS(t *testing.T) {
 		t.Error("expected app.js to reference /api/credentials")
 	}
 }
-
-// --- Presentation API Tests ---
 
 func TestPresentationAPI_InvalidJSON(t *testing.T) {
 	srv := newTestServer(t, true)
@@ -800,10 +789,8 @@ func TestBrowserPresentationAPI_DCAPISignedJWT(t *testing.T) {
 	if err := json.Unmarshal([]byte(plaintext), &decrypted); err != nil {
 		t.Fatalf("parsing decrypted response: %v", err)
 	}
-	// OID4VP 1.0 Appendix A.2: "since the state parameter is not defined for
-	// the DC API, the Verifier cannot expect it to be included in the
-	// response". A Verifier over this channel correlates by the request it
-	// made, not by a parameter the appendix does not define.
+	// OID4VP 1.0 Appendix A.2 leaves state undefined for DC API responses. The
+	// verifier correlates the response with its API call.
 	if _, present := decrypted["state"]; present {
 		t.Errorf("the encrypted Digital Credentials API response carries state: %v", decrypted["state"])
 	}
@@ -817,12 +804,8 @@ func TestBrowserPresentationAPI_DCAPISignedJWT(t *testing.T) {
 	}
 }
 
-// OID4VP 1.0 Appendix A.2 on expected_origins: "This parameter is not for use
-// in unsigned requests and therefore a Wallet MUST ignore this parameter if it
-// is present in an unsigned request." An unsigned Digital Credentials API
-// request is authenticated by the origin the platform reports, so one that
-// names somebody else in a parameter it does not sign must not be refused for
-// it, even under HAIP.
+// OID4VP 1.0 Appendix A.2 requires ignoring expected_origins in unsigned requests. The
+// platform supplies the origin used to authenticate the request.
 func TestBrowserPresentationAPI_UnsignedRequestIgnoresExpectedOrigins(t *testing.T) {
 	srv := newTestServer(t, true)
 
@@ -848,8 +831,6 @@ func TestBrowserPresentationAPI_UnsignedRequestIgnoresExpectedOrigins(t *testing
 		t.Fatalf("marshaling payload: %v", err)
 	}
 
-	// Conformance is a wallet setting, so hold this request to strict + HAIP
-	// by configuring the wallet.
 	srv.wallet.ValidationMode = ValidationModeStrict
 	srv.wallet.RequireHAIP = true
 
@@ -957,8 +938,6 @@ func TestBrowserPresentationAPI_DCAPIMultiSignedPrefersValidSignature(t *testing
 		t.Fatalf("expected state in browser result, got %v", data["state"])
 	}
 }
-
-// --- Full Presentation E2E Test (auto-accept) ---
 
 func TestPresentationFlow_AutoAccept(t *testing.T) {
 	srv := newTestServer(t, true)
@@ -1212,7 +1191,6 @@ func TestPresentationFlow_AutoAccept_MultipleCredentials(t *testing.T) {
 		t.Error("expected 'pid_mdoc' key in vp_token")
 	}
 
-	// Each query must map to a single non-empty presentation string.
 	for _, qid := range []string{"pid_sdjwt", "pid_mdoc"} {
 		if len(vpToken[qid]) != 1 || vpToken[qid][0] == "" {
 			t.Errorf("expected non-empty presentation for %q", qid)
@@ -1285,10 +1263,8 @@ func TestAuthorize_MissingClientID(t *testing.T) {
 	}
 }
 
-// --- Consent Flow (Interactive) ---
-
 func TestConsentFlow_ApproveAndDeny(t *testing.T) {
-	srv := newTestServer(t, false) // interactive mode
+	srv := newTestServer(t, false)
 
 	verifier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
@@ -1321,7 +1297,6 @@ func TestConsentFlow_ApproveAndDeny(t *testing.T) {
 		"dcql_query":    {string(dcqlJSON)},
 	}
 
-	// Start the authorize flow in a goroutine (it blocks waiting for consent)
 	resultCh := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		req := httptest.NewRequest("GET", "/authorize?"+params.Encode(), nil)
@@ -1651,8 +1626,6 @@ func TestConsentFlow_Deny_DirectPostJWT_SubmitsEncryptedErrorWithState(t *testin
 	}
 }
 
-// --- Trust List API Tests ---
-
 func TestTrustListAPI(t *testing.T) {
 	srv := newTestServer(t, false)
 
@@ -1821,9 +1794,8 @@ func TestJWTVCIssuerMetadata_ExposesSigningKeyTrustedByTrustList(t *testing.T) {
 		t.Fatalf("generating credentials: %v", err)
 	}
 	srv := NewServer(w, 0, nil)
-	// The published expiry is the signing certificate's, not a value fixed
-	// when the server was built: a wallet running for a day would otherwise
-	// advertise a key that had already expired.
+	// Use the current signing certificate's expiry. A value captured at startup
+	// becomes stale after certificate renewal.
 	wantExp := w.SigningCertificateExpiry().Unix()
 
 	metaResp := serverRequest(t, srv, "GET", "/.well-known/jwt-vc-issuer", "")
@@ -1940,10 +1912,7 @@ func TestJWTVCIssuerMetadata_ExposesSigningKeyTrustedByTrustList(t *testing.T) {
 	}
 }
 
-// §12.2.2: "The Credential Issuer MUST support returning metadata in an
-// unsigned form 'application/json' and MAY support returning it in a signed
-// form 'application/jwt'." Serving only the signed form leaves every wallet
-// that does not implement signed metadata with no metadata at all.
+// OpenID4VCI 1.0 §12.2.2 requires unsigned JSON metadata. Signed metadata is optional.
 func TestOpenIDCredentialIssuerMetadata_ServesUnsignedJSONByDefault(t *testing.T) {
 	w := generateTestWallet(t)
 	w.IssuerURL = "https://localhost:8443"
@@ -2233,8 +2202,6 @@ func TestTrustListsAPI_MixedProfilesExposeMultipleTrustListsAndKeepLegacyPIDDefa
 		t.Fatalf("expected 200, got %d: %s", indexResp.Code, indexResp.Body.String())
 	}
 	index := decodeJSON(t, indexResp)
-	// pid and local for the credentials, plus the wallet-provider list that
-	// is always served.
 	rawLists, ok := index["trust_lists"].([]any)
 	if !ok || len(rawLists) != 3 {
 		t.Fatalf("expected 3 trust-list index entries, got %v", index["trust_lists"])
@@ -2340,8 +2307,6 @@ func TestTrustListsAPI_MixedProfilesExposeMultipleTrustListsAndKeepLegacyPIDDefa
 	}
 }
 
-// --- Offer API Tests ---
-
 func TestOfferAPI_InvalidJSON(t *testing.T) {
 	srv := newTestServer(t, false)
 
@@ -2354,14 +2319,11 @@ func TestOfferAPI_InvalidJSON(t *testing.T) {
 	}
 }
 
-// --- OnConsentRequest Callback Tests ---
-
 func TestOnConsentRequest_CalledOnInteractiveFlow(t *testing.T) {
-	srv := newTestServer(t, false) // interactive mode
+	srv := newTestServer(t, false)
 
-	// The callback fires on the request goroutine while this one polls, so
-	// the values it records need a lock. Without one `go test -race` flags
-	// the read below.
+	// The callback writes on the request goroutine while this goroutine reads. Protect
+	// both accesses with a lock.
 	var callbackMu sync.Mutex
 	var callbackCalled bool
 	var callbackReqID string
@@ -2403,7 +2365,6 @@ func TestOnConsentRequest_CalledOnInteractiveFlow(t *testing.T) {
 		"dcql_query":    {string(dcqlJSON)},
 	}
 
-	// Start authorize flow in goroutine (blocks waiting for consent)
 	resultCh := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		req := httptest.NewRequest("GET", "/authorize?"+params.Encode(), nil)
@@ -2436,7 +2397,6 @@ func TestOnConsentRequest_CalledOnInteractiveFlow(t *testing.T) {
 		t.Errorf("callback received request ID %s, expected %s", gotReqID, reqID)
 	}
 
-	// Approve to let the goroutine finish
 	approveReq := httptest.NewRequest("POST", "/api/requests/"+reqID+"/approve",
 		strings.NewReader(`{"selected_claims":{}}`))
 	approveReq.Header.Set("Content-Type", "application/json")
@@ -2447,7 +2407,7 @@ func TestOnConsentRequest_CalledOnInteractiveFlow(t *testing.T) {
 }
 
 func TestOnConsentRequest_NotCalledOnAutoAccept(t *testing.T) {
-	srv := newTestServer(t, true) // auto-accept mode
+	srv := newTestServer(t, true)
 
 	callbackCalled := false
 	srv.SetOnConsentRequest(func(req *ConsentRequest) {
@@ -2501,7 +2461,7 @@ func TestOnConsentRequest_NotCalledOnAutoAccept(t *testing.T) {
 func TestOnUIRequest_CalledOnInteractiveOfferImport(t *testing.T) {
 	srv := newTestServer(t, false)
 
-	// Written on the request goroutine, read here: needs a lock for -race.
+	// Protect writes from the request goroutine and reads from the test goroutine.
 	var callbackMu sync.Mutex
 	callbackCalled := false
 	srv.SetOnUIRequest(func(string) {
@@ -2563,10 +2523,8 @@ func TestOnUIRequest_CalledOnInteractiveOfferImport(t *testing.T) {
 	}
 }
 
-// An interactive offer import resolves the offer twice: once to describe it
-// in the consent dialog, and again to run the flow after approval. Fetching a
-// credential_offer_uri more than once is permitted, and it is what lets the
-// dialog show what is being issued rather than a bare hostname.
+// Interactive issuance fetches the offer before consent and again when processing
+// approval. The specification permits repeated fetches.
 func TestOnUIRequest_InteractiveOfferImportFetchesOfferForDialogAndAfterApproval(t *testing.T) {
 	srv := newTestServer(t, false)
 	offerFetched := make(chan struct{}, 2)
@@ -2601,7 +2559,6 @@ func TestOnUIRequest_InteractiveOfferImportFetchesOfferForDialogAndAfterApproval
 	if reqID == "" {
 		t.Fatal("no pending issuance consent request found")
 	}
-	// Fetched once already, to describe the offer in the dialog.
 	select {
 	case <-offerFetched:
 	case <-time.After(time.Second):
@@ -2634,7 +2591,7 @@ func TestOnUIRequest_InteractiveOfferImportFetchesOfferForDialogAndAfterApproval
 func TestOnUIRequest_NotCalledOnAutoAcceptOfferImport(t *testing.T) {
 	srv := newTestServer(t, true)
 
-	// Written on the request goroutine, read here: needs a lock for -race.
+	// Protect writes from the request goroutine and reads from the test goroutine.
 	var callbackMu sync.Mutex
 	callbackCalled := false
 	srv.SetOnUIRequest(func(string) {
@@ -2817,8 +2774,6 @@ func TestPresentationFlow_RequestURIMethodPost_Encrypted(t *testing.T) {
 	}))
 	defer verifier.Close()
 
-	// Mock request_uri endpoint: reads wallet encryption key from wallet_metadata,
-	// encrypts the request object JWT as JWE
 	requestURIServer := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		walletMetaStr := r.Form.Get("wallet_metadata")
@@ -2891,8 +2846,6 @@ func TestPresentationFlow_RequestURIMethodPost_Encrypted(t *testing.T) {
 	}
 }
 
-// --- Helper ---
-
 func generateSDJWTForTest(t *testing.T, srv *Server) string {
 	t.Helper()
 	result, err := mock.GenerateSDJWT(mock.SDJWTConfig{
@@ -2910,7 +2863,7 @@ func generateSDJWTForTest(t *testing.T, srv *Server) string {
 
 func TestSetIssuerListenPortDisablesTLSListener(t *testing.T) {
 	w := generateTestWallet(t)
-	// A port-less https issuer URL (external TLS terminator) derives port 443.
+	// An HTTPS issuer URL without a port uses 443 for an external TLS terminator.
 	w.IssuerURL = "https://eudi-test.example"
 	srv := NewServer(w, 0, nil)
 	if srv.issuerPort != 443 {
@@ -2930,8 +2883,6 @@ func TestSetIssuerListenPortDisablesTLSListener(t *testing.T) {
 	}
 }
 
-// TestStaticAssetsServed pins the embed pattern: every asset the UI references
-// must be reachable from the binary.
 func TestStaticAssetsServed(t *testing.T) {
 	srv := newTestServer(t, true)
 	for _, path := range []string{"/", "/app.js", "/style.css", "/favicon.svg", "/logo.svg", "/robots.txt"} {
@@ -2945,8 +2896,7 @@ func TestStaticAssetsServed(t *testing.T) {
 	}
 }
 
-// TestSecurityTxt checks the RFC 9116 file: a contact and an expiry under a
-// year ahead.
+// RFC 9116 requires a contact and an expiry less than a year away.
 func TestSecurityTxt(t *testing.T) {
 	srv := newTestServer(t, true)
 	rec := serverRequest(t, srv, "GET", "/.well-known/security.txt", "")
@@ -2967,12 +2917,8 @@ func TestSecurityTxt(t *testing.T) {
 	}
 }
 
-// TestListCredentialsPaging covers the window a paging UI needs: a slice of
-// the list plus the full count, without changing the response shape for
-// clients that ask for everything.
 func TestListCredentialsPaging(t *testing.T) {
 	srv := newTestServer(t, true)
-	// The test server starts with the two default PIDs.
 	for i := 0; i < 23; i++ {
 		body := fmt.Sprintf(`{"format":"sdjwt","vct":"urn:example:%d"}`, i)
 		if w := serverRequest(t, srv, "POST", "/api/issue", body); w.Code != http.StatusCreated {
@@ -3014,7 +2960,7 @@ func TestListCredentialsPaging(t *testing.T) {
 		t.Error("pages returned the same first credential")
 	}
 
-	// A stale page must not error, it just has nothing on it.
+	// A page beyond the current total returns an empty result.
 	if beyond, _ := listed("?limit=10&offset=999"); len(beyond) != 0 {
 		t.Errorf("offset past the end returned %d credentials", len(beyond))
 	}
@@ -3026,9 +2972,8 @@ func TestListCredentialsPaging(t *testing.T) {
 	}
 }
 
-// An idle event stream has to send something periodically. Without it,
-// proxies drop the connection, the browser reconnects, and a single open tab
-// turns into a steady stream of new requests.
+// Keepalives prevent proxies from closing idle streams and causing repeated browser
+// reconnects.
 func TestRequestStreamKeepalive(t *testing.T) {
 	srv := newTestServer(t, true)
 
@@ -3051,7 +2996,7 @@ func TestRequestStreamKeepalive(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Two of them: one proves the ticker fires, two prove it keeps firing.
+	// Two events check that the ticker continues after the first interval.
 	reader := bufio.NewReader(resp.Body)
 	seen := 0
 	for seen < 2 {
@@ -3065,11 +3010,8 @@ func TestRequestStreamKeepalive(t *testing.T) {
 	}
 }
 
-// A page on another site can reach a wallet on localhost, and the request
-// that matters here (a POST carrying text/plain) is not preflighted, so CORS
-// never gets a say. Without the guard this submits the wallet's credentials
-// to a response_uri the page chose, and auto_accept in the body means the
-// user is never asked.
+// A text/plain POST needs no CORS preflight. Without the origin check, another site
+// could submit credentials to its own response_uri with auto_accept enabled.
 func TestCrossOriginPresentationIsRefused(t *testing.T) {
 	srv := newTestServer(t, false)
 
@@ -3114,8 +3056,6 @@ func TestCrossOriginPresentationIsRefused(t *testing.T) {
 	}
 }
 
-// The same call from the wallet's own UI has to keep working, and so does
-// the one the CLI makes with no Origin at all.
 func TestSameOriginAndOriginlessAPICallsAreAllowed(t *testing.T) {
 	srv := newTestServer(t, false)
 
@@ -3138,10 +3078,8 @@ func TestSameOriginAndOriginlessAPICallsAreAllowed(t *testing.T) {
 	}
 }
 
-// The Digital Credentials API is invoked by a verifier's web page from that
-// page's own origin, so the cross-origin guard must not cover it. What
-// protects it is the origin the platform reports, which an unsigned Digital
-// Credentials API request is authenticated by, and the consent dialog.
+// The DC API is called from the verifier's origin. It therefore allows cross-origin
+// requests and relies on the platform origin and wallet consent.
 func TestBrowserAPIAcceptsACrossOriginCaller(t *testing.T) {
 	srv := newTestServer(t, false)
 
@@ -3157,8 +3095,6 @@ func TestBrowserAPIAcceptsACrossOriginCaller(t *testing.T) {
 	}
 }
 
-// The exemption is for that endpoint alone. Everything else the guard covers
-// still refuses a page on another site.
 func TestTheDCAPIExemptionDoesNotLeakToOtherEndpoints(t *testing.T) {
 	srv := newTestServer(t, false)
 
@@ -3176,9 +3112,7 @@ func TestTheDCAPIExemptionDoesNotLeakToOtherEndpoints(t *testing.T) {
 	}
 }
 
-// encryptionClientMetadata is the verifier metadata an encrypted response mode
-// needs: an ephemeral key to encrypt to, and both content encryption
-// algorithms HAIP §5 obliges a Verifier to list.
+// HAIP §5 requires verifiers to advertise both content encryption algorithms.
 func encryptionClientMetadata(t *testing.T) map[string]any {
 	t.Helper()
 	encKey, err := mock.GenerateKey()

@@ -25,7 +25,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// CreateSelfIssuedIDToken creates a SIOPv2 self-issued ID token JWT signed by the wallet's holder key.
 func (w *Wallet) CreateSelfIssuedIDToken(nonce, clientID string) (string, error) {
 	subJWK := mock.PublicKeyJWKMap(&w.HolderKey.PublicKey)
 	thumbprint, err := jwkThumbprint(&w.HolderKey.PublicKey)
@@ -67,7 +66,6 @@ func jwkThumbprint(key *ecdsa.PublicKey) (string, error) {
 	return format.EncodeBase64URL(h[:]), nil
 }
 
-// ResponseTypeContains checks if a space-separated response_type string contains the given value.
 func ResponseTypeContains(responseType, target string) bool {
 	for _, rt := range strings.Fields(responseType) {
 		if rt == target {

@@ -38,7 +38,6 @@ func testKey(t *testing.T) *ecdsa.PrivateKey {
 	return key
 }
 
-// deviceKeyCBOR encodes a public key the way an MSO carries it, as a COSE_Key.
 func deviceKeyCBOR(t *testing.T, pub *ecdsa.PublicKey) []byte {
 	t.Helper()
 	x, y, err := format.ECPublicCoords(pub)
@@ -56,8 +55,6 @@ func deviceKeyCBOR(t *testing.T, pub *ecdsa.PublicKey) []byte {
 	return encoded
 }
 
-// signDeviceAuth produces the deviceSignature a holder sends: a COSE_Sign1
-// over DeviceAuthentication with the payload detached.
 func signDeviceAuth(t *testing.T, key *ecdsa.PrivateKey, sessionTranscript []byte, docType string) []byte {
 	t.Helper()
 
@@ -110,8 +107,8 @@ func transcriptFor(t *testing.T, nonce string) []byte {
 	return encoded
 }
 
-// signDeviceAuthVerbatim signs like the wallet does: it embeds the session
-// transcript bytes as-is, without the decode and re-encode signDeviceAuth uses.
+// Embed the session transcript bytes directly, as the wallet does. The other helper
+// decodes and re-encodes them.
 func signDeviceAuthVerbatim(t *testing.T, key *ecdsa.PrivateKey, sessionTranscript []byte, docType string) []byte {
 	t.Helper()
 	emptyNamespaces, err := tag24(map[string]any{})
@@ -147,10 +144,8 @@ func signDeviceAuthVerbatim(t *testing.T, key *ecdsa.PrivateKey, sessionTranscri
 	return encoded
 }
 
-// The verifier embeds the session transcript bytes verbatim, as the holder
-// signed them. A transcript that a decode and re-encode would not reproduce
-// unchanged (here an indefinite-length item that re-encodes to a definite one,
-// as an mdoc handover's maps and tags can) still verifies.
+// Preserve the signed transcript bytes. Decoding and re-encoding this
+// indefinite-length CBOR changes its encoding and would break verification.
 func TestVerifyDeviceAuthEmbedsTheTranscriptVerbatim(t *testing.T) {
 	key := testKey(t)
 	transcript := []byte{0x9f, 0x00, 0xff} // indefinite-length array holding [0]

@@ -29,10 +29,8 @@ import (
 
 const appBundleName = "EUDI-Dev-Wallet.app"
 
-// legacyAppBundleName is the bundle earlier releases installed. It is removed
-// and deregistered explicitly: left behind, Launch Services keeps a second
-// handler for the same schemes and macOS shows it in the open dialog or asks
-// which app to use.
+// An old bundle left registered in Launch Services would appear as a second handler
+// for the same URL schemes.
 const legacyAppBundleName = "OID4VC-Dev-Wallet.app"
 
 func supportsURLSchemeRegistration() bool {
@@ -49,13 +47,12 @@ func legacyAppBundlePath() string {
 	return filepath.Join(home, "Applications", legacyAppBundleName)
 }
 
-// removeBundle deregisters a bundle from Launch Services and deletes it.
 func removeBundle(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil
 	}
 	lsregister := "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-	_, _ = exec.Command(lsregister, "-u", path).CombinedOutput() // not registered is fine
+	_, _ = exec.Command(lsregister, "-u", path).CombinedOutput() // Deregistration may fail if the bundle was never registered.
 	return os.RemoveAll(path)
 }
 
@@ -65,9 +62,8 @@ func handlerScriptPath() string {
 	return filepath.Join(config.BaseDir(), "url-handler.sh")
 }
 
-// RegisterURLSchemes creates a macOS .app bundle via osacompile and registers URL scheme handlers.
-// macOS delivers URLs via Apple Events, so we use an AppleScript with "on open location"
-// that calls a bash handler script.
+// RegisterURLSchemes installs an Apple Events handler for macOS scheme URLs. The bundle's
+// AppleScript handles "on open location" and calls the shell script.
 func RegisterURLSchemes(opts RegisterOptions) error {
 	binaryPath, err := os.Executable()
 	if err != nil {
@@ -89,8 +85,7 @@ func RegisterURLSchemes(opts RegisterOptions) error {
 		return fmt.Errorf("writing handler script: %w", err)
 	}
 
-	// Remove existing bundles so osacompile can create a fresh one, including
-	// an earlier release's bundle that would otherwise keep claiming the schemes.
+	// osacompile requires the output bundle to be absent.
 	bundlePath := appBundlePath()
 	os.RemoveAll(bundlePath)
 	if err := removeBundle(legacyAppBundlePath()); err != nil {
@@ -102,9 +97,7 @@ func RegisterURLSchemes(opts RegisterOptions) error {
 	return compileHandlerBundle(handlerPath, bundlePath, binaryPath, opts)
 }
 
-// compileHandlerBundle builds the .app that macOS dispatches URL schemes to.
 func compileHandlerBundle(handlerPath, bundlePath, binaryPath string, opts RegisterOptions) error {
-	// Write AppleScript source. "on open location" receives the URL from macOS Apple Events
 	appleScript := fmt.Sprintf(`on open location theURL
 	do shell script quoted form of "%s" & " " & quoted form of theURL & " >> /tmp/eudi-dev-wallet.log 2>&1 &"
 end open location
@@ -127,7 +120,7 @@ end open location
 		return fmt.Errorf("osacompile failed: %s: %w", string(out), err)
 	}
 
-	// Patch Info.plist to add URL schemes and LSUIElement (no Dock icon)
+	// LSUIElement hides the app from the Dock.
 	plistPath := filepath.Join(bundlePath, "Contents", "Info.plist")
 	plistBuddy := "/usr/libexec/PlistBuddy"
 
@@ -135,14 +128,12 @@ end open location
 		{"-c", "Add :CFBundleIdentifier string dev.eudi.wallet", plistPath},
 		{"-c", "Add :LSUIElement bool true", plistPath},
 		{"-c", "Add :CFBundleURLTypes array", plistPath},
-		// OID4VP schemes
 		{"-c", "Add :CFBundleURLTypes:0 dict", plistPath},
 		{"-c", "Add :CFBundleURLTypes:0:CFBundleURLName string OID4VP", plistPath},
 		{"-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes array", plistPath},
 		{"-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string openid4vp", plistPath},
 		{"-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes:1 string eudi-openid4vp", plistPath},
 		{"-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes:2 string haip-vp", plistPath},
-		// OID4VCI scheme
 		{"-c", "Add :CFBundleURLTypes:1 dict", plistPath},
 		{"-c", "Add :CFBundleURLTypes:1:CFBundleURLName string OID4VCI", plistPath},
 		{"-c", "Add :CFBundleURLTypes:1:CFBundleURLSchemes array", plistPath},
@@ -163,7 +154,6 @@ end open location
 		return fmt.Errorf("codesign failed: %s: %w", string(out), err)
 	}
 
-	// Register with Launch Services
 	lsregister := "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 	cmd = exec.Command(lsregister, "-R", bundlePath)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -187,19 +177,17 @@ end open location
 	return nil
 }
 
-// UnregisterURLSchemes removes the macOS .app bundle and handler script.
 func UnregisterURLSchemes() error {
 	bundlePath := appBundlePath()
 
 	if err := removeBundle(bundlePath); err != nil {
 		return fmt.Errorf("removing app bundle: %w", err)
 	}
-	// Remove an earlier release's bundle too.
 	if err := removeBundle(legacyAppBundlePath()); err != nil {
 		return fmt.Errorf("removing the previous %s: %w", legacyAppBundleName, err)
 	}
 
-	os.Remove(handlerScriptPath()) // ignore errors if not present
+	os.Remove(handlerScriptPath())
 
 	fmt.Printf("Unregistered URL scheme handlers and removed %s\n", bundlePath)
 	return nil

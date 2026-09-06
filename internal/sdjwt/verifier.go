@@ -24,7 +24,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/jws"
 )
 
-// VerifyResult contains the result of signature and validity verification.
 type VerifyResult struct {
 	SignatureValid bool
 	Expired        bool
@@ -38,7 +37,6 @@ type VerifyResult struct {
 	Errors         []string
 }
 
-// Verify verifies the SD-JWT signature using the provided public key.
 func Verify(token *Token, pubKey crypto.PublicKey) *VerifyResult {
 	result := &VerifyResult{}
 
@@ -81,8 +79,7 @@ func Verify(token *Token, pubKey crypto.PublicKey) *VerifyResult {
 	return result
 }
 
-// isSupportedAlgorithm lets Verify name an unsupported algorithm before the
-// signature check fails on it.
+// Report unsupported algorithms before attempting signature verification.
 func isSupportedAlgorithm(alg string) bool {
 	for _, supported := range jws.SupportedAlgorithms {
 		if string(supported) == alg {

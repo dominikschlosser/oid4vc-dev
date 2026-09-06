@@ -1,7 +1,6 @@
 (function() {
   'use strict';
 
-  // Theme toggle
   const themeBtn = document.getElementById('theme-toggle');
   const saved = localStorage.getItem('wallet-theme');
   if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
@@ -11,9 +10,7 @@
     localStorage.setItem('wallet-theme', isLight ? '' : 'light');
   });
 
-  // Header menu toggle (narrow screens). The links are a horizontal row on
-  // wide screens and a drop-down list behind this button when they no longer
-  // fit. CSS decides which via the media query, this only flips the state.
+  // CSS chooses the menu layout. JavaScript only controls whether it is open.
   const menuToggle = document.getElementById('header-menu-toggle');
   const headerLinks = document.getElementById('header-links');
   if (menuToggle && headerLinks) {
@@ -21,7 +18,6 @@
       const open = headerLinks.classList.toggle('open');
       menuToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     });
-    // Tapping a link closes the menu so it does not stay open over content.
     headerLinks.addEventListener('click', (e) => {
       if (e.target.tagName === 'A') {
         headerLinks.classList.remove('open');
@@ -31,18 +27,13 @@
   }
 
   const pageParams = new URLSearchParams(window.location.search);
-  // A client that submits a flow on this page's behalf (the URL handler, the
-  // CLI) names the page in the URL it opens and on the call it makes, so the
-  // request it creates reaches this page. Kept for the tab rather than read
-  // from the address bar each time, so a reload mid-flow still answers for it
-  // and the name does not sit in a URL anyone can copy.
+  // Keep the consent owner in sessionStorage for reloads and remove it from shareable
+  // URLs.
   const actingOwner = readActingOwner();
-  // The request this page was opened for, read here because the address bar is
-  // cleaned before anything asks what is pending.
+  // Read the request ID before clearing the address bar.
   const openedForRequest = pageParams.get('request') || '';
 
-  // Answering names the request this page was opened for, so a browser that
-  // keeps no cookie can act on the dialog the wallet redirected it to.
+  // The request ID lets a browser without cookies answer the consent it was redirected to.
   function approveURL(id, action) {
     const named = id === openedForRequest ? '?request=' + encodeURIComponent(id) : '';
     return '/api/requests/' + id + action + named;
@@ -58,9 +49,6 @@
     }
   }
 
-  // Name this client on every call it makes, the way the CLI and the URL
-  // handler do. The page is served by the wallet it talks to, so it is never
-  // the stale one, but the wallet reads the same header from everybody.
   const CLIENT_NAME = 'eudi-ui';
   const CLIENT_HEADER = 'X-Eudi-Client';
   const OWNER_HEADER = 'X-Eudi-Owner';
@@ -68,8 +56,8 @@
     const original = window.fetch;
     window.fetch = function (input, init) {
       const raw = typeof input === 'string' ? input : String((input && (input.url || input.href)) || '');
-      // Same-origin absolute URLs and Request objects count too: a call that
-      // reaches the wallet's API carries the same name whatever shape it took.
+      // Add the client header to all wallet API calls, including absolute URLs and Request
+      // objects.
       const url = raw.startsWith(window.location.origin) ? raw.slice(window.location.origin.length) : raw;
       if (!url.startsWith('/api/')) return original(input, init);
       const opts = Object.assign({}, init);
@@ -81,16 +69,13 @@
     };
   })();
 
-  // State
   let credentials = [];
   let pendingRequests = [];
-  // A shared demo can accumulate a lot of credentials, so the list is
-  // windowed server side rather than rendering everything.
+  // Paginate on the server because shared wallets can hold many credentials.
   const CREDENTIALS_PER_PAGE = 10;
   let credentialPage = 0;
   let credentialTotal = 0;
 
-  // Elements
   const credContainer = document.getElementById('credentials');
   const credEmpty = document.getElementById('cred-empty');
   const logContainer = document.getElementById('log');
@@ -105,8 +90,6 @@
   const consentOverlay = document.getElementById('consent-overlay');
   const consentDialog = document.getElementById('consent-dialog');
 
-  // Credentials an issuer deferred. The wallet collects them on the issuer's
-  // own interval. The buttons are for going faster than that, or giving up.
   async function loadDeferred() {
     try {
       const resp = await fetch('/api/deferred');
@@ -127,9 +110,6 @@
         const formatLabel = formatLabelFor(p);
         const next = p.next_attempt_at ? new Date(p.next_attempt_at) : null;
         const when = next && !isNaN(next) ? next.toLocaleTimeString() : '';
-        // The same card face as a delivered credential, painted by
-        // applyCredentialDisplay below, so an awaiting item already shows the
-        // art the offer declared.
         const logoImg = display.logo_uri
           ? '<img class="credential-logo" src="' + escHtml(display.logo_uri) + '" alt="' + escHtml(display.logo_alt_text || '') + '">'
           : '';
@@ -162,15 +142,11 @@
         '</div>';
       }).join('');
 
-      // Paint each face with the appearance the offer declared, the same call
-      // the credential list uses.
       list.querySelectorAll('.deferred-item').forEach(item => {
         const p = pending.find(x => String(x.id) === item.dataset.id);
         if (p) applyCredentialDisplay(item, p.display);
       });
 
-      // Check asks the issuer now instead of at the next scheduled attempt.
-      // Abandon stops the wallet asking at all.
       list.querySelectorAll('.deferred-check').forEach(btn => {
         btn.addEventListener('click', async () => {
           btn.disabled = true;
@@ -215,26 +191,23 @@
       const resp = await fetch('/api/credentials?limit=' + CREDENTIALS_PER_PAGE + '&offset=' + offset);
       credentials = await resp.json();
       credentialTotal = parseInt(resp.headers.get('X-Total-Count') || '0', 10);
-      // Deleting the last credential of a page (or a reset) can leave us
-      // past the end: step back instead of showing an empty list.
+      // Deleting the last credential on a page can move the offset past the end of the
+      // list.
       if (credentials.length === 0 && credentialPage > 0) {
         credentialPage = Math.max(0, Math.ceil(credentialTotal / CREDENTIALS_PER_PAGE) - 1);
         return loadCredentials();
       }
       renderCredentials();
       renderPager();
-      // Issuance can add trust list groups, so keep the links in sync.
+      // Issuance can create trust profiles, so refresh their links too.
       loadTrustLists();
     } catch (e) {
       console.error('Failed to load credentials:', e);
     }
   }
 
-  // Whole credentials the consent dialog's Edit view needs for its candidate
-  // cards, by credential id. A consent request carries only the claims the
-  // verifier asked for, and the credential list holds one page. A credential
-  // that could not be read is remembered as null, so the dialog does not ask
-  // for it again on every render.
+  // Consent summaries contain only requested claims. Cache full credentials for Edit,
+  // including failed reads to avoid repeated requests.
   const candidateDetails = new Map();
 
   async function loadCandidateDetails(ids) {
@@ -279,8 +252,6 @@
     loadCredentials();
   });
 
-  // relativeTime turns a timestamp into "3 min ago". Returns "" for a missing
-  // or unparseable value.
   function relativeTime(value) {
     if (!value) return '';
     const then = new Date(value);
@@ -298,17 +269,11 @@
     return Math.floor(months / 12) + ' y ago';
   }
 
-  // shortCredentialId is the first 8 characters of the credential's UUID, a
-  // visual handle for telling two same-type instances apart. The API and the
-  // CLI key on the full id, so this short form is for reading, not for lookups.
+  // Short IDs distinguish cards visually. API and CLI lookups use the full ID.
   function shortCredentialId(id) {
     return String(id || '').slice(0, 8);
   }
 
-  // credentialInitials builds a monogram from a display name (first letter of
-  // up to three words), for a credential whose face has neither art nor color
-  // nor a logo. A credential with no display name gets a generic glyph
-  // instead, since the technical type has no meaningful initials.
   function credentialInitials(name) {
     const words = String(name || '').replace(/[()]/g, ' ').split(/\s+/).filter(w => /^[a-z0-9]/i.test(w));
     return words.slice(0, 3).map(w => w[0]).join('').toUpperCase();
@@ -316,8 +281,7 @@
 
   const GENERIC_FACE_GLYPH = '<span class="face-generic"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2.2"/><circle cx="8" cy="11" r="2"/><path d="M13 10h5M13 13h4M6 15.6h6"/></svg></span>';
 
-  // A lock as an inline SVG so it takes the pill's color (the 🔒 emoji keeps its
-  // own yellow whatever the text color is).
+  // An SVG lock inherits the text color. The emoji retains its own color.
   const LOCK_SVG = '<svg class="pill-ico" viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M12 1a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-1V6a5 5 0 0 0-5-5zm3 8H9V6a3 3 0 0 1 6 0v3z"/></svg>';
 
   function formatLabelFor(cred) {
@@ -329,7 +293,6 @@
     const typeLabel = cred.vct || cred.doctype || cred.format;
     const isProtected = cred.protected === true;
 
-    // Stable identity and selection hooks for UI automation
     const dataset = {
       credentialId: cred.id,
       format: formatLabel === 'SD-JWT' ? 'sdjwt' : formatLabel === 'JWT VC' ? 'jwt' : 'mdoc',
@@ -339,16 +302,13 @@
     if (cred.vct) dataset.vct = cred.vct;
     if (cred.doctype) dataset.doctype = cred.doctype;
 
-    // Protected credentials are the shared baseline: the server refuses to
-    // delete or revoke them, so do not offer buttons that would only 403.
+    // Protected credentials cannot be deleted or revoked, so hide those actions.
     const protectedBadge = isProtected
       ? '<span class="status-badge status-protected" id="' + idPrefix + 'protected-' + cred.id + '"' +
         ' title="Part of this wallet\'s baseline. It cannot be deleted or revoked' +
         ' through the UI or the API, only by editing the wallet file.">' + LOCK_SVG + 'Protected</span>'
       : '';
 
-    // Status badge: managed entries show live status, foreign status lists
-    // get a badge of their own, and an entry with no status list says so.
     const st = cred.status;
     let statusBadge;
     if (st && st.managed) {
@@ -362,8 +322,6 @@
       statusBadge = '<span class="status-badge status-none ico-circle" id="' + idPrefix + 'status-' + cred.id + '" title="This credential carries no status list, so revocation cannot be checked.">No status</span>';
     }
 
-    // How long the credential is still good for. The wallet renews what it
-    // can shortly before this, so a date here is not always a deadline.
     const expiry = expiryInfo(cred.expires_at);
     let expiryBadge = '';
     if (expiry) {
@@ -372,9 +330,8 @@
         '" title="' + escHtml(expiry.title) + '">' + escHtml(expiry.label) + '</span>';
     }
 
-    // The issuer signature checked against only the key material embedded in
-    // the credential (its x5c chain or embedded jwk), with no trust anchor. A
-    // pass means self-consistent, never that the issuer is trusted (ADR-0009).
+    // An embedded key verifies signature consistency. It does not establish issuer trust
+    // (ADR 0009).
     let signatureBadge = '';
     const sig = cred.signature;
     if (sig && sig.algorithm) {
@@ -389,9 +346,6 @@
       }
     }
 
-    // Holder binding: bound to a key this wallet holds (presentable), bound to
-    // a key it does not hold (shown and decoded but never presentable), or no
-    // binding at all. The unheld case keeps its own hook so a picker can warn.
     let keyBindingBadge = '';
     const binding = cred.holder_binding ||
       (cred.key_binding_not_held === true ? 'other_key' : '');
@@ -409,45 +363,30 @@
         '" title="The credential names no holder key.">No key binding</span>';
     }
 
-    // The issuer-declared appearance (§12.2.4), stored with the credential.
     const display = cred.display || {};
     const logoImg = display.logo_uri
       ? '<img class="credential-logo" src="' + escHtml(display.logo_uri) + '" alt="' + escHtml(display.logo_alt_text || '') + '">'
       : '';
     const faceLabel = display.name ? escHtml(display.name) : escHtml(typeLabel);
 
-    // The card face: one background slot (art over color, or a solid color, or
-    // a plain tile), painted by applyCredentialDisplay. The format badge and
-    // the name overlay it, so on a phone the face reads like a wallet card.
     const faceHtml = '<div class="card-face">' +
       '<span class="format-badge format-badge-face">' + formatLabel + '</span>' +
       logoImg +
       '<div class="face-name">' + faceLabel + '</div>' +
       '</div>';
 
-    // The headline is the display name, or the technical type when the issuer
-    // declared no name. The type is not repeated: when a name leads, the type
-    // moves to the meta row below, and when it is the headline the meta row
-    // drops it.
     const nameHtml = '<span class="credential-name">' + faceLabel + '</span>';
 
-    // The meta strip carries every technical fact in one line so the header can
-    // be just the name: the short id (the per-instance handle), when it was
-    // issued, the type a DCQL query matches on, and the issuer as the format
-    // carries it.
+
     const idMeta = '<span class="cred-meta-item cred-m-id"><span class="cred-meta-k">id</span> <span class="mono cred-shortid">#' + escHtml(shortCredentialId(cred.id)) + '</span></span>';
 
     const rel = relativeTime(cred.issued_at);
     const issuedMeta = rel ? '<span class="cred-meta-item cred-m-iat"><span class="cred-meta-k">iat</span> ' + escHtml(rel) + '</span>' : '';
 
-    // The vct is shown once: it is the headline when the issuer declared no
-    // name, and a meta item when a display name took the headline.
     const typeMeta = display.name
       ? '<span class="cred-meta-item cred-m-type"><span class="cred-meta-k">type</span> <span class="mono">' + escHtml(typeLabel) + '</span></span>'
       : '';
 
-    // Issuer as the format actually carries it: iss for SD-JWT, the signing
-    // certificate subject for mdoc, a DID otherwise.
     let issuerMeta = '';
     if (cred.issuer && cred.issuer.value) {
       issuerMeta = '<span class="cred-meta-item cred-m-iss"><span class="cred-meta-k">' + escHtml(cred.issuer.kind || 'iss') +
@@ -468,11 +407,8 @@
     return { html: faceHtml + bodyHtml, dataset: dataset };
   }
 
-  // applyCredentialDisplay paints the issuer-declared appearance (§12.2.4)
-  // onto the card face: the background image over the background color, or a
-  // solid color, or a plain tile with a monogram or a generic glyph when the
-  // issuer declared neither. Values were validated at issuance and are
-  // assigned as style properties, never interpolated into a style sheet.
+  // Apply issuer display metadata from OID4VCI 1.0 §12.2.4 as style properties, with
+  // validated values.
   function applyCredentialDisplay(card, display) {
     const face = card.querySelector('.card-face');
     if (!face) return;
@@ -484,9 +420,7 @@
       const scrim = darkText
         ? 'linear-gradient(0deg,rgba(255,255,255,.80),rgba(255,255,255,.12) 58%)'
         : 'linear-gradient(0deg,rgba(0,0,0,.62),rgba(0,0,0,.05) 58%)';
-      // The image over the declared color as its base, so a transparent image
-      // shows the color through it. url() takes the value as a plain string,
-      // not a place a quote could break out of a rule.
+      // Keep the declared color beneath the image so it shows through transparent pixels.
       face.style.backgroundImage = scrim + ', url("' + display.background_uri.replace(/["\\]/g, '') + '")';
       if (display.background_color) face.style.backgroundColor = display.background_color;
       face.style.color = textColor || '#fff';
@@ -495,9 +429,6 @@
         ', color-mix(in srgb, ' + display.background_color + ' 56%, #000))';
       face.style.color = textColor || '#fff';
     } else {
-      // No art and no color. A logo still sits on the plain tile, otherwise a
-      // monogram from the display name, or a generic glyph when there is not
-      // even a name to initial.
       face.classList.add('plain');
       if (!face.querySelector('.credential-logo')) {
         const name = display.name || '';
@@ -510,8 +441,6 @@
       }
     }
 
-    // The overlaid format badge takes the declared text color so it reads as
-    // part of the face, with a scrim that contrasts either way.
     const fb = face.querySelector('.format-badge-face');
     if (fb) {
       fb.style.color = textColor || '#fff';
@@ -531,8 +460,6 @@
     credentials.forEach(cred => {
       const card = document.createElement('div');
       card.className = 'credential-card';
-      // A batch reads as one card drawn as a small stack (desktop and consent
-      // only). The stack is the sole cue that it was batch issued.
       if (cred.batch) card.classList.add('batch');
 
       const isProtected = cred.protected === true;
@@ -540,8 +467,6 @@
       card.id = 'credential-' + cred.id;
       Object.assign(card.dataset, body.dataset);
 
-      // What can be done about the status this card shows: revoke an entry on
-      // the wallet's own list, re-check one on somebody else's.
       const st = cred.status;
       let revokeBtn = '';
       if (st && st.managed) {
@@ -552,14 +477,9 @@
         revokeBtn = '<button class="btn btn-sm" id="status-check-' + cred.id + '" data-check-status="' + cred.id + '">Check status</button>';
       }
 
-      // The About control and the description pane appear only when the issuer
-      // declared a description. The card wraps its face, body and actions in a
-      // front so the pane can be the flipped-over back on a phone and an inline
-      // expand on a wide list (see the container queries in the stylesheet).
+      // Container queries choose whether the description flips the card or expands beneath
+      // it.
       const hasDesc = !!(cred.display && cred.display.description);
-      // The button carries both glyphs. The stylesheet shows the info glyph on a
-      // phone (where the card flips) and the chevron on a wide list (where the
-      // pane expands in place, so the arrow signals open/close and rotates).
       const aboutBtn = hasDesc
         ? '<button class="btn btn-sm about-btn" id="about-' + cred.id + '" data-about="' + cred.id + '" aria-expanded="false" aria-label="Show description">' +
             descIcon('ic-info', '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.6h.01"/>') +
@@ -573,9 +493,8 @@
           '<button class="btn btn-sm" id="show-' + cred.id + '" data-show="' + cred.id + '">Show</button>' +
           (isProtected ? '' : '<button class="btn btn-danger btn-sm" id="delete-' + cred.id + '" data-delete="' + cred.id + '">Delete</button>') +
         '</div>';
-      // The Back control sits in the pane for the phone flip, where the front
-      // face (with the About button) is turned away. A wide list has no flip, so
-      // the stylesheet hides it and the About button toggles the pane shut.
+      // The flipped card hides the About button, so phones need a Back control inside the
+      // description.
       const descPane = hasDesc
         ? '<div class="cred-desc"><div class="cred-desc-in">' +
             '<div class="cred-desc-head"><span class="cred-desc-label">Description</span>' +
@@ -589,8 +508,7 @@
       applyCredentialDisplay(card, cred.display);
 
       const openDecoder = () => {
-        // By id: the decoder is mounted on this wallet and can look the
-        // credential up, which keeps the link short enough to share.
+        // The mounted decoder can look up credentials by ID, keeping links short.
         window.open('/decoder/?id=' + encodeURIComponent(cred.id), '_blank');
       };
       card.querySelector('[data-show]').addEventListener('click', openDecoder);
@@ -609,8 +527,6 @@
         check.addEventListener('click', () => checkCredentialStatus(cred.id));
       }
 
-      // Opening flips the card on a phone and expands the pane on a wide list,
-      // both the same class the stylesheet reads differently per width.
       const about = card.querySelector('[data-about]');
       if (about) {
         about.addEventListener('click', (e) => {
@@ -631,17 +547,12 @@
     });
   }
 
-  // descIcon is a small inline SVG for the description controls, stroked in the
-  // current text color. cls names the variant the stylesheet shows per width.
   function descIcon(cls, body) {
     return '<svg class="ic ' + cls + '" viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
       'stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       body + '</svg>';
   }
 
-  // expiryInfo turns an RFC 3339 expiry into what the badge shows: how long
-  // is left. The exact time stays on the tooltip. Returns null for a
-  // credential that states no lifetime, which then gets no badge at all.
   function expiryInfo(value) {
     if (!value) return null;
     const when = new Date(value);
@@ -652,14 +563,10 @@
     if (seconds <= 0) {
       return { state: 'expired', label: 'Expired', title: 'Expired ' + absolute };
     }
-    // Under a day is worth pointing at: the wallet renews shortly before
-    // expiry, and a credential this close is either about to be renewed or
-    // cannot be.
     const state = seconds < 24 * 3600 ? 'expiring' : 'valid';
     return { state: state, label: 'Valid ' + humanizeDuration(seconds), title: 'Valid until ' + absolute };
   }
 
-  // humanizeDuration renders seconds as the one unit worth reading.
   function humanizeDuration(seconds) {
     const units = [
       [365 * 24 * 3600, 'year'],
@@ -677,8 +584,6 @@
     return 'for less than a minute';
   }
 
-  // Revoke (status 1) or re-activate (status 0) a credential on the wallet's
-  // own status list.
   async function setCredentialStatus(id, status) {
     try {
       const resp = await fetch('/api/credentials/' + id + '/status', {
@@ -698,7 +603,6 @@
     }
   }
 
-  // Resolve the live status of a credential on an external status list.
   async function checkCredentialStatus(id) {
     const badge = document.getElementById('status-' + id);
     if (badge) badge.textContent = 'Checking...';
@@ -735,7 +639,6 @@
     }
   }
 
-  // Process URI (auto-detect VP or VCI)
   processBtn.addEventListener('click', async () => {
     const uri = offerInput.value.trim();
     if (!uri) return;
@@ -748,7 +651,6 @@
         uri.startsWith('openid-credential-offer://') ||
         uri.startsWith('haip-vci://');
       const endpoint = isVCI ? '/api/offers' : '/api/presentations';
-      // Whatever goes wrong with this submission is this tab's to report.
       expectError();
 
       const resp = await fetch(endpoint, {
@@ -773,7 +675,6 @@
     }
   });
 
-  // Import credential
   importBtn.addEventListener('click', () => {
     importOverlay.classList.add('active');
     importTextarea.value = '';
@@ -805,7 +706,6 @@
     }
   });
 
-  // Issue credential
   const issueBtn = document.getElementById('issue-btn');
   const issueOverlay = document.getElementById('issue-overlay');
   const issueForm = document.getElementById('issue-form');
@@ -843,9 +743,8 @@
     return issueAlwaysDisclosed.value.split(',').map(s => s.trim()).filter(Boolean);
   }
 
-  // The "Always visible" input is the source of truth for always-disclosed
-  // claims. The per-row SD checkboxes are a convenience view over its
-  // top-level entries. Dotted paths (nested claims) only live in the input.
+  // The Always visible input stores all paths. Row checkboxes represent only its top level
+  // claims.
   function syncAlwaysDisclosedFromRows() {
     const nested = alwaysDisclosedList().filter(p => p.indexOf('.') !== -1);
     const plain = [];
@@ -865,8 +764,7 @@
     });
   }
 
-  // Builder claims use "namespace:element" keys for mdoc rows that set a
-  // namespace, matching the server-side claim key convention.
+  // mdoc claim keys use namespace:element, matching the server format.
   function builderClaims() {
     const claims = {};
     issueClaimRows.querySelectorAll('.claim-row').forEach(row => {
@@ -876,7 +774,7 @@
       if (ns && issueFormat.value === 'mdoc') key = ns + ':' + key;
       const rawVal = row.querySelector('input[id^="issue-claim-value-"]').value;
       let val = rawVal;
-      try { val = JSON.parse(rawVal); } catch (e) { /* keep as string */ }
+      try { val = JSON.parse(rawVal); } catch (e) { /* Leave non-JSON input as a string. */ }
       claims[key] = val;
     });
     return claims;
@@ -911,9 +809,6 @@
     updateAlwaysDisclosedVisibility();
   }
 
-  // The per-row SD checkboxes and the "Always visible" input hold the same
-  // list, so only one is shown at a time: checkboxes in builder mode, the
-  // input (which also accepts dotted paths for nested claims) in JSON mode.
   function updateAlwaysDisclosedVisibility() {
     const show = issueFormat.value === 'sdjwt' &&
       document.getElementById('issue-claims-mode-json').checked;
@@ -934,7 +829,7 @@
     try {
       templates = await loadTemplates(true);
     } catch (e) {
-      return; // the dropdown just stays empty
+      return;
     }
     const current = issueTemplateSelect.value;
     issueTemplateSelect.textContent = '';
@@ -951,19 +846,12 @@
     issueTemplateSelect.value = current || '';
   }
 
-  // The template whose logo or background image the issued credential should
-  // wear. The form flattens a template into explicit values and cannot carry
-  // an embedded image, so its name travels instead and the server applies its
-  // display. Empty when the selected template declares no art.
+  // Send the template name so the server can apply embedded images that the form cannot
+  // carry.
   let issueDisplayTemplate = '';
 
-  // Applies a template to the issue form: format, type identifiers, expiry,
-  // claims, and always-disclosed claims. Everything stays editable. The form
-  // contents are submitted as explicit values, so edits (including removed
-  // claims) win over the template. Every template-controlled field is set
-  // unconditionally (cleared when the template omits it), otherwise switching
-  // templates before issuing would submit a merge of every template selected
-  // so far.
+  // Clear fields omitted by a new template to prevent values from mixing. Explicit form
+  // values preserve user edits.
   function applyIssueTemplate(name) {
     const tpl = (templatesCache || []).find(t => t.name === name);
     if (!tpl) return;
@@ -982,10 +870,7 @@
     applyTemplateDisplay(tpl.display || {});
   }
 
-  // Shows the template's declared appearance in the form: the name, description
-  // and colors are editable, and the logo and background image stay with the
-  // template (they are applied on issuance and merged under any field the
-  // operator sets, so the art is kept even when the name is changed).
+  // Keep template images when the user edits other display fields.
   function applyTemplateDisplay(display) {
     document.getElementById('issue-display-name').value = display.name || '';
     document.getElementById('issue-display-description').value = display.description || '';
@@ -1002,8 +887,6 @@
     if (note) note.hidden = !(display.logo || display.background_image);
   }
 
-  // Keeps both claim editors in sync: entering JSON mode serializes the
-  // builder rows, entering builder mode re-parses the JSON into rows.
   function updateClaimsMode() {
     const jsonRadio = document.getElementById('issue-claims-mode-json');
     const jsonMode = jsonRadio.checked;
@@ -1034,8 +917,7 @@
     updateAlwaysDisclosedVisibility();
   }
 
-  // Clears everything except the selected format. Also used when the format
-  // changes, because values do not translate between formats.
+  // Reset other fields when the format changes because their values may not apply.
   function resetIssueFields() {
     document.getElementById('issue-vct').value = '';
     document.getElementById('issue-doctype').value = '';
@@ -1061,8 +943,7 @@
     updateClaimsMode();
   }
 
-  // The wallet only has an own status list when a base or issuer URL is
-  // configured. Reflect the real state in the option instead of guessing.
+  // A wallet has a status list only when its serving configuration provides a URL.
   async function updateStatusListOption() {
     const autoOption = document.getElementById('issue-status-list-auto');
     try {
@@ -1075,7 +956,7 @@
         document.getElementById('issue-status-list').value = 'none';
       }
     } catch (e) {
-      /* keep the default option state */
+      // Keep the default when configuration cannot be loaded.
     }
   }
 
@@ -1093,7 +974,6 @@
     if (issueTemplateSelect.value) {
       applyIssueTemplate(issueTemplateSelect.value);
     } else {
-      // "(none)": back to a clean form instead of the last template's values.
       const format = issueFormat.value;
       issueForm.reset();
       issueFormat.value = format;
@@ -1118,9 +998,6 @@
     issueOverlay.classList.remove('active');
   });
 
-  // Display: keep each color picker and its text field in step, and load an
-  // uploaded image into its text field as a data URI. The text field is the
-  // value that is sent, so the picker and the upload are conveniences.
   function bindColorPicker(pickerId, textId) {
     const picker = document.getElementById(pickerId);
     const text = document.getElementById(textId);
@@ -1173,12 +1050,10 @@
     if (exp) body.exp = exp;
     const nbf = document.getElementById('issue-nbf').value.trim();
     if (nbf) body.nbf = nbf;
-    // A batch of N issues N distinct-key copies, so the wallet presents an
-    // unused one each time (holder-bound formats only).
+    // Each batch copy uses a distinct holder key. The wallet rotates between copies during
+    // presentation.
     const batch = parseInt(document.getElementById('issue-batch').value, 10);
     if (batch >= 2) body.batch = batch;
-    // Unbound issues a bearer credential with no holder key. The default binds
-    // it to the wallet.
     if (document.getElementById('issue-binding').value === 'unbound') body.unbound = true;
     const statusListMode = document.getElementById('issue-status-list').value;
     if (statusListMode === 'none') {
@@ -1215,9 +1090,8 @@
     const bgImage = document.getElementById('issue-bg-image').value.trim();
     if (bgImage) display.background_image = bgImage;
     if (Object.keys(display).length > 0) body.display = display;
-    // The selected template's logo and background image cannot travel in the
-    // form, so its name does, and the server applies its display under any
-    // field set above.
+    // The server applies template display values beneath fields explicitly supplied by the
+    // form.
     if (issueDisplayTemplate) body.display_template = issueDisplayTemplate;
 
     issueSubmit.disabled = true;
@@ -1245,7 +1119,6 @@
     }
   });
 
-  // Templates manager
   const templatesOverlay = document.getElementById('templates-overlay');
   const templatesList = document.getElementById('templates-list');
   const templateForm = document.getElementById('template-form');
@@ -1254,7 +1127,6 @@
   const templateJSON = document.getElementById('template-json');
 
   function templateEditorFields(tpl) {
-    // The name lives in its own input and predefined is server managed.
     const doc = Object.assign({}, tpl);
     delete doc.name;
     delete doc.predefined;
@@ -1351,7 +1223,6 @@
       templateError.textContent = 'Template must be valid JSON: ' + e.message;
       return;
     }
-    // A pasted template may carry its own name. The name input wins.
     const name = templateName.value.trim() || (typeof doc.name === 'string' ? doc.name.trim() : '');
     if (!name) {
       templateError.textContent = 'Template name is required';
@@ -1376,7 +1247,6 @@
     }
   });
 
-  // Load activity log
   async function loadLog() {
     try {
       const resp = await fetch('/api/log');
@@ -1387,8 +1257,7 @@
     }
   }
 
-  // The button sits in the drawer header, which toggles the drawer, so its
-  // click and its keyboard activation stay on the button.
+  // Stop propagation so the drawer header does not toggle when this button is activated.
   const clearLogBtn = document.getElementById('clear-log-btn');
   clearLogBtn.addEventListener('keydown', (event) => event.stopPropagation());
   clearLogBtn.addEventListener('click', async (event) => {
@@ -1401,17 +1270,14 @@
     }
   });
 
-  // The activity drawer starts open and collapses to just its header, so the
-  // credentials take the height when the log is not wanted. The choice is
-  // remembered per viewer.
   const activityDrawer = document.getElementById('activity-drawer');
   const activityToggle = document.getElementById('activity-toggle');
   function setActivityCollapsed(collapsed) {
     activityDrawer.classList.toggle('collapsed', collapsed);
     activityToggle.setAttribute('aria-expanded', String(!collapsed));
-    try { localStorage.setItem('activity-collapsed', collapsed ? '1' : '0'); } catch (e) { /* private mode */ }
+    try { localStorage.setItem('activity-collapsed', collapsed ? '1' : '0'); } catch (e) { /* Storage may be unavailable in private browsing. */ }
   }
-  try { if (localStorage.getItem('activity-collapsed') === '1') setActivityCollapsed(true); } catch (e) { /* private mode */ }
+  try { if (localStorage.getItem('activity-collapsed') === '1') setActivityCollapsed(true); } catch (e) { /* Storage may be unavailable in private browsing. */ }
   const toggleActivity = () => setActivityCollapsed(!activityDrawer.classList.contains('collapsed'));
   activityToggle.addEventListener('click', toggleActivity);
   activityToggle.addEventListener('keydown', (event) => {
@@ -1431,8 +1297,8 @@
       const hasDetails = entry.details && Object.keys(entry.details).length > 0;
       el.className = 'log-entry' + (hasDetails ? ' has-details' : '');
       const time = new Date(entry.time).toLocaleTimeString();
-      // Three states: a spec violation the wallet noted but did not fail on is
-      // a warning, distinct from a plain OK or a hard FAIL.
+      // Profile violations accepted in debug mode are warnings, separate from success and
+      // failure.
       const warning = entry.severity === 'warning';
       const statusClass = warning ? 'warning' : (entry.success ? 'success' : 'failure');
       const statusLabel = warning ? '⚠ WARN' : (entry.success ? 'OK' : 'FAIL');
@@ -1480,17 +1346,13 @@
     return html;
   }
 
-  // The pending list, naming the request this page was opened for. A browser
-  // that keeps no cookie reaches that one by id and nothing else.
+  // The request ID lets a browser without cookies access its pending consent.
   function requestsURL() {
     return '/api/requests' +
       (openedForRequest ? '?request=' + encodeURIComponent(openedForRequest) : '');
   }
 
-  // Show or hide the indicator for the requests waiting off screen. The
-  // dialog covers it, so while one is open the banner is hidden rather than
-  // dimmed behind it with a button nothing can click. Every close path
-  // refreshes it, so what is still waiting is offered the moment it is gone.
+  // Hide the banner while a dialog covers it and refresh it when the dialog closes.
   function updatePendingBanner(requests) {
     const banner = document.getElementById('pending-banner');
     const pending = requests || [];
@@ -1498,9 +1360,8 @@
       banner.hidden = true;
       return;
     }
-    // A request no client named a browser for is offered to everybody, so on
-    // a wallet several people reach it is as likely to be a stranger's as
-    // this visitor's. The count says which kind is waiting.
+    // Unowned requests are available to all browsers. Label them separately from this
+    // browser's requests.
     const claimed = pending.some((req) => req.mine);
     document.getElementById('pending-text').textContent = pending.length === 1
       ? (claimed ? 'A request is waiting for consent.' : 'A request is waiting that no browser claimed.')
@@ -1512,11 +1373,8 @@
     try {
       const resp = await fetch(requestsURL());
       const all = await resp.json();
-      // A dialog whose request is no longer pending can answer nothing, so it
-      // is closed here (this is how another tab drops a dialog for a request
-      // answered elsewhere). The tab with the answer in flight keeps its dialog
-      // and closes it with the result instead. closeConsentOverlay refreshes the
-      // banner again, this time with the dialog gone.
+      // Close consent answered elsewhere, but preserve this tab's dialog while its
+      // submission is pending.
       if (consentRequestOpen && !consentSubmitting && consentRequestID != null &&
           !(all || []).some((req) => req.id === consentRequestID)) {
         closeConsentOverlay();
@@ -1524,13 +1382,12 @@
       }
       updatePendingBanner(reviewableRequests(all));
     } catch (e) {
-      /* leave the banner as it is */
+      // Keep the current banner if refresh fails.
     }
   }
 
-  // What the banner may offer: everything pending this caller can answer,
-  // minus the one already on screen. The wallet scopes the list to the caller,
-  // so a request that belongs to another browser is not in it to begin with.
+  // The server has already filtered requests by owner. Exclude the request currently shown
+  // in a dialog.
   function reviewableRequests(requests) {
     return (requests || []).filter((req) => !(consentRequestOpen && req.id === consentRequestID));
   }
@@ -1549,22 +1406,17 @@
     }
   });
 
-  // Load any existing pending consent requests
   async function loadPendingRequests() {
     try {
       const resp = await fetch(requestsURL());
       const requests = await resp.json();
       if (requests && requests.length > 0) {
         const own = requests.find((r) => r.id === openedForRequest) || requests.find((r) => r.mine);
-        // Not over a dialog the user is already answering: this runs again
-        // after a dropped stream, and reopening would reset a selection they
-        // are in the middle of making.
+        // Reconnecting must not reopen a dialog and reset a selection the user is editing.
         if (own && !consentRequestOpen) {
           showConsentDialog(own);
           return;
         }
-        // What is left was submitted by a client that named no browser, so it
-        // is nobody's in particular and waits in the banner.
         updatePendingBanner(reviewableRequests(requests));
         return;
       }
@@ -1572,7 +1424,6 @@
       console.error('Failed to load pending requests:', e);
     }
 
-    // No pending consent request, so check for a recent error.
     try {
       const resp = await fetch('/api/error');
       presentError(await resp.json());
@@ -1581,15 +1432,12 @@
     }
   }
 
-  // SSE for consent requests and errors
   function connectSSE() {
     const es = new EventSource('/api/requests/stream' +
       (actingOwner ? '?owner=' + encodeURIComponent(actingOwner) : ''));
     es.addEventListener('consent', (event) => {
       try {
         const req = JSON.parse(event.data);
-        // A dialog belongs to the browser that started the flow. Anything
-        // else waits in the banner, where it interrupts nobody.
         if (req.mine) {
           showConsentDialog(req);
           return;
@@ -1601,7 +1449,7 @@
     });
     let stateRefresh = null;
     es.addEventListener('state', () => {
-      // Coalesce bursts (an issuance saves several times) into one refresh.
+      // Issuance saves several times. Combine nearby events into one refresh.
       clearTimeout(stateRefresh);
       stateRefresh = setTimeout(() => {
         loadCredentials();
@@ -1610,9 +1458,7 @@
         refreshPendingBanner();
       }, 300);
     });
-    // An issuance in progress needs the user to sign in at the issuer. The
-    // wallet cannot do that for them, so this tab goes there. The issuer
-    // redirects back to /callback, which resumes the flow and returns here.
+    // Issuer sign-in returns through /callback, which resumes the waiting issuance.
     es.addEventListener('authorize', (event) => {
       try {
         const { url } = JSON.parse(event.data);
@@ -1629,8 +1475,7 @@
       }
     });
     es.addEventListener('open', () => {
-      // Events are not replayed, so a stream that dropped left a gap. Ask for
-      // what arrived while it was down.
+      // SSE events are not replayed. Fetch pending state after reconnecting.
       if (streamDropped) {
         streamDropped = false;
         loadPendingRequests();
@@ -1644,34 +1489,26 @@
   }
   let streamDropped = false;
 
-  // Starting something drops a stored error from before it, which a later
-  // action would otherwise inherit.
+  // Clear stored errors before a new flow so they cannot appear over its consent dialog.
   function expectError() {
     dropStoredError();
   }
 
-  // The stored error survives a GET (the endpoint peeks rather than pops), so
-  // anything that has decided not to show one has to drop it, or it surfaces
-  // again later against whatever request happens to be on screen then.
+  // Reading an error does not consume it. Clear dismissed errors to prevent them from
+  // reappearing.
   function dropStoredError() {
     fetch('/api/error', { method: 'DELETE' }).catch(() => {});
   }
 
-  // Whether a consent request currently owns the dialog. An error belonging to
-  // an earlier request must not take that dialog over, and must not be left
-  // stored to reappear once this one closes.
+  // An error from an earlier request must not replace an active consent dialog.
   let consentRequestOpen = false;
-  // Which request the dialog on screen belongs to. A late answer from a fetch
-  // one dialog started must not redraw the dialog that replaced it.
+  // Ignore late fetch results for dialogs that have been replaced.
   let consentRequestID = null;
-  // Whether this tab has an approve or deny in flight. This tab's own dialog is
-  // driven by that request, so the resolution reconciliation leaves it alone
-  // and lets the handler close it with the result.
+  // The submitting handler closes its own dialog after receiving the result. Background
+  // reconciliation must leave it open.
   let consentSubmitting = false;
 
-  // Closing the dialog puts whatever is still pending back in the banner. A
-  // second request arriving while one is on screen replaces it, so without
-  // this the first one would be waiting where nothing shows it.
+  // Closing a dialog makes any request it replaced available in the banner again.
   function closeConsentOverlay() {
     consentRequestOpen = false;
     consentRequestID = null;
@@ -1682,8 +1519,6 @@
   function presentError(err) {
     if (!err || !err.message) return;
     if (consentRequestOpen) {
-      // A request the user is being asked about is on screen. This error is
-      // not from it: the flow it belongs to ended before this one began.
       dropStoredError();
       return;
     }
@@ -1713,10 +1548,8 @@
     });
   }
 
-  // Whether a URL handed to us by an issuer or verifier may be navigated to.
-  // javascript: and data: URLs would execute in the wallet's own origin, so a
-  // verifier answering a presentation with {"redirect_uri":"javascript:..."}
-  // must not be followed. The server refuses them too.
+  // Restrict redirects to web URLs. javascript: and data: URLs could execute content in
+  // the wallet origin.
   function navigable(url) {
     try {
       const scheme = new URL(url, window.location.href).protocol;
@@ -1748,7 +1581,7 @@
       try {
         var parsed = JSON.parse(errorBody);
         errorBody = JSON.stringify(parsed, null, 2);
-      } catch (e) { /* keep as-is */ }
+      } catch (e) { /* Keep values that cannot be decoded unchanged. */ }
       html += '<pre class="error-detail">' + escHtml(errorBody) + '</pre>';
     }
 
@@ -1764,11 +1597,8 @@
   }
 
 
-  // An offered credential configuration, as the same card the list and consent
-  // render. It is not issued yet, so it carries no trust state (status, a
-  // signature, holder binding): only the issuer-declared face, the name and
-  // type, an optional description, and the claim names it would carry. The face
-  // is painted by applyCredentialDisplay through the data-config-id hook.
+  // Offer previews have no credential yet, so signature, status and holder binding checks
+  // do not apply.
   function offerCardHtml(cred) {
     const fmt = cred.format ? formatLabelFor(cred) : '';
     const typeLabel = cred.vct || cred.doctype || cred.id;
@@ -1796,17 +1626,12 @@
       claims = '<div class="cl-hd">↗ You will receive<span class="cl-count">' + cred.claims.length +
           ' claim' + (cred.claims.length === 1 ? '' : 's') + '</span></div>' +
         '<div class="consent-claims offer-claims">' + cred.claims.map(claim =>
-          // A break opportunity after each dot keeps a long mdoc path breaking
-          // at its segments rather than mid-word if it does not fit on one line.
           '<div class="consent-claim"><span class="consent-claim-name mono">' + escHtml(claim).replace(/\./g, '.<wbr>') + '</span></div>'
         ).join('') + '</div>';
     }
     return '<div class="consent-credential" data-config-id="' + escHtml(cred.id) + '">' + card + claims + '</div>';
   }
 
-  // What an issuer is offering. Everything except the offer itself comes from
-  // the issuer's metadata, which is optional, so each part is rendered only
-  // when it is actually known rather than as an empty row.
   function renderOfferDetails(req) {
     const details = req.offer_details || {};
     let html = '';
@@ -1820,8 +1645,8 @@
       ).join('') + '</div>';
     }
 
-    // An offer that requires a transaction code cannot be approved without
-    // one. The issuer delivers it out of band, so ask for it here.
+    // The issuer sends the transaction code separately. Collect it before approving the
+    // offer.
     if (details.tx_code) {
       const numeric = details.tx_code_input_mode !== 'text';
       html += '<div class="offer-tx-code">' +
@@ -1836,7 +1661,6 @@
       '</div>';
     }
 
-    // The offer could not be fetched, so only its origin is known.
     if (details.resolve_error) {
       html += '<p class="dialog-hint" id="offer-resolve-error">This offer could not be retrieved, ' +
         'so only the issuer it names is shown. Approving will try again.</p>';
@@ -1868,14 +1692,10 @@
     consentSubmitting = false;
     dropStoredError();
     consentOverlay.classList.add('active');
-    // This one is on screen now, and a request it replaced is not.
     refreshPendingBanner();
 
     const isIssuance = req.type === 'issuance';
 
-    // The alternatives the request offers: per set its satisfiable options,
-    // per query id its matching credentials. The selection starts on the
-    // wallet's own choice (option 0, first candidate, every claim).
     const options = !isIssuance && req.credential_options &&
       (req.credential_options.queries || []).length > 0 ? req.credential_options : null;
     const selection = { editing: false, setChoices: [], picks: {}, claims: {} };
@@ -1885,8 +1705,7 @@
       options.queries.forEach(q => {
         selection.picks[q.id] = q.candidates[0].credential_id;
         q.candidates.forEach(c => {
-          // A credential answering two queries keeps one merged disclosure
-          // state, which is how the approval applies it.
+          // A credential used for two queries shares one merged disclosure selection.
           const kept = selection.claims[c.credential_id] || [];
           Object.keys(c.claims || {}).forEach(key => {
             if (!kept.includes(key)) kept.push(key);
@@ -1926,14 +1745,8 @@
       return selection.setChoices.every(c => c === 0) &&
         options.queries.every(q => selection.picks[q.id] === q.candidates[0].credential_id);
     }
-    // The candidate cards want the whole credential, which the request does
-    // not carry. Reading them when the Edit view opens keeps a consent that is
-    // simply approved from asking for anything, and the cards render from the
-    // match in the meantime, so there is nothing to wait for on screen.
+    // Load full credentials when Edit opens. Show the request summary while they load.
     let loadingCandidates = false;
-    // The credential ids the dialog shows, from the DCQL queries or, without
-    // them, the matched credentials. Both surfaces render the issuer-declared
-    // appearance, which travels with the fetched detail.
     function candidateIds() {
       const ids = [];
       const add = id => { if (id && !ids.includes(id)) ids.push(id); };
@@ -1955,11 +1768,7 @@
       });
     }
 
-    // The party the request comes from. For a presentation it is the verifier
-    // client_id, with the request-object authentication state beside it and the
-    // self-asserted client_name (when any) as the visible name. For an offer it
-    // is the issuer, named by its metadata when the issuer published one. The
-    // authenticated id always sits on the line carrying #offer-issuer-origin.
+    // Keep the authenticated identifier separate from the self-asserted display name.
     function whoBlock() {
       let name, cid, chip = '', logoHtml = '';
       if (isIssuance) {
@@ -1992,15 +1801,11 @@
     }
 
     function headerHtml() {
-      // The title text ("Presentation Request" / "Credential Offer") is what
-      // the e2e tests scan the dialog for. It renders as a small kicker above
-      // the who block so the party asking leads.
       let html = '<div class="consent-title">' + (isIssuance ? 'Credential Offer' : 'Presentation Request') + '</div>' +
         whoBlock();
 
-      // The purposes the verifier registered for this data request, read by the
-      // wallet from the registration certificates in verifier_info (OpenID4VP
-      // 1.0 section 5.1) and shown with the request they explain.
+      // Verifier purposes come from registration certificates in verifier_info (OpenID4VP
+      // 1.0 §5.1).
       if (!isIssuance && req.purposes) {
         req.purposes.forEach((text, idx) => {
           html += '<div class="consent-purpose" id="consent-purpose-' + idx + '">' +
@@ -2010,13 +1815,8 @@
       return html;
     }
 
-    // The disclosed fields for a credential, as selective-disclosure
-    // checkboxes. Every claim stays uncheckable, including required ones, so a
-    // test wallet can withhold a field and see how the verifier reacts.
-    // warnMarker is the note explaining a claim, a warning sign then the text,
-    // on its own full-width row below the claim (a direct child of the flex row,
-    // not inside the value column, so it wraps instead of being clipped). Always
-    // shown, so it needs no hover (touch has none) and no tap.
+    // Allow required claims to be unchecked so developers can test verifier behavior.
+    // Keep warnings visible without hover because touch screens have no hover state.
     function warnMarker(hint) {
       return '<span class="consent-claim-hint"><span class="consent-claim-warn" aria-hidden="true">⚠</span>' + escHtml(hint) + '</span>';
     }
@@ -2029,9 +1829,8 @@
       const total = keys.length + missingList.length;
       let rows = '';
       keys.forEach(key => {
-        // A claim whose path selected an array but none of its selectively
-        // disclosable elements discloses an empty array, so the disclosed value
-        // is [], not the credential's value. A warning marker carries the reason.
+        // Selecting an array without its selectively disclosable elements reveals an empty
+        // array.
         const empty = empties.includes(key);
         const val = empty ? '[]'
           : (typeof claims[key] === 'object' ? JSON.stringify(claims[key]) : String(claims[key]));
@@ -2043,10 +1842,7 @@
           '<span class="consent-claim-value mono">' + escHtml(val) + '</span>' + warn +
         '</label>';
       });
-      // Requested claims this credential cannot satisfy (a claim it does not
-      // carry, or an array index out of range). Debug mode still offers the
-      // credential, so the dialog shows them as not disclosed rather than
-      // hiding that the request asked for them.
+      // Debug mode includes missing claims so the mismatch remains visible.
       missingList.forEach(path => {
         rows += '<div class="consent-claim consent-claim-missing">' +
           '<input type="checkbox" disabled aria-hidden="true">' +
@@ -2060,10 +1856,8 @@
         '<div class="consent-claims">' + rows + '</div>';
     }
 
-    // The summary card: the same card the credential list renders (reused from
-    // credentialCardBody, laid out compactly in the dialog) with the disclosed
-    // fields below it. Until the full credential has loaded it renders from the
-    // match, which knows the type and format but only the requested claims.
+    // Match details contain only requested claims. Use them until full credential details
+    // arrive.
     function credentialCardHtml(mc) {
       const detail = candidateDetails.get(mc.credential_id);
       const cred = detail || {
@@ -2078,9 +1872,8 @@
       '</div>';
     }
 
-    // untrustedAuthorityNote flags a credential the request's trusted_authorities
-    // did not match. Debug mode offers it anyway, so the dialog names the
-    // constraint a conformant wallet would have enforced.
+    // Debug mode offers credentials that fail trusted_authorities. Explain the mismatch
+    // before consent.
     function untrustedAuthorityNote(mc) {
       if (!mc || !mc.untrusted_authority) return '';
       return '<div class="consent-untrusted" role="note">⚠ Trusted authorities do not match. ' +
@@ -2088,10 +1881,7 @@
         'It is offered because debug mode ignores the restriction.</div>';
     }
 
-    // The Edit view: the set options and, per query id of the chosen
-    // options, the matching credentials. Changes apply immediately, Done
-    // returns to the summary, and the bottom buttons stay the dialog's own
-    // Deny/Approve on both screens.
+
     function editScreenHtml() {
       let html = headerHtml() +
         '<div class="consent-selection-row">Selection' +
@@ -2109,8 +1899,8 @@
           '</label>';
         });
         if (set.optional) {
-          // A presentation carries at least one credential, so the last
-          // answered set cannot also be skipped.
+          // A presentation needs at least one credential, so the last selected set cannot
+          // be skipped.
           const othersAnswered = selection.setChoices.some((c, j) => j !== i && c !== -1);
           html += '<label class="consent-set-option">' +
             '<input type="radio" id="consent-set-' + i + '-none" name="consent-set-' + i + '" value="-1"' +
@@ -2131,10 +1921,7 @@
           '</div>';
         q.candidates.forEach((c, i) => {
           const picked = selection.picks[qid] === c.credential_id;
-          // The same card the credential list renders. Until the whole
-          // credential is here the card is built from the match itself, which
-          // knows the type and the format but only the claims the verifier
-          // asked for, so the claim names wait for the rest.
+          // Full credential details are needed to show claims beyond those requested.
           const detail = candidateDetails.get(c.credential_id);
           const body = credentialCardBody(detail || {
             id: c.credential_id, format: c.format, vct: c.vct, doctype: c.doctype, claims: c.claims,
@@ -2145,10 +1932,7 @@
               '<div class="credential-card' + (detail && detail.batch ? ' batch' : '') + '">' + body.html + '</div>' +
               '<div class="candidate-actions">' +
                 (i === 0 ? '<span class="auto-chip">auto</span>' : '') +
-                // By id, like the credential list's own decoder link, and in a
-                // new tab: the consent is still pending and waiting for an
-                // answer, so reading a credential must not navigate away from
-                // the dialog that is asking.
+                // Open decoding in another tab to preserve pending consent.
                 '<a class="btn btn-sm candidate-decode" id="consent-decode-' + escHtml(qid) + '-' + c.credential_id + '"' +
                   ' href="/decoder/?id=' + encodeURIComponent(c.credential_id) + '" target="_blank" rel="noopener"' +
                   ' title="Open in decoder">Show</a>' +
@@ -2162,17 +1946,9 @@
     }
 
     function wireSelectionHandlers() {
-      // The issuer-declared face on every consent card that names a credential,
-      // so it looks the same being decided on as it does at rest. Presentation
-      // summary cards carry data-credential-id, edit-view candidates carry
-      // data-cred (both fetched into candidateDetails), and issuance offer cards
-      // carry data-config-id (display in the offer details). The query-group
-      // wrapper has none.
       consentDialog.querySelectorAll('[data-credential-id], .candidate[data-cred]').forEach(el => {
         const id = el.dataset.credentialId || el.dataset.cred;
         const detail = candidateDetails.get(id);
-        // Always paint the face, so a credential with no declared appearance
-        // gets its monogram or the generic glyph here too, never a blank tile.
         applyCredentialDisplay(el, detail && detail.display);
       });
       if (isIssuance && req.offer_details) {
@@ -2212,9 +1988,8 @@
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); }
         });
       });
-      // The row it sits in selects the candidate, so the link keeps its own
-      // click. Without this, picking a different candidate re-renders the
-      // dialog while the browser is still following the anchor.
+      // Stop link clicks from selecting the row. Selection would redraw the dialog before
+      // navigation completes.
       consentDialog.querySelectorAll('.candidate-decode').forEach(link => {
         link.addEventListener('click', e => e.stopPropagation());
         link.addEventListener('keydown', e => e.stopPropagation());
@@ -2230,8 +2005,6 @@
         });
       }
 
-      // Keep each card's "X of Y fields" count in step with its checkboxes, so
-      // withholding a field shows in the header at once.
       consentDialog.querySelectorAll('.consent-credential').forEach(credEl => {
         const countEl = credEl.querySelector('.cl-count');
         const boxes = credEl.querySelectorAll('.consent-claims input[type="checkbox"]');
@@ -2246,8 +2019,7 @@
     }
 
     function renderDialog() {
-    // A submission in flight owns the dialog: re-rendering would put a
-    // fresh, enabled Approve on screen next to it.
+    // Redrawing during submission would create another enabled Approve button.
     if (submitting) return;
     let html = headerHtml();
 
@@ -2256,15 +2028,10 @@
     }
 
     if (!isIssuance) {
-      // Load the full detail behind every candidate so the cards can carry
-      // the issuer's declared name, logo and colors, the same as the
-      // credential list. A re-render follows when it arrives.
       ensureCandidateDetails();
     }
 
     if (!isIssuance && options) {
-      // One quiet row announces the alternatives. The cards below stay the
-      // ones the current selection presents.
       if (hasAlternatives()) {
         const n = alternativeCount();
         html += '<div class="consent-selection-row" id="consent-selection-row">' +
@@ -2291,8 +2058,8 @@
     wireSelectionHandlers();
 
     document.getElementById('consent-approve').addEventListener('click', async () => {
-      // Checked here so an empty code fails in the dialog, rather than as an
-      // issuer error after the offer is spent.
+      // Validate the transaction code before sending an offer that might only be redeemed
+      // once.
       const txCodeField = document.getElementById('offer-tx-code-input');
       if (txCodeField && !txCodeField.value.trim()) {
         txCodeField.classList.add('input-error');
@@ -2301,9 +2068,8 @@
       }
       if (txCodeField) txCodeField.classList.remove('input-error');
 
-      // Gather selected claims: from the tracked selection when the request
-      // offered alternatives (Approve also works from the Edit view, which
-      // renders no claim checkboxes), from the checkboxes otherwise.
+      // Edit has no claim checkboxes. Read its tracked selection when alternatives are
+      // available.
       const selected = {};
       if (options) {
         activeQueryIds().forEach(qid => {
@@ -2346,17 +2112,14 @@
           body: JSON.stringify(approveBody)
         });
         const result = await resp.json();
-        // The wait for an answer can outlast this dialog: a presentation the
-        // issuer asks for mid-issuance replaces it. Whatever comes back then
-        // belongs to a request that is no longer on screen.
+        // A nested presentation can replace the issuance dialog before approval returns.
+        // Do not update the replacement with the earlier result.
         if (consentRequestID !== req.id) return;
         if (!resp.ok) {
           showErrorDialog('This request could not be answered', result.error || 'The wallet refused the answer.');
           return;
         }
         if (isIssuance) {
-          // Deferred, not failed: the wallet keeps collecting it and the
-          // credential appears once it arrives.
           if (result.pending) {
             closeConsentOverlay();
             await loadDeferred();
@@ -2405,12 +2168,8 @@
     renderDialog();
   }
 
-  // Escapes for both element content and quoted attribute values, including
-  // " and '. A value interpolated into an attribute (a status list URI, a
-  // vct, a claim name, a credential configuration id) could otherwise close
-  // the attribute and add an event handler. On a shared wallet those values
-  // come from whoever imported the credential or sent the offer, so they run
-  // in every other visitor's browser.
+  // Escape text and both quote characters because shared wallet values also appear in
+  // attributes.
   function escHtml(s) {
     return String(s === undefined || s === null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -2420,24 +2179,17 @@
       .replace(/'/g, '&#39;');
   }
 
-  // Escapes a description and turns each bare http(s) URL in it into a link
-  // that opens in a new tab. The pre-defined PIDs end their description with
-  // the rulebook they follow, and an issuer may do the same. Only the URL's
-  // escaped text goes into the href, so nothing in the description can add an
-  // attribute of its own.
+  // Escape descriptions and link only HTTP or HTTPS URLs. Escape href values to prevent
+  // injected attributes.
   function linkifyText(s) {
     return escHtml(s).replace(/https?:\/\/[^\s<>"']+/g, function (url) {
       return '<a href="' + url + '" target="_blank" rel="noopener">' + url + '</a>';
     });
   }
 
-  // Footer: version, imprint link, demo note. Demo mode also hides the
-  // Templates button and template-write controls (the server rejects
-  // writes with 403).
   let demoMode = false;
-  // Until /api/config resolves we do not know whether this is a demo, so the
-  // dialog-vs-banner decision waits for it: a request arriving in that window
-  // is never forced into a dialog it might not belong to.
+  // Wait for configuration before deciding to open consent automatically. Demo mode uses
+  // different ownership rules.
   async function loadAppConfig() {
     try {
       const resp = await fetch('/api/config');
@@ -2450,19 +2202,12 @@
         document.getElementById('imprint-link').hidden = false;
       }
       if (config.tls_listener === false) {
-        // No built-in HTTPS listener (external TLS terminator serves the
-        // issuer origin): the self-signed TLS leaf is never presented, so
-        // offering it for download would only mislead.
+        // An external TLS terminator does not use the wallet's TLS certificate, so hide
+        // that download.
         document.getElementById('tls-row-label').hidden = true;
         document.getElementById('tls-row').hidden = true;
       }
-      // Determine demo mode before rendering the conformance panel: its note
-      // and browser-only warning both branch on it.
       demoMode = !!(config.demo && config.demo.enabled);
-      // An auto-accept wallet never opens a consent dialog, and without a
-      // hint the silence reads as a broken flow. A local wallet can flip the
-      // setting from the header. The demo keeps its consent rules, so there
-      // it only shows the state.
       renderAutoAccept(!!config.auto_accept);
       renderConformance(config);
       ['conf-mode-select', 'conf-haip-input', 'conf-encrypted-input', 'conf-vci-version-select', 'conf-key-attestation-select'].forEach((id) => {
@@ -2493,15 +2238,10 @@
         document.querySelector('label[for="issue-save-template"]').hidden = true;
         document.getElementById('template-form').hidden = true;
         document.getElementById('templates-btn').hidden = true;
-        // A shared demo takes no visitor-supplied image, so the logo and
-        // background image fields are hidden. A template's own art still
-        // applies, and normal issuance carries the appearance the issuer
-        // declares.
+        // Demo mode accepts images from templates and issuer metadata, but rejects visitor
+        // image fields.
         document.querySelectorAll('.issue-image-field').forEach((el) => { el.hidden = true; });
-        // The demo signs with its own key only, so the signing override is hidden.
         document.querySelectorAll('.issue-signing-field').forEach((el) => { el.hidden = true; });
-        // The activity log is shared history on a demo, and the server
-        // refuses to clear it.
         document.getElementById('clear-log-btn').hidden = true;
         if (!localStorage.getItem('demo-banner-dismissed')) {
           document.getElementById('demo-banner').hidden = false;
@@ -2516,7 +2256,7 @@
         });
       }
     } catch (e) {
-      /* footer extras are optional */
+      // The footer can load without optional server details.
     }
   }
 
@@ -2552,9 +2292,8 @@
     }
   }
 
-  // Conformance is the wallet's own process-level setting, reported by
-  // /api/config. Only a locally-hosted wallet can change it (PUT/DELETE
-  // /api/config/conformance). The public demo shows it read-only.
+  // Conformance settings apply to the wallet process. Demo mode displays them without
+  // allowing changes.
   let conformanceDefaults = { validation_mode: 'debug', require_haip: true, require_encrypted_request: false, vci_version: '1.0', key_attestation_level: '' };
 
   function effectiveConformance() {
@@ -2604,13 +2343,12 @@
         body: JSON.stringify(values),
       });
       if (resp.ok) conformanceDefaults = Object.assign({}, conformanceDefaults, await resp.json());
-    } catch (e) { /* leave the controls as the user set them */ }
+    } catch (e) { /* Keep the selected values if saving fails. */ }
     applyConformanceToControls();
   }
 
   function onConformanceChange() {
-    if (demoMode) return; // demo controls are read-only
-    // Change this wallet's own setting so every flow reaching it honors it.
+    if (demoMode) return;
     setServerConformance(currentControlValues());
   }
 
@@ -2622,7 +2360,6 @@
       .catch(() => { applyConformanceToControls(); });
   }
 
-  // Shows what an incoming request has to satisfy.
   function renderConformance(config) {
     conformanceDefaults = config || conformanceDefaults;
     applyConformanceToControls();
@@ -2636,8 +2373,6 @@
     set('conf-transcript', config.session_transcript || 'oid4vp', 'neutral');
     set('conf-format', config.preferred_format || 'no preference',
       config.preferred_format ? 'neutral' : 'off');
-    // The demo's settings are read-only. The intro says so, so the disabled
-    // controls make sense.
     const intro = document.getElementById('conf-intro');
     if (intro) {
       const base = 'How this wallet checks incoming requests, and which OpenID4VCI version it uses when it asks an issuer for a credential. A failed check is a warning in debug mode and rejects the request in strict mode.';
@@ -2647,7 +2382,6 @@
     if (reset) reset.hidden = demoMode;
   }
 
-  // "daily at 00:00 CET", "every hour", or null when resets are disabled.
   function describeReset(demo) {
     if (demo.reset_daily_at) return 'daily at ' + demo.reset_daily_at;
     const secs = demo.reset_interval_seconds || 0;
@@ -2663,10 +2397,7 @@
     return m + ' minutes';
   }
 
-  // Trust list links: what a counterparty needs to trust this wallet, both a
-  // verifier checking its self-issued credentials and an issuer checking its
-  // wallet and key attestations (same CA anchor in every list). Groups can
-  // change with issuance, so this is reloaded whenever credentials change.
+  // Issuance can add trust profiles, so refresh links when credentials change.
   async function loadTrustLists() {
     const row = document.getElementById('trust-list-links');
     try {
@@ -2676,8 +2407,6 @@
       row.querySelectorAll('.trust-items').forEach(el => el.remove());
       row.hidden = lists.length === 0;
 
-      // Grouped by what each list anchors, so a reader looking for one kind
-      // does not have to read past the other.
       const groups = new Map();
       lists.forEach(entry => {
         const category = entry.category || 'Other';
@@ -2685,8 +2414,6 @@
         groups.get(category).push(entry);
       });
 
-      // Same shape as the certificates below: a bold label on the left, the
-      // entries and their explanation on the right.
       const list = document.createElement('dl');
       list.className = 'trust-items';
       [...groups.keys()].sort().forEach(category => {
@@ -2725,7 +2452,7 @@
                 await navigator.clipboard.writeText(url);
                 copy.textContent = '\u2713';
                 setTimeout(() => { copy.textContent = '\u29C9'; }, 1200);
-              } catch (e) { /* clipboard unavailable */ }
+              } catch (e) { /* The clipboard API may be unavailable. */ }
             });
             links.appendChild(copy);
             detail.appendChild(links);
@@ -2754,7 +2481,6 @@
     trustOverlay.classList.remove('active');
   });
 
-  // Conformance modal
   const conformanceOverlay = document.getElementById('conformance-overlay');
   document.getElementById('conformance-link').addEventListener('click', (event) => {
     event.preventDefault();
@@ -2764,7 +2490,6 @@
     conformanceOverlay.classList.remove('active');
   });
 
-  // Get-the-CLI modal
   const cliOverlay = document.getElementById('cli-overlay');
   document.getElementById('get-cli-link').addEventListener('click', (event) => {
     event.preventDefault();
@@ -2786,9 +2511,8 @@
     howtoOverlay.classList.remove('active');
   });
 
-  // Initialize. The owner and the request id answer for this page, so they
-  // are read above and cleared from the address bar rather than left where a
-  // copied link would carry them.
+  // Remove consent identifiers from the address bar after reading them so copied links
+  // cannot grant access.
   if (pageParams.get('focus') === 'overview' || openedForRequest || actingOwner) {
     if (pageParams.get('focus') === 'overview') {
       window.scrollTo({ top: 0, left: 0, behavior: 'instant' });

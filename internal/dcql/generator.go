@@ -22,12 +22,10 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
-// FromSDJWT generates a DCQL query from an SD-JWT credential.
 func FromSDJWT(token *sdjwt.Token) *Query {
 	return fromJWTToken(token, "dc+sd-jwt")
 }
 
-// FromJWT generates a DCQL query from a plain JWT VC credential.
 func FromJWT(token *sdjwt.Token) *Query {
 	return fromJWTToken(token, "jwt_vc_json")
 }
@@ -58,7 +56,6 @@ func fromJWTToken(token *sdjwt.Token, credFormat string) *Query {
 	return &Query{Credentials: []CredentialQuery{cq}}
 }
 
-// FromMDOC generates a DCQL query from an mDOC credential.
 func FromMDOC(doc *mdoc.Document) *Query {
 	id := sanitizeID(doc.DocType)
 	if id == "" {
@@ -116,14 +113,9 @@ func extractSDJWTClaims(claims map[string]any) []ClaimQuery {
 	return result
 }
 
-// extractPaths recursively generates DCQL claim paths.
-// For leaf values it returns the current path.
-// For objects it recurses into each key.
-// For arrays it appends a null wildcard element.
 func extractPaths(prefix []any, v any) []ClaimQuery {
 	switch val := v.(type) {
 	case map[string]any:
-		// Skip _sd/_sd_alg metadata, only look at real sub-claims
 		var result []ClaimQuery
 		keys := sortedKeys(val)
 		for _, k := range keys {
@@ -139,7 +131,6 @@ func extractPaths(prefix []any, v any) []ClaimQuery {
 		}
 		return result
 	case []any:
-		// Array. Use null wildcard to request all elements
 		path := append(append([]any{}, prefix...), nil)
 		return []ClaimQuery{{Path: path}}
 	default:

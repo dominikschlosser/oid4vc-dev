@@ -50,13 +50,11 @@ func TestConcatKDF(t *testing.T) {
 		z[i] = byte(i)
 	}
 
-	// Test with nil apu, 128-bit key
 	derived128 := ConcatKDF(z, "A128GCM", nil, nil, 128)
 	if len(derived128) != 16 {
 		t.Errorf("expected 16-byte derived key, got %d bytes", len(derived128))
 	}
 
-	// Test with non-nil apu, 256-bit key
 	derived256 := ConcatKDF(z, "A256GCM", []byte("test"), nil, 256)
 	if len(derived256) != 32 {
 		t.Errorf("expected 32-byte derived key, got %d bytes", len(derived256))

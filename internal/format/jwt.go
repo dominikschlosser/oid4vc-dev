@@ -20,8 +20,6 @@ import (
 	"strings"
 )
 
-// ParseJWTParts splits a compact JWT into its three parts (header, payload, signature)
-// and decodes the header and payload as JSON maps.
 func ParseJWTParts(raw string) (header, payload map[string]any, sig []byte, err error) {
 	parts := strings.SplitN(raw, ".", 3)
 	if len(parts) != 3 {

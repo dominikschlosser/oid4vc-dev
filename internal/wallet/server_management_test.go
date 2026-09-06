@@ -107,8 +107,6 @@ func TestIssueCredentialAPI(t *testing.T) {
 	}
 }
 
-// Issuing through the UI or CLI can set the credential's display, which runs
-// through the same validation and image cache as an issuer's display metadata.
 func TestIssueCredentialAPIDisplay(t *testing.T) {
 	srv := newTestServer(t, true)
 	tinyPNG := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
@@ -130,15 +128,13 @@ func TestIssueCredentialAPIDisplay(t *testing.T) {
 		t.Errorf("logo not cached as a data URI: %.30q", d.LogoURI)
 	}
 
-	// The listing references the image by URL, not inline, so the payload stays
-	// small.
 	list := serverRequest(t, srv, http.MethodGet, "/api/credentials", "")
 	listBody := list.Body.String()
 	if strings.Contains(listBody, "data:image/") {
 		t.Error("the credential listing still inlines a display image as a data URI")
 	}
-	// The overview does not carry the claim values or the raw credential, only
-	// the count, so an image-heavy wallet is not returned by the megabyte.
+	// Omitting raw credentials and claim values keeps the overview response small even
+	// when credentials contain images.
 	if strings.Contains(listBody, `"raw":`) {
 		t.Error("the credential listing still ships the raw credential string")
 	}
@@ -148,13 +144,11 @@ func TestIssueCredentialAPIDisplay(t *testing.T) {
 	if !strings.Contains(listBody, `"claim_count":`) {
 		t.Error("the credential listing dropped the claim count")
 	}
-	// The single-credential GET still carries the raw credential.
 	one := serverRequest(t, srv, http.MethodGet, "/api/credentials/"+id, "")
 	if !strings.Contains(one.Body.String(), `"raw":`) {
 		t.Error("the single-credential GET dropped the raw credential")
 	}
 
-	// The referenced endpoint serves the image bytes, cached hard with an ETag.
 	img := serverRequest(t, srv, http.MethodGet, "/api/credentials/"+id+"/display/logo", "")
 	if img.Code != http.StatusOK {
 		t.Fatalf("display image GET: expected 200, got %d", img.Code)
@@ -170,7 +164,6 @@ func TestIssueCredentialAPIDisplay(t *testing.T) {
 		t.Error("the display image response is empty")
 	}
 
-	// A conditional request with the ETag is answered 304.
 	req := httptest.NewRequest(http.MethodGet, "/api/credentials/"+id+"/display/logo", nil)
 	req.Header.Set("If-None-Match", etag)
 	rec := httptest.NewRecorder()
@@ -180,8 +173,8 @@ func TestIssueCredentialAPIDisplay(t *testing.T) {
 	}
 }
 
-// A display color the value space does not allow is dropped rather than failing
-// the issuance, the same as on the offer path.
+// Invalid display colors are ignored during issuance, as they are when processing
+// offers.
 func TestIssueCredentialAPIDropsInvalidColor(t *testing.T) {
 	srv := newTestServer(t, true)
 	body := `{"format":"sdjwt","vct":"urn:example:badcolor","display":{"name":"Bad","background_color":"#gggggg"}}`
@@ -199,9 +192,7 @@ func TestIssueCredentialAPIDropsInvalidColor(t *testing.T) {
 	}
 }
 
-// A JWT VC carries the PID claim set plainly, so a PID request in that format
-// issues one. The template the PID flag picks is a claim set, not a choice of
-// format.
+// The PID template defines claims without restricting the credential format.
 func TestIssueCredentialAPIPIDAsJWT(t *testing.T) {
 	srv := newTestServer(t, true)
 	resp := serverRequest(t, srv, http.MethodPost, "/api/issue", `{"format": "jwt", "pid": true}`)

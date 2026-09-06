@@ -126,8 +126,7 @@ func TestExtractAndValidateJWKX5C(t *testing.T) {
 	})
 }
 
-// Resolution needs an https issuer, a kid to look up and a signature to check.
-// Anything less means there is nothing to resolve against.
+// Metadata resolution needs an HTTPS issuer, a key ID and a signature.
 func TestCanResolveJWTIssuerMetadata(t *testing.T) {
 	full := func() *sdjwt.Token {
 		return &sdjwt.Token{

@@ -1,6 +1,6 @@
 # Flow Diagrams
 
-The diagrams are Mermaid source, reviewable in plain text. They treat `eudi-dev` as a single actor and show the external interaction pattern plus the request parameters and wallet flags that change behavior.
+These Mermaid diagrams show how `eudi-dev` interacts with issuers and verifiers. Each page also lists the request parameters and wallet flags that affect the flow.
 
 ## Pages
 

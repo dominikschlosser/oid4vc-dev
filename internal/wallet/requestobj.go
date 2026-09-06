@@ -28,10 +28,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/jwe"
 )
 
-// encryptionKeyCoords returns the JWK coordinates of the request encryption
-// key when the wallet holds one, and nil coordinates otherwise. The key is
-// offered in wallet_metadata regardless of whether the wallet requires an
-// encrypted request object, so a Verifier that wants to encrypt one can.
+// The wallet advertises its encryption key even when encrypted Request Objects are
+// optional.
 func encryptionKeyCoords(w *Wallet) (x, y []byte, err error) {
 	if w.RequestEncryptionKey == nil {
 		return nil, nil, nil
@@ -39,16 +37,13 @@ func encryptionKeyCoords(w *Wallet) (x, y []byte, err error) {
 	return format.ECPublicCoords(&w.RequestEncryptionKey.PublicKey)
 }
 
-// BuildWalletMetadata builds the wallet_metadata JSON object per OID4VP 1.0 §10.
-// clientID is the Client Identifier of the request being fetched, whose prefix
-// decides whether the wallet may advertise Request Object signing algorithms.
+// BuildWalletMetadata advertises signing algorithms only when the client identifier prefix
+// permits signed requests (OID4VP 1.0 §10).
 func BuildWalletMetadata(w *Wallet, clientID string) map[string]any {
 	meta := map[string]any{
-		// Appendix B names the members of each format profile. For dc+sd-jwt
-		// they are sd-jwt_alg_values and kb-jwt_alg_values, and for mso_mdoc
-		// they are issuerauth_alg_values and deviceauth_alg_values, whose
-		// values are COSE algorithm identifiers rather than the JOSE names
-		// used for JWTs (-7 is ECDSA with SHA-256).
+		// Appendix B defines different algorithm fields for each format. SD-JWT fields
+		// use JOSE names. The mso_mdoc fields use COSE identifiers, such as -7 for
+		// ECDSA with SHA-256.
 		"vp_formats_supported": map[string]any{
 			"dc+sd-jwt": map[string]any{
 				"sd-jwt_alg_values": []string{"ES256"},
@@ -59,40 +54,31 @@ func BuildWalletMetadata(w *Wallet, clientID string) map[string]any {
 				"deviceauth_alg_values": []int{-7},
 			},
 		},
-		// §10.1: the Client Identifier Prefixes the wallet supports, which a
-		// Verifier reads to choose one (§5.9.1). "If omitted, the default
-		// value is pre-registered", so saying nothing rules out x509_hash.
-		//
-		// Only prefixes whose requests this wallet can verify are listed.
-		// verifier_attestation and decentralized_identifier carry their key
-		// elsewhere than the x5c leaf, so naming them would invite a request
-		// nothing here can confirm.
+		// OID4VP 1.0 §10.1 defaults to pre-registered when this field is absent. List
+		// the supported prefixes explicitly to allow x509_hash. The wallet cannot
+		// verify verifier_attestation or decentralized_identifier requests, so it
+		// omits those prefixes.
 		"client_id_prefixes_supported": []string{
 			"pre-registered",
 			"redirect_uri",
 			"x509_san_dns",
 			"x509_hash",
 		},
-		// §10 makes the wallet metadata an Authorization Server Metadata document
-		// (RFC 8414), which requires response_types_supported. The wallet answers
-		// an OpenID4VP request with a vp_token (§5.6).
+		// OID4VP 1.0 §10 uses RFC 8414 metadata, which requires
+		// response_types_supported. OpenID4VP returns vp_token (§5.6).
 		"response_types_supported": []string{"vp_token"},
-		// The response modes the wallet returns a vp_token in. Without this a
-		// verifier reads the RFC 8414 default (query and fragment), which does not
-		// describe this wallet, so it is stated even though RFC 8414 leaves it
-		// optional.
+		// RFC 8414 defaults to query and fragment. Explicit response modes are needed
+		// to describe this wallet.
 		"response_modes_supported": []string{"direct_post", "direct_post.jwt", "dc_api", "dc_api.jwt"},
-		// §10: the algorithms the wallet supports to encrypt an Authorization
-		// Response, used with the direct_post.jwt and dc_api.jwt response modes.
-		// ECDH-ES on P-256 is the OID4VP baseline, with A128GCM and A256GCM as
-		// the content encryption (both of which HAIP requires).
+		// OID4VP 1.0 §10 advertises response encryption for direct_post.jwt and
+		// dc_api.jwt. ECDH-ES with P-256 is the baseline. HAIP requires both A128GCM
+		// and A256GCM.
 		"authorization_encryption_alg_values_supported": []string{"ECDH-ES"},
 		"authorization_encryption_enc_values_supported": []string{"A128GCM", "A256GCM"},
 	}
 
-	// §10: advertise Request Object signing algorithms only when the Client
-	// Identifier Prefix permits a signed Request Object. The redirect_uri prefix
-	// precludes one (OID4VP 1.0 §5.9.1), so the wallet omits the parameter then.
+	// OID4VP 1.0 §10 permits signing algorithms only for prefixes that support signed
+	// Request Objects. The redirect_uri prefix forbids them (§5.9.1).
 	if !strings.HasPrefix(clientID, "redirect_uri:") {
 		meta["request_object_signing_alg_values_supported"] = []string{"ES256"}
 	}
@@ -110,9 +96,9 @@ func BuildWalletMetadata(w *Wallet, clientID string) map[string]any {
 				},
 			},
 		}
-		// §5.10.5 puts the request encryption keys in jwks. The algorithms
-		// for them are the request_object_encryption_* pair of OpenID
-		// Connect Discovery, with the wallet in the server role.
+		// OID4VP 1.0 §5.10.5 puts request encryption keys in jwks. The
+		// request_object_encryption_* fields follow OpenID Connect Discovery, with the
+		// wallet acting as the server.
 		meta["request_object_encryption_alg_values_supported"] = []string{"ECDH-ES"}
 		meta["request_object_encryption_enc_values_supported"] = []string{"A128GCM", "A256GCM"}
 	}
@@ -120,8 +106,7 @@ func BuildWalletMetadata(w *Wallet, clientID string) map[string]any {
 	return meta
 }
 
-// GenerateWalletNonce generates a base64url-encoded 16-byte cryptographic nonce
-// for replay attack mitigation per OID4VP 1.0 §5.10.
+// GenerateWalletNonce provides replay protection through wallet_nonce (OID4VP 1.0 §5.10).
 func GenerateWalletNonce() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -130,10 +115,9 @@ func GenerateWalletNonce() (string, error) {
 	return format.EncodeBase64URL(b), nil
 }
 
-// MakeFetchRequestURI returns a FetchRequestURI callback for oid4vc.ParseOptions.
-// When method is "post", it POSTs wallet_metadata and wallet_nonce to the request_uri.
-// When method is "get" or empty, it performs a plain GET.
-// If the response is a JWE (encrypted request object) and the wallet has an encryption key, it decrypts it.
+// MakeFetchRequestURI includes wallet_metadata and wallet_nonce in POST requests. An empty
+// method uses GET. Encrypted responses are decrypted when the wallet has an encryption
+// key.
 func MakeFetchRequestURI(w *Wallet, logFn func(string, ...any)) func(url, method, clientID string) (string, error) {
 	return func(requestURI, method, clientID string) (string, error) {
 		if method == "post" {
@@ -172,9 +156,8 @@ func fetchRequestURIGET(w *Wallet, requestURI string) (string, error) {
 	return strings.TrimSpace(string(body)), nil
 }
 
-// judgeRequestURIMediaType holds the media type of a request_uri response to
-// the active validation mode: strict refuses a wrong one, debug records the
-// finding as a warning and reads the request object anyway.
+// Strict mode rejects an incorrect media type. Debug mode warns and reads the Request
+// Object.
 func (w *Wallet) judgeRequestURIMediaType(contentType string) error {
 	err := validateRequestURIResponse(contentType)
 	if err == nil {
@@ -189,7 +172,6 @@ func (w *Wallet) judgeRequestURIMediaType(contentType string) error {
 	return nil
 }
 
-// fetchRequestURIPOST implements the request_uri_method=post flow per OID4VP 1.0 §5.10.
 func fetchRequestURIPOST(w *Wallet, requestURI, clientID string, logFn func(string, ...any)) (string, error) {
 	walletMeta := BuildWalletMetadata(w, clientID)
 	walletMetaJSON, err := json.Marshal(walletMeta)
@@ -344,8 +326,7 @@ func responseLogResult(statusCode int, details map[string]any) map[string]any {
 	return details
 }
 
-// validateRequestURIResponse checks the media type of a request_uri response
-// against OID4VP 1.0 §5.10.1.
+// Validates the media type required by OID4VP 1.0 §5.10.1.
 func validateRequestURIResponse(contentType string) error {
 	if contentType == "" {
 		return fmt.Errorf("OID4VP 1.0 §5.10.1: the request_uri response is missing the Content-Type application/oauth-authz-req+jwt")
@@ -360,20 +341,16 @@ func validateRequestURIResponse(contentType string) error {
 	return nil
 }
 
-// isJWT checks if a string looks like a JWT (3 dot-separated parts).
 func isJWT(s string) bool {
 	parts := strings.SplitN(s, ".", 4)
 	return len(parts) == 3 && len(parts[0]) > 0 && len(parts[1]) > 0
 }
 
-// isJWE checks if a string looks like a JWE compact serialization (5 dot-separated parts).
 func isJWE(s string) bool {
 	parts := strings.Split(s, ".")
 	return len(parts) == 5 && len(parts[0]) > 0
 }
 
-// DecryptCompactJWE decrypts a compact JWE using the wallet's EC private key
-// via ECDH-ES key agreement and returns the plaintext.
 func DecryptCompactJWE(compact string, key *ecdsa.PrivateKey) (string, error) {
 	if key == nil {
 		return "", fmt.Errorf("decryption requires a private key")
@@ -389,8 +366,6 @@ func DecryptCompactJWE(compact string, key *ecdsa.PrivateKey) (string, error) {
 	return strings.TrimSpace(string(plaintext)), nil
 }
 
-// DecryptRequestObjectJWE decrypts a JWE-encrypted request object using the wallet's
-// EC private key via ECDH-ES key agreement. Returns the decrypted JWT string.
 func DecryptRequestObjectJWE(jwe string, key *ecdsa.PrivateKey) (string, error) {
 	return DecryptCompactJWE(jwe, key)
 }

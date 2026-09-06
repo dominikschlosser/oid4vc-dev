@@ -231,10 +231,6 @@ func prettyJSON(value any) string {
 	return string(raw)
 }
 
-// createLoginURL builds an authorization request that goes straight to the
-// wallet identity provider. The user presents the PID, and on the first login
-// signs in with a password so Keycloak can bind the account and issue the
-// membership credential.
 func (s *server) createLoginURL() (string, error) {
 	state := "s-" + randomToken(8)
 	nonce := "n-" + randomToken(8)

@@ -21,18 +21,14 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/config"
 )
 
-// ClientHeader names the client and its release. A submission that carries it
-// comes from a client this project ships, which tells a current URL handler
-// apart from one an earlier release installed.
+// ClientHeader identifies the client and release so the server can detect outdated URL
+// handlers.
 const ClientHeader = config.ClientHeader
 
-// staleClientNotice names what a submission that identifies no page costs, and
-// the two ways to fix it.
 const staleClientNotice = "This client named neither itself nor a page, so what it submits is offered to every open tab " +
 	"rather than the one that started it. Re-register the URL handler with 'eudi wallet register', or send " +
 	OwnerHeader + " from your own client to say which page a flow belongs to."
 
-// clientName returns the name a client gives itself, empty when it gives none.
 func clientName(r *http.Request) string {
 	if r == nil {
 		return ""
@@ -42,9 +38,8 @@ func clientName(r *http.Request) string {
 	return strings.TrimSpace(name)
 }
 
-// noteStaleClient reports a submission that names neither itself nor a page
-// (a URL handler an earlier release installed). It goes to the activity log:
-// such a client dispatches headlessly, so its own output reaches nobody.
+// Older URL handlers identify neither the client nor the browser session. Log the
+// warning because their terminal output is not visible to the user.
 func (s *Server) noteStaleClient(r *http.Request) {
 	if clientName(r) != "" || requestOwner(r) != "" {
 		return

@@ -21,8 +21,6 @@ import (
 	"time"
 )
 
-// newTestServerWithStatusList creates a test server whose wallet has a
-// configured status list, so issued credentials get managed status entries.
 func newTestServerWithStatusList(t *testing.T) *Server {
 	t.Helper()
 	w := generateTestWallet(t)
@@ -64,7 +62,7 @@ func TestCredentialListIncludesManagedStatus(t *testing.T) {
 }
 
 func TestCredentialListWithoutStatusListHasNoStatus(t *testing.T) {
-	srv := newTestServer(t, true) // no BaseURL: no status list configured
+	srv := newTestServer(t, true)
 
 	resp := serverRequest(t, srv, http.MethodGet, "/api/credentials", "")
 	creds := decodeJSONArray(t, resp)
@@ -95,7 +93,6 @@ func TestRevokeAndActivateCredential(t *testing.T) {
 		t.Errorf("unexpected status after revoke: %v", status)
 	}
 
-	// The list reflects the revocation
 	resp = serverRequest(t, srv, http.MethodGet, "/api/credentials/"+id, "")
 	cred := decodeJSON(t, resp)
 	if cred["status"].(map[string]any)["status"] != float64(1) {
@@ -157,8 +154,7 @@ func TestGetConfigStatusListURL(t *testing.T) {
 }
 
 func TestGeneratePIDStatusWithIssuerURLOnly(t *testing.T) {
-	// Only an issuer URL is set (no base URL), matching a wallet that has
-	// served before. PID generation must still embed status references.
+	// A previously served wallet may retain its issuer URL without a base URL.
 	w := generateTestWallet(t)
 	w.IssuerURL = "https://localhost:8086"
 	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {

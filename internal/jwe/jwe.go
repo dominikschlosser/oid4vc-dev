@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package jwe decrypts compact JSON Web Encryption using ECDH-ES, for the
-// wallet (request objects encrypted to it) and the proxy (traffic it holds a
-// key for). The key derivation lives here once: a drifting copy fails as a bad
-// ciphertext rather than as a bug.
+// Package jwe decrypts ECDH-ES compact JWEs for the wallet and proxy. Both use the
+// same key derivation to avoid incompatible implementations.
 package jwe
 
 import (
@@ -35,7 +33,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/keys"
 )
 
-// Header is the parsed protected header of a compact JWE.
 type Header struct {
 	Enc string
 	EPK map[string]any
@@ -44,7 +41,6 @@ type Header struct {
 	Raw map[string]any
 }
 
-// ParseHeader decodes the protected header of a compact JWE.
 func ParseHeader(compact string) (Header, error) {
 	parts := strings.Split(compact, ".")
 	if len(parts) != 5 {
@@ -75,7 +71,6 @@ func ParseHeader(compact string) (Header, error) {
 	return h, nil
 }
 
-// Decrypt decrypts a compact JWE addressed to key using ECDH-ES.
 func Decrypt(compact string, key *ecdh.PrivateKey) ([]byte, error) {
 	if key == nil {
 		return nil, fmt.Errorf("decryption requires a private key")
@@ -184,8 +179,6 @@ func ConcatKDF(z []byte, enc string, apu, apv []byte, keyBitLen int) []byte {
 	return h.Sum(nil)[:keyBitLen/8]
 }
 
-// writeWithLength writes a 4-byte big-endian length prefix followed by data,
-// writing just the zero length when data is empty.
 func writeWithLength(h io.Writer, data []byte) {
 	var lenBuf [4]byte
 	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(data)))
@@ -195,7 +188,6 @@ func writeWithLength(h io.Writer, data []byte) {
 	}
 }
 
-// EncKeyBitLen returns the content encryption key length for enc.
 func EncKeyBitLen(enc string) (int, error) {
 	switch enc {
 	case "A128GCM":

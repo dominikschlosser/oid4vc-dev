@@ -14,16 +14,12 @@
 
 package wallet
 
-// RegisterOptions controls how OS URL handler registration should configure
-// the helper process that receives custom scheme links.
 type RegisterOptions struct {
 	ListenerPort int
 	AutoAccept   bool
 	ServeArgs    []string
 }
 
-// SupportsURLSchemeRegistration reports whether this build can register OS-level
-// handlers for openid4vp:// and related custom schemes.
 func SupportsURLSchemeRegistration() bool {
 	return supportsURLSchemeRegistration()
 }

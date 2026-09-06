@@ -1,6 +1,5 @@
-# Two wallet servers on one Postgres database behind an nginx ingress. The
-# target for load and performance tests: every request through the ingress
-# lands on either server, and both serve the same wallet state.
+# Two wallet servers share Postgres behind nginx. Load tests can reach either server
+# through one URL.
 services:
   db:
     image: postgres:16-alpine
@@ -15,7 +14,6 @@ services:
 
   wallet-1: &wallet
     image: ghcr.io/dominikschlosser/eudi-dev:${WALLET_TAG:-latest}
-    # docker compose build builds the image from the working tree.
     build:
       context: ../..
     # The state persists in the database, so the wallet generates its own random keys.
@@ -30,9 +28,8 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
-    # The base URL is the ingress as a verifier or issuer on the host sees
-    # it. The HTTPS issuer endpoints take its host and the wallet port plus
-    # one (8086). The ingress passes that port through unchanged.
+    # The base URL is the ingress address visible to host clients. HTTPS uses port 8086,
+    # which nginx forwards unchanged.
     command:
       - wallet
       - serve
@@ -65,8 +62,8 @@ services:
     ports:
       - "${INGRESS_PORT:-8080}:8080"
       - "8086:8081"
-    # The ingress opens once both servers answer, so no request meets a
-    # server that is still starting.
+    # Wait for both wallets so the ingress cannot forward to a server that is still
+    # starting.
     depends_on:
       wallet-1:
         condition: service_healthy

@@ -68,7 +68,6 @@ func TestEncryptJWERSARoundTrip(t *testing.T) {
 		t.Fatal("RSA-OAEP JWE must carry an encrypted key in the second part")
 	}
 
-	// Decrypt as the verifier would: unwrap the CEK with RSA-OAEP, then AES-GCM.
 	dec := func(s string) []byte {
 		b, decErr := format.DecodeBase64URL(s)
 		if decErr != nil {
@@ -130,7 +129,7 @@ func TestFindEncryptionJWKPrefersECOverRSA(t *testing.T) {
 	rsaPriv, _ := rsa.GenerateKey(rand.Reader, 2048)
 	ecJWK := map[string]any{"kty": "EC", "crv": "P-256", "use": "enc", "kid": "ec", "x": "8Yrbbg", "y": "V2Ki0w"}
 	meta := map[string]any{"jwks": map[string]any{"keys": []any{
-		rsaEncJWK(&rsaPriv.PublicKey, "RSA-OAEP"), // listed first
+		rsaEncJWK(&rsaPriv.PublicKey, "RSA-OAEP"),
 		ecJWK,
 	}}}
 	jwk := findEncryptionJWK(nil, meta)
@@ -172,13 +171,11 @@ func TestHaipEncryptionKeyViolationsRSA(t *testing.T) {
 	}
 }
 
-// Guard the compact-JWE structure the round-trip test relies on.
 func TestEncryptJWERSAUnsupportedAlg(t *testing.T) {
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
 	if _, _, err := EncryptJWERSA([]byte("{}"), &priv.PublicKey, "k", "RSA1_5", "A128GCM"); err == nil {
 		t.Fatal("expected an error for an unsupported RSA alg")
 	}
-	// A well-formed header is still valid JSON.
 	compact, _, err := EncryptJWERSA([]byte("{}"), &priv.PublicKey, "k", "RSA-OAEP-256", "A256GCM")
 	if err != nil {
 		t.Fatalf("RSA-OAEP-256 with A256GCM: %v", err)

@@ -21,7 +21,6 @@ import (
 	"testing"
 )
 
-// TestHeaders covers the policy every UI depends on when escaping fails.
 func TestHeaders(t *testing.T) {
 	handler := Headers(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))

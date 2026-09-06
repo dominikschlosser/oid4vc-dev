@@ -23,9 +23,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/mock"
 )
 
-// legacyTypeCredential issues a mock SD-JWT VC and re-heads it with the
-// earlier vc+sd-jwt typ. Re-encoding the header invalidates the
-// signature, which import parsing does not check.
+// Replace typ with the legacy value to test import parsing. This invalidates the
+// signature, which import does not check.
 func legacyTypeCredential(t *testing.T, w *Wallet) string {
 	t.Helper()
 	raw, err := mock.GenerateSDJWT(mock.SDJWTConfig{

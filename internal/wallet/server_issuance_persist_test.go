@@ -19,11 +19,8 @@ import (
 	"time"
 )
 
-// The synchronous management handlers (import, delete, set-status, issue,
-// generate-pid) mutate the wallet and save through saveMutation, which must
-// hold storeSyncMu across the change and its save so a per-request reload
-// cannot land in between and drop the write. A reload therefore blocks while a
-// mutation is in flight.
+// A reload must wait until a mutation has been saved. Otherwise it could replace the
+// changed state with the old stored state.
 func TestSaveMutationFencesOutAReload(t *testing.T) {
 	srv := newTestServer(t, true)
 	store := NewWalletStore(t.TempDir())
@@ -38,8 +35,8 @@ func TestSaveMutationFencesOutAReload(t *testing.T) {
 	reloadDone := make(chan struct{})
 
 	go srv.saveMutation(func() bool {
-		close(inside) // now holding storeSyncMu
-		<-release     // keep holding it until the test says so
+		close(inside)
+		<-release
 		return true
 	})
 
@@ -53,17 +50,13 @@ func TestSaveMutationFencesOutAReload(t *testing.T) {
 	case <-reloadDone:
 		t.Fatal("a reload ran while a mutation held the store lock")
 	case <-time.After(50 * time.Millisecond):
-		// Expected: the reload is blocked on storeSyncMu.
 	}
 	close(release)
 	<-reloadDone
 }
 
-// An issuance flow can stay open for a long time: an authorization code flow
-// waits for the user to sign in at the issuer, and meanwhile every request
-// reloads the wallet from the store, replacing the credential list. The
-// credential the flow imports survives a reload that lands between the import
-// and the save.
+// Issuance can overlap with request-triggered reloads. Saving must restore a
+// credential if a reload discarded it after import.
 func TestSaveIssuedCredential_SurvivesConcurrentStoreReload(t *testing.T) {
 	srv := newTestServer(t, true)
 
@@ -79,8 +72,7 @@ func TestSaveIssuedCredential_SurvivesConcurrentStoreReload(t *testing.T) {
 	}
 	srv.wallet.RestoreCredential(issued)
 
-	// What a reload does: the persisted state replaces the in-memory list,
-	// and the credential the flow just imported is not in it yet.
+	// Simulate a reload before the imported credential has been saved.
 	persisted := &Wallet{Credentials: []StoredCredential{}}
 	srv.applyPersistedWalletState(persisted)
 	if _, ok := srv.wallet.GetCredential(issued.ID); ok {
@@ -97,9 +89,8 @@ func TestSaveIssuedCredential_SurvivesConcurrentStoreReload(t *testing.T) {
 	}
 }
 
-// A credential on this wallet's own status list (the demo issuer's ticket is
-// the common case) adopts its status entry at import. The entry survives a
-// concurrent reload together with the credential, so the wallet can revoke it.
+// Import adopts status entries for credentials on this wallet's status list. A reload
+// must preserve the adopted entry so the credential can still be revoked.
 func TestSaveIssuedCredential_KeepsTheAdoptedStatusEntry(t *testing.T) {
 	srv := newTestServer(t, true)
 	srv.onSave = func() {}
@@ -119,14 +110,12 @@ func TestSaveIssuedCredential_KeepsTheAdoptedStatusEntry(t *testing.T) {
 			},
 		},
 	}
-	// What the import did: stored the credential and adopted its entry.
 	srv.wallet.RestoreCredential(issued)
 	srv.wallet.adoptOwnStatusEntry(&issued)
 	if _, ok := srv.wallet.StatusEntryFor(issued.ID); !ok {
 		t.Fatal("precondition failed: the import should have adopted the status entry")
 	}
 
-	// A concurrent reload lands between the import and the save.
 	srv.applyPersistedWalletState(&Wallet{Credentials: []StoredCredential{}})
 	if _, ok := srv.wallet.StatusEntryFor(issued.ID); ok {
 		t.Fatal("precondition failed: the reload should have wiped the status entry")
@@ -143,7 +132,6 @@ func TestSaveIssuedCredential_KeepsTheAdoptedStatusEntry(t *testing.T) {
 	}
 }
 
-// Restoring is idempotent: a credential still present must not be duplicated.
 func TestSaveIssuedCredential_DoesNotDuplicate(t *testing.T) {
 	srv := newTestServer(t, true)
 	srv.onSave = func() {}
@@ -159,9 +147,8 @@ func TestSaveIssuedCredential_DoesNotDuplicate(t *testing.T) {
 	}
 }
 
-// A renewal has the same reload race as an issuance. The renewed copy
-// replaces a credential that still exists on disk, so a reload between the
-// replacement and the save reverts it and drops the rotated refresh token.
+// A reload between renewal and saving can restore the old credential and refresh
+// token. Saving must recover the renewed credential and its rotated token.
 func TestSaveRenewedCredential_SurvivesConcurrentStoreReload(t *testing.T) {
 	srv := newTestServer(t, true)
 	saved := 0
@@ -192,7 +179,6 @@ func TestSaveRenewedCredential_SurvivesConcurrentStoreReload(t *testing.T) {
 		CredentialEndpoint: "https://issuer.example/credential",
 	}
 
-	// What the flow did in memory, then a concurrent reload reverting it.
 	srv.wallet.PutCredential(renewed)
 	srv.applyPersistedWalletState(&Wallet{Credentials: []StoredCredential{stale}})
 

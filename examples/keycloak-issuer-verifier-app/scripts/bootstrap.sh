@@ -92,8 +92,8 @@ realm_id() {
   api GET "/admin/realms/${KEYCLOAK_REALM}" | jq -er '.id'
 }
 
-# Keycloak refuses to sign an SD-JWT credential with a self-signed certificate,
-# so the realm's active RS256 signing key is a leaf a small demo CA issued.
+# Keycloak requires a CA-issued certificate for SD-JWT signing, so the demo CA signs the
+# realm key.
 configure_static_realm_signing_key() {
   local realm_id_value="$1"
   local cert_b64 existing_id

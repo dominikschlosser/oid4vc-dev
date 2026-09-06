@@ -1,9 +1,9 @@
 # Keys and credentials are stored unencrypted
 
-The wallet store (`~/.eudi-dev/wallet/`) holds credentials, holder and issuer private keys and issuer refresh tokens in the clear. The CA key one level above it is shared by every wallet under the same base directory. A test wallet whose store you can read with `cat` and edit with an editor is easier to debug. A CA regenerated per run would invalidate every trust list and status list URL a verifier had already been pointed at.
+Credentials, private keys and issuer refresh tokens are stored unencrypted. On the file backend they live in `~/.eudi-dev/wallet/`, with the shared CA key one level above it. The readable store makes test state easy to inspect and edit. Keeping the CA stable lets verifiers reuse their configured trust anchor across runs.
 
-File modes still apply (`0600` for keys, `0700` for directories, atomic write-then-rename for `wallet.json`).
+Key files use mode `0600` and directories use `0700`. Saving `wallet.json` writes a temporary file and atomically renames it.
 
 ## Consequences
 
-The CA key is an unprotected trust anchor. Anyone who can read it can issue credentials the verifiers you configured will accept. That is acceptable for a test CA on a developer machine and nowhere else. Encryption would change the store format and the `--wallet-dir` contract that CI setups and the Docker image depend on.
+Anyone who can read the CA key can issue credentials accepted by verifiers that trust this CA. Use it only for testing. Encryption would change the store format and the `--wallet-dir` contract that CI setups and the Docker image depend on.

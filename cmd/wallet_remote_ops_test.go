@@ -20,8 +20,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/remote"
 )
 
-// TestOpensSignInHere covers who navigates to the sign-in an issuer asks for
-// mid-issuance: the page this client named, or this process.
 func TestOpensSignInHere(t *testing.T) {
 	previous := noOpen
 	t.Cleanup(func() { noOpen = previous })
@@ -50,7 +48,6 @@ func TestOpensSignInHere(t *testing.T) {
 	}
 }
 
-// TestNavigatesHere covers the one rule every hand-over to a browser follows.
 func TestNavigatesHere(t *testing.T) {
 	previous := noOpen
 	t.Cleanup(func() { noOpen = previous })

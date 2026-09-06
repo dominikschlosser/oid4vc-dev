@@ -29,29 +29,25 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx database/sql driver
 )
 
-// postgresTable holds one row per key, postgresVersions numbers its writes.
 const (
 	postgresTable    = "eudi_dev_state"
 	postgresVersions = "eudi_dev_state_version"
 )
 
-// postgresStore keeps every key as a row.
 type postgresStore struct {
 	db    *sql.DB
 	label string
 
-	// prepared records that the table exists. It is created on first use, so
-	// a command routed to a running server never connects.
+	// Connect and create schema objects on first use, so commands routed to a
+	// server need no database connection.
 	prepareMu sync.Mutex
 	prepared  bool
 }
 
-// postgresPools holds one store per connection URL, so every opener of a
-// database in the process shares its connection pool.
+// Openers using the same connection URL share a pool within the process.
 var postgresPools sync.Map
 
-// openPostgres returns the store for the database at a postgres:// URL.
-// The connection is made, and the state table created, on first use.
+// Open lazily so commands routed to a wallet server need no local database connection.
 func openPostgres(dsn string) (Store, error) {
 	if store, ok := postgresPools.Load(dsn); ok {
 		return store.(*postgresStore), nil
@@ -67,15 +63,12 @@ func openPostgres(dsn string) (Store, error) {
 	return store.(*postgresStore), nil
 }
 
-// prepare creates the table and its prefix index unless they exist. A
-// failure is not remembered, so a database that was still starting is
-// retried on the next call. Two processes creating them at the same moment
-// race inside Postgres, and the loser's error (a unique violation or
-// "relation already exists") means they are there.
+// prepare creates the table, prefix index and version sequence. Failed attempts are
+// retried on the next call. Concurrent creation can report duplicate-object errors even
+// when the objects now exist.
 //
-// Every listing is a LIKE on a key prefix. The primary key's index serves
-// that only under the C collation, so a second index with text_pattern_ops
-// keeps a listing from scanning the whole table.
+// The prefix index supports LIKE queries under collations where the primary-key index
+// cannot.
 func (s *postgresStore) prepare() error {
 	s.prepareMu.Lock()
 	defer s.prepareMu.Unlock()
@@ -102,7 +95,7 @@ func (s *postgresStore) prepare() error {
 	return nil
 }
 
-// postgresLabel returns the URL without its credentials, for messages.
+// Omit database credentials from diagnostic messages.
 func postgresLabel(dsn string) string {
 	u, err := url.Parse(dsn)
 	if err != nil {
@@ -308,13 +301,11 @@ func (s *postgresStore) WriteIf(key string, data []byte, _ fs.FileMode, expected
 	return postgresStamp(version, int64(len(data))), nil
 }
 
-// postgresStamp is the stamp of a row. Versions come from one sequence for
-// the whole table, so a row deleted and created again never repeats one.
+// A shared sequence gives recreated rows new versions, so cached readers detect them.
 func postgresStamp(version, size int64) Stamp {
 	return Stamp{Version: strconv.FormatInt(version, 10), Size: size}
 }
 
-// likePrefix escapes a key prefix for a LIKE pattern.
 func likePrefix(prefix string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(prefix) + "%"
 }

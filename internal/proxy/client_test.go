@@ -77,7 +77,7 @@ func TestDashboardClientEntries(t *testing.T) {
 	}
 }
 
-// A dashboard that is not there has to say so rather than look empty.
+// Connection failures must report an error instead of empty history.
 func TestDashboardClientReportsAnUnreachableProxy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nope", http.StatusNotFound)
@@ -121,8 +121,7 @@ func TestDashboardClientStreamSubscribesBeforeItReturns(t *testing.T) {
 	}
 }
 
-// Keepalive comments keep an idle stream open through whatever sits between
-// the proxy and the client. A reader has to skip them, not choke on them.
+// Skip keepalive comments without treating them as malformed events.
 func TestEntryStreamSkipsKeepalivesAndMalformedEvents(t *testing.T) {
 	body := ": keepalive\n\n" +
 		"data: not json\n\n" +

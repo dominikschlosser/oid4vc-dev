@@ -118,7 +118,6 @@ func init() {
 	issueCmd.AddCommand(issueJWTCmd)
 	issueCmd.AddCommand(issueMDOCCmd)
 
-	// SD-JWT flags
 	issueSDJWTCmd.Flags().StringVar(&issueClaims, "claims", "", "Claims as JSON string or @filepath")
 	issueSDJWTCmd.Flags().StringVar(&issueTemplate, "template", "", "Credential template name or file, listed by 'templates list' (--claims overrides individual claims)")
 	issueSDJWTCmd.Flags().StringSliceVar(&issueAlwaysDisclosed, "always-disclosed", nil, "Claims to embed plainly instead of selectively disclosable (dotted paths for nested claims, e.g. address.country)")
@@ -139,7 +138,6 @@ func init() {
 	addIssueTrustMetadataFlags(issueSDJWTCmd)
 	addIssueDisplayFlags(issueSDJWTCmd)
 
-	// JWT flags
 	issueJWTCmd.Flags().StringVar(&issueClaims, "claims", "", "Claims as JSON string or @filepath")
 	issueJWTCmd.Flags().StringVar(&issueTemplate, "template", "", "Credential template name or file, listed by 'templates list' (--claims overrides individual claims)")
 	issueJWTCmd.Flags().StringVar(&issueSaveTemplate, "save-template", "", "Save the issued claims and settings as a credential template with this name")
@@ -157,7 +155,6 @@ func init() {
 	addIssueTrustMetadataFlags(issueJWTCmd)
 	addIssueDisplayFlags(issueJWTCmd)
 
-	// mDOC flags
 	issueMDOCCmd.Flags().StringVar(&issueClaims, "claims", "", "Claims as JSON string or @filepath")
 	issueMDOCCmd.Flags().StringVar(&issueTemplate, "template", "", "Credential template name or file, listed by 'templates list' (--claims overrides individual claims)")
 	issueMDOCCmd.Flags().StringVar(&issueSaveTemplate, "save-template", "", "Save the issued claims and settings as a credential template with this name")
@@ -177,7 +174,6 @@ func init() {
 	addIssueTrustMetadataFlags(issueMDOCCmd)
 	addIssueDisplayFlags(issueMDOCCmd)
 
-	// Shell completion for knowable values
 	for _, c := range []*cobra.Command{issueSDJWTCmd, issueJWTCmd, issueMDOCCmd} {
 		_ = c.RegisterFlagCompletionFunc("template", completeTemplateNames)
 		_ = c.RegisterFlagCompletionFunc("trust-profile", staticCompletion("auto", "pid", "local"))
@@ -397,8 +393,6 @@ func loadOrGenerateIssueKey() (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
-// readSigningOverrideFiles reads the --key and --cert files, empty when
-// --cert is not set.
 func readSigningOverrideFiles() (keyData, certData string, err error) {
 	if issueCertPath == "" {
 		return "", "", nil
@@ -448,8 +442,8 @@ func loadWalletForIssue(cmd *cobra.Command) (*wallet.Wallet, *wallet.WalletStore
 		w.Templates = credtemplate.FileLocation(templatesDir)
 	}
 
-	// With --cert the key and chain travel in the issue request as a signing
-	// override. --key alone re-leafs the wallet CA chain for the given key.
+	// With --cert, the request includes the supplied key and chain. With --key alone,
+	// the wallet signs a new leaf certificate under its CA.
 	if issueKeyPath != "" && issueCertPath == "" {
 		issuerKey, err := loadWalletECKey(issueKeyPath, "issuer")
 		if err != nil {
@@ -517,10 +511,8 @@ func runIssueToWallet(cmd *cobra.Command, format string) error {
 	return nil
 }
 
-// resolveIssueTemplate loads the credential template selected by --template,
-// or the pre-defined PID template of the type --vct names when --pid is set
-// without --claims. It applies the template's VCT, doc type, namespace, and
-// expiry to flags the user did not set explicitly.
+// Explicit flags override template defaults. With --pid and no --claims, --vct selects
+// the built-in PID template.
 func resolveIssueTemplate(cmd *cobra.Command, format string) (*credtemplate.Template, error) {
 	var name string
 	// A template named by --template must match the format. The --pid
@@ -610,8 +602,6 @@ func resolveIssueAlwaysDisclosed(format string, tpl *credtemplate.Template) ([]s
 	}
 }
 
-// saveIssueTemplate persists the resolved issuance parameters as a user
-// template when --save-template is set.
 func saveIssueTemplate(format string, claims map[string]any, alwaysDisclosed []string) error {
 	if issueSaveTemplate == "" {
 		return nil
@@ -641,10 +631,8 @@ func saveIssueTemplate(format string, claims map[string]any, alwaysDisclosed []s
 	return nil
 }
 
-// issueAPIRequestFromFlags maps the issue flags onto the POST /api/issue
-// request body, the issuance contract shared by both walletService backends.
-// Templates resolve on the managed wallet against its template directory, so
-// only the template name and the explicit overrides travel.
+// issueAPIRequestFromFlags builds the shared POST /api/issue request. Templates resolve
+// on the managed wallet, so send only the name and explicit overrides.
 func issueAPIRequestFromFlags(cmd *cobra.Command, format string) (map[string]any, error) {
 	req := map[string]any{"format": format}
 	keyData, certData, err := readSigningOverrideFiles()
@@ -652,8 +640,6 @@ func issueAPIRequestFromFlags(cmd *cobra.Command, format string) (map[string]any
 		return nil, err
 	}
 	if certData != "" {
-		// Validated here too, so a bad pair fails before it travels to a
-		// remote instance.
 		if _, _, err := wallet.ParseSigningOverride(keyData, certData); err != nil {
 			return nil, err
 		}
@@ -723,10 +709,8 @@ func issueAPIRequestFromFlags(cmd *cobra.Command, format string) (map[string]any
 	if issueTrustProfile != "" && issueTrustProfile != "auto" {
 		req["trust_profile"] = issueTrustProfile
 	}
-	// The registration metadata flags (--entitlement, --trust-list-type, ...)
-	// travel in the "trust" object. The server sets Format/VCT/DocType and
-	// applies the trust profile, so an empty spec here is equivalent to sending
-	// none.
+	// The server fills in Format, VCT and DocType and applies the trust profile. An
+	// empty trust object therefore behaves like an omitted one.
 	req["trust"] = issueTrustSpecFromFlags()
 
 	display := map[string]any{}
@@ -805,9 +789,6 @@ func addIssueDisplayFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&issueBackgroundImage, "background-image", "", "With --wallet: the card background image, a file path, a data URI, or an http(s) URL")
 }
 
-// displayImageArg resolves a display image flag to a value the wallet accepts. A
-// data URI or an http(s) URL passes through, and a file path is read and encoded
-// as a data URI.
 func displayImageArg(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -823,8 +804,6 @@ func displayImageArg(value string) (string, error) {
 	return "data:" + displayImageMIME(value, data) + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
-// displayImageMIME picks the media type for a display image read from a file,
-// by extension where the wallet supports it and by content otherwise.
 func displayImageMIME(path string, data []byte) string {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".svg":

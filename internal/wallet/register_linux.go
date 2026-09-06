@@ -22,14 +22,12 @@ func supportsURLSchemeRegistration() bool {
 	return false
 }
 
-// RegisterURLSchemes is not yet supported on Linux.
 func RegisterURLSchemes(opts RegisterOptions) error {
 	_ = opts
 	fmt.Println("URL scheme registration is not available on this platform. Continue with 'eudi wallet accept <uri>' for copied offer or presentation links.")
 	return nil
 }
 
-// UnregisterURLSchemes is not yet supported on Linux.
 func UnregisterURLSchemes() error {
 	fmt.Println("URL scheme registration is not available on this platform. Nothing to unregister.")
 	return nil

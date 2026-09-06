@@ -37,7 +37,6 @@ type DemoOptions struct {
 	ResetDaily *DailySchedule
 }
 
-// DailySchedule is a wall-clock time of day in a specific location.
 type DailySchedule struct {
 	Hour     int
 	Minute   int
@@ -55,7 +54,6 @@ func (d DailySchedule) Next(now time.Time) time.Time {
 	return next
 }
 
-// String renders the schedule for logs and the UI, e.g. "00:00 CET".
 func (d DailySchedule) String() string {
 	zone, _ := time.Now().In(d.Location).Zone()
 	return fmt.Sprintf("%02d:%02d %s", d.Hour, d.Minute, zone)
@@ -86,7 +84,6 @@ func ParseDailySchedule(value string) (*DailySchedule, error) {
 	return &DailySchedule{Hour: hour, Minute: minute, Location: loc}, nil
 }
 
-// demoState is the runtime state of an enabled demo profile.
 type demoState struct {
 	opts      DemoOptions
 	mu        sync.Mutex
@@ -100,19 +97,13 @@ func (s *Server) SetDemo(opts DemoOptions) {
 	s.demo = &demoState{opts: opts}
 }
 
-// DemoEnabled reports whether the public-demo profile is active.
 func (s *Server) DemoEnabled() bool {
 	return s.demo != nil
 }
 
-// maxRequestBodyBytes caps request bodies on every server, demo or not. Every
-// legitimate payload (credentials, offers, presentations, templates) is far
-// smaller.
+// Limit request bodies on every server to bound memory use.
 const maxRequestBodyBytes = 1 << 20
 
-// Handler returns the server's root handler: the mux, wrapped with the
-// browser security headers, the cross-origin guard, the request body cap
-// and, when the demo profile is enabled, the demo guard.
 func (s *Server) Handler() http.Handler {
 	return httpsec.Headers(s.guardAPI(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.demo != nil && demoBlockedRoute(r) {
@@ -179,8 +170,6 @@ func (w *Wallet) ResetToBaseline() {
 	w.DeferredIssuances = nil
 }
 
-// startDemoReset launches the periodic baseline reset when configured.
-// Called from ListenAndServe/ListenAndServeBackground.
 func (s *Server) startDemoReset() {
 	if s.demo == nil {
 		return
@@ -230,7 +219,6 @@ func (s *Server) startDemoReset() {
 	}()
 }
 
-// stopDemoReset stops the reset ticker. Safe to call multiple times.
 func (s *Server) stopDemoReset() {
 	if s.demo == nil || s.demo.stop == nil {
 		return
@@ -238,10 +226,8 @@ func (s *Server) stopDemoReset() {
 	s.demo.stopOnce.Do(func() { close(s.demo.stop) })
 }
 
-// demoReset restores the clean baseline and persists it. It holds
-// storeSyncMu for the whole sequence so concurrent requests (which reload
-// the store at their boundary) observe either the pre-reset or the fully
-// regenerated state, never a half-reset one.
+// Hold storeSyncMu through the reset so requests on this server see the complete old
+// or new baseline.
 func (s *Server) demoReset() error {
 	s.storeSyncMu.Lock()
 	defer s.storeSyncMu.Unlock()
@@ -273,8 +259,6 @@ func (s *Server) demoReset() error {
 	return nil
 }
 
-// demoConfig returns the demo section of GET /api/config, or nil when the
-// demo profile is off.
 func (s *Server) demoConfig() map[string]any {
 	if s.demo == nil {
 		return nil

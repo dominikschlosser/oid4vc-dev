@@ -29,7 +29,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
-// captureOutput captures all terminal output (both fmt and color) during fn execution.
 func captureOutput(fn func()) string {
 	color.NoColor = true
 	defer func() { color.NoColor = false }()
@@ -822,7 +821,6 @@ func TestRelativeTime(t *testing.T) {
 	}
 }
 
-// TestBuildMDOCJSON_DeviceBinding covers the holder binding the decoder shows.
 func TestBuildMDOCJSON_DeviceBinding(t *testing.T) {
 	t.Run("no device key", func(t *testing.T) {
 		doc := &mdoc.Document{IssuerAuth: &mdoc.IssuerAuth{MSO: &mdoc.MSO{}}}
@@ -850,9 +848,8 @@ func TestBuildMDOCJSON_DeviceBinding(t *testing.T) {
 	})
 }
 
-// TestFormatDisclosuresJSON_Referenced covers the link between a disclosure
-// and the credential that signed it. A disclosure the credential never refers
-// to discloses nothing, and the decoder has to say so.
+// Report disclosures not referenced by the credential, because they prove nothing
+// about its claims.
 func TestFormatDisclosuresJSON_Referenced(t *testing.T) {
 	token := &sdjwt.Token{
 		Payload: map[string]any{

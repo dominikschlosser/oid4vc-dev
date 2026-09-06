@@ -1,8 +1,10 @@
-# Outbound fetches are policed at dial time
+# Outbound addresses are checked when connecting
 
-The wallet fetches URLs it received from another party (request objects, issuer metadata, status lists, trust lists). This matters most on the public demo, which reaches the internet and sits on a host with a private network behind it. Checking the URL before fetching is not enough. A name resolving to a public address at check time can resolve to a private one at connect time, and a redirect moves the target after the check has passed.
+The wallet fetches request objects, issuer metadata, status lists and trust lists from URLs supplied by other parties. In a public demo, those URLs could expose private services on the host network.
 
-So the policy is a `net.Dialer.Control` hook (`internal/format/policy.go`). It runs per connection attempt against the already resolved `ip:port`, after DNS and after any redirect. `BlockPrivateAddresses` refuses loopback, RFC 1918, link-local (cloud metadata included), CGNAT, unique-local, unspecified and multicast.
+A URL check before the fetch cannot prevent this. DNS can return a different address when the connection opens, and redirects can change the destination.
+
+The address check runs in a `net.Dialer.Control` hook (`internal/format/policy.go`). It runs per connection attempt against the resolved `ip:port`, including connections opened after a redirect. `BlockPrivateAddresses` refuses loopback, RFC 1918, link-local (cloud metadata included), CGNAT, unique-local, unspecified and multicast.
 
 ## Consequences
 

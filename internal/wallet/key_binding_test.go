@@ -107,9 +107,7 @@ func TestImportReportsACredentialBoundToAKeyTheWalletDoesNotHold(t *testing.T) {
 	}
 }
 
-// The ordinary case stays quiet: an issuance binds the credential to the
-// wallet's own holder key, and a warning on every one of those would train the
-// reader to ignore it.
+// Credentials bound to an available key must not produce warnings.
 func TestImportStaysQuietForACredentialBoundToTheWalletKey(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -150,8 +148,8 @@ func TestImportStaysQuietForACredentialWithoutHolderBinding(t *testing.T) {
 	}
 }
 
-// A cnf naming a key the wallet cannot even compare is still a credential
-// bound elsewhere: the holder key is a P-256 key, so nothing else can be it.
+// An unsupported cnf key is still a binding, even though this wallet cannot compare or
+// use it.
 func TestHolderBindingOfAnUnreadableConfirmationKey(t *testing.T) {
 	for name, jwk := range map[string]confirmationJWK{
 		"another curve":  {Kty: "EC", Crv: "P-384", X: "AAAA", Y: "AAAA"},
@@ -166,10 +164,8 @@ func TestHolderBindingOfAnUnreadableConfirmationKey(t *testing.T) {
 	}
 }
 
-// A DID names a key nothing in this toolkit resolves, and the EUDI ecosystem
-// uses none: HAIP 1.0 §6.1.1 puts the issuer's signing certificate in x5c. A
-// credential arriving with one is kept, so the wallet says at that moment that
-// its issuer signature will never be checked.
+// Keep imported DID credentials but report unsupported issuer key resolution (HAIP 1.0
+// §6.1.1 uses x5c).
 func TestImportReportsAnIssuerKeyNamedByADID(t *testing.T) {
 	w := generateTestWallet(t)
 	const did = "did:key:z6MkuR4XP7DmHiEzKK46ypK2RyZ3XgqQCz1DHw7XtMg3CEuf"
@@ -193,8 +189,6 @@ func TestImportReportsAnIssuerKeyNamedByADID(t *testing.T) {
 	}
 }
 
-// An issuer resolvable the way the profile expects is not a finding, so the
-// warning keeps meaning something.
 func TestImportStaysQuietForAnIssuerKeyNotNamedByADID(t *testing.T) {
 	w := generateTestWallet(t)
 	imported, err := w.ImportCredential(sdJWTBoundTo(t, w, &w.HolderKey.PublicKey))
@@ -209,9 +203,8 @@ func TestImportStaysQuietForAnIssuerKeyNotNamedByADID(t *testing.T) {
 	}
 }
 
-// sdJWTSignedByDID builds a credential whose header and iss name a DID, the
-// shape an issuer outside the EUDI ecosystem produces. The signature is not
-// checked on import, and no key here could check this one.
+// Use an unresolved DID issuer key. Import parses the credential without verifying
+// this signature.
 func sdJWTSignedByDID(t *testing.T, did string) string {
 	t.Helper()
 	encode := func(v any) string {
@@ -230,10 +223,8 @@ func sdJWTSignedByDID(t *testing.T, did string) string {
 	return header + "." + payload + "." + base64.RawURLEncoding.EncodeToString([]byte("not a signature")) + "~"
 }
 
-// Presenting a credential the wallet cannot sign key binding for is reported
-// before the response goes out. Debug mode still sends it, because the
-// verifier's refusal is what a run against that verifier is here to show, and
-// strict mode stops while the nonce is unspent.
+// Report unavailable holder keys before submission. Strict mode stops. Debug mode
+// sends the presentation so verifier behavior can be inspected.
 func TestPresentingACredentialWithAnUnheldKeyBindingIsReported(t *testing.T) {
 	present := func(t *testing.T, w *Wallet) (VPTokenResult, error) {
 		t.Helper()
@@ -284,8 +275,6 @@ func TestPresentingACredentialWithAnUnheldKeyBindingIsReported(t *testing.T) {
 	})
 }
 
-// A credential bound to the wallet's own key presents without a word, so the
-// warning keeps meaning something.
 func TestPresentingAHeldCredentialIsNotReported(t *testing.T) {
 	w := generateTestWallet(t)
 	imported, err := w.ImportCredential(sdJWTBoundTo(t, w, &w.HolderKey.PublicKey))
@@ -303,10 +292,8 @@ func TestPresentingAHeldCredentialIsNotReported(t *testing.T) {
 	}
 }
 
-// The primary copy of a batch the issuer bound to a proof key other than the
-// holder key is imported with that key, so it is presentable and importing it
-// stays quiet: a warning here would be a false alarm the wallet contradicts the
-// moment it signs the key binding with the recorded key.
+// A primary copy bound to an ephemeral proof key remains presentable when that key is
+// stored. Import must not warn that the key is unavailable.
 func TestImportStaysQuietForABatchPrimaryBoundToAProofKey(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -32,8 +32,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// --- omitClaims unit tests ---
-
 func TestOmitClaims_RemovesSpecifiedClaims(t *testing.T) {
 	result := omitClaims(mock.SDJWTPIDClaims, []string{"place_of_birth", "address", "nationalities"})
 
@@ -100,8 +98,6 @@ func TestOmitClaims_OmitAllClaims(t *testing.T) {
 	}
 }
 
-// --- resolveIssueClaimsForFormat tests ---
-
 func TestResolveIssueClaims_DefaultWhenEmpty(t *testing.T) {
 	issuePID = false
 	issueClaims = ""
@@ -153,8 +149,6 @@ func TestResolveIssueClaims_PIDWhenFlagged_GermanSDJWT(t *testing.T) {
 	if len(claims) != len(mock.SDJWTGermanPIDClaims) {
 		t.Errorf("expected %d German SD-JWT PID claims, got %d", len(mock.SDJWTGermanPIDClaims), len(claims))
 	}
-	// The national additions, and the statement that the credential is also
-	// of the country-independent type.
 	for _, name := range []string{"birth_name", "source_document_type", credtype.AkaVCTsClaim} {
 		if _, ok := claims[name]; !ok {
 			t.Errorf("the German PID claim set is missing %q", name)
@@ -201,8 +195,6 @@ func TestResolveIssueClaims_PIDWhenFlagged_GermanMDOC(t *testing.T) {
 	if len(claims) != len(mock.MDOCGermanPIDClaims) {
 		t.Errorf("expected %d German mDoc PID claims, got %d", len(mock.MDOCGermanPIDClaims), len(claims))
 	}
-	// The national elements live in the German namespace, which claim keys
-	// carry as a prefix.
 	if _, ok := claims[credtype.GermanPIDNamespace+":birth_name"]; !ok {
 		t.Errorf("the German mdoc PID claim set is missing %s:birth_name", credtype.GermanPIDNamespace)
 	}
@@ -369,8 +361,6 @@ func TestResolveIssueClaims_MissingFile(t *testing.T) {
 		t.Error("expected error for missing file")
 	}
 }
-
-// --- end-to-end cobra command tests ---
 
 func TestIssueSDJWT_EndToEnd(t *testing.T) {
 	buf := new(bytes.Buffer)
@@ -759,8 +749,6 @@ func TestIssueMDOC_InvalidKeyFile(t *testing.T) {
 	}
 }
 
-// --- claims data tests ---
-
 func TestDefaultClaims_HasExpectedFields(t *testing.T) {
 	required := []string{"given_name", "family_name", "birthdate"}
 	for _, name := range required {
@@ -834,8 +822,8 @@ func TestSDJWTGermanPIDClaims_HasExpectedFields(t *testing.T) {
 	}
 	assertClaimSet(t, "SDJWTGermanPIDClaims", mock.SDJWTGermanPIDClaims, want)
 
-	// The German PID answers a request for the country-independent one, and
-	// says so in the credential rather than in retrievable Type Metadata.
+	// aka_vcts lets the German PID match the base PID type without fetching Type
+	// Metadata.
 	aka := credtype.AkaVCTs(mock.SDJWTGermanPIDClaims)
 	if len(aka) != 1 || aka[0] != credtype.PIDVCT {
 		t.Errorf("aka_vcts should be [%q], got %v", credtype.PIDVCT, aka)
@@ -863,7 +851,6 @@ func TestSDJWTGermanPIDClaims_HasExpectedFields(t *testing.T) {
 		"region": true, "country": true,
 	})
 
-	// All six thresholds, computed from the birthdate at issuance.
 	ages, ok := mock.SDJWTGermanPIDClaims["age_equal_or_over"].(map[string]any)
 	if !ok {
 		t.Fatal("age_equal_or_over should be a map")
@@ -975,10 +962,8 @@ func TestMDOCGermanPIDClaims_HasExpectedFields(t *testing.T) {
 	}
 }
 
-// Each PID's two formats (SD-JWT and mdoc) describe one person, so their shared
-// values must agree. The country-independent PID and the German PID describe
-// different people: the rulebook's Dutch Jan Wijnand and the German Erika
-// Mustermann specimen.
+// The SD-JWT and mdoc versions of each PID must describe the same person. The EU and
+// German templates use different rulebook specimens.
 func TestPIDClaims_TypesAreCorrect(t *testing.T) {
 	pairs := []struct {
 		label             string
@@ -999,7 +984,6 @@ func TestPIDClaims_TypesAreCorrect(t *testing.T) {
 		}
 	}
 
-	// One person per rulebook, so the shared claim names differ between them.
 	if mock.SDJWTPIDClaims["family_name"] == mock.SDJWTGermanPIDClaims["family_name"] &&
 		mock.SDJWTPIDClaims["given_name"] == mock.SDJWTGermanPIDClaims["given_name"] {
 		t.Error("the country-independent and the German PID should describe different people")
@@ -1025,7 +1009,6 @@ func TestPIDClaims_TypesAreCorrect(t *testing.T) {
 		t.Errorf("expiry_date is %d years out, want 5", years)
 	}
 
-	// The issuance date is today, and a calendar day as well.
 	issued, ok := mock.MDOCPIDClaims["issuance_date"].(string)
 	if !ok {
 		t.Fatalf("issuance_date should be a string, got %T", mock.MDOCPIDClaims["issuance_date"])

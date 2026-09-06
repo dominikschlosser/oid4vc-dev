@@ -25,8 +25,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/config"
 )
 
-// configBaseDir resolves the base directory holding the remote target and
-// the instance registry (overridable in tests).
 var configBaseDir = config.BaseDir
 
 type activeConfig struct {
@@ -37,8 +35,6 @@ func configPath() string {
 	return filepath.Join(configBaseDir(), "remote.json")
 }
 
-// Active returns the persisted remote wallet URL, or "" when the CLI manages
-// the local wallet store.
 func Active() string {
 	data, err := os.ReadFile(configPath())
 	if err != nil {
@@ -74,7 +70,6 @@ func NormalizeURL(raw string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
-// SetActive persists the remote wallet URL used by management commands.
 func SetActive(rawURL string) (string, error) {
 	normalized, err := NormalizeURL(rawURL)
 	if err != nil {
@@ -93,7 +88,6 @@ func SetActive(rawURL string) (string, error) {
 	return normalized, nil
 }
 
-// ClearActive switches management back to the local wallet store.
 func ClearActive() error {
 	err := os.Remove(configPath())
 	if err != nil && !os.IsNotExist(err) {

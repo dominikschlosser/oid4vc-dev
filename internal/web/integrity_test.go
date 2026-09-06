@@ -108,8 +108,7 @@ func TestCheckSDJWTIntegrity_NestedSD(t *testing.T) {
 }
 
 func TestCheckSDJWTIntegrity_NestedDisclosureValue(t *testing.T) {
-	// The address disclosure's value carries its own _sd array holding the
-	// locality digest, as a PID does.
+	// The address disclosure contains the locality digest in its own _sd array.
 
 	addressDiscRaw := base64.RawURLEncoding.EncodeToString([]byte(`["salt-addr","address",{"_sd":["LOCALITY_DIGEST_PLACEHOLDER"]}]`))
 	addressDigest := sha256Sum(addressDiscRaw)
@@ -117,7 +116,6 @@ func TestCheckSDJWTIntegrity_NestedDisclosureValue(t *testing.T) {
 	localityDiscRaw := base64.RawURLEncoding.EncodeToString([]byte(`["salt-loc","locality","KOELN"]`))
 	localityDigest := sha256Sum(localityDiscRaw)
 
-	// Re-create address disclosure with the real locality digest in its _sd
 	addressValue := map[string]any{
 		"_sd": []any{localityDigest},
 	}
@@ -140,8 +138,7 @@ func TestCheckSDJWTIntegrity_NestedDisclosureValue(t *testing.T) {
 }
 
 func TestCheckSDJWTIntegrity_NestedArrayDisclosure(t *testing.T) {
-	// The nationalities disclosure's value is an array of {"...": digest}
-	// placeholders.
+	// The array disclosure contains element digest placeholders.
 
 	subDiscRaw := base64.RawURLEncoding.EncodeToString([]byte(`["salt-de","DE"]`))
 	subDigest := sha256Sum(subDiscRaw)
@@ -170,7 +167,7 @@ func TestCheckSDJWTIntegrity_NestedArrayDisclosure(t *testing.T) {
 }
 
 func TestCheckMDOCIntegrity_AllMatch(t *testing.T) {
-	rawCBOR1 := []byte{0xa4, 0x01, 0x02, 0x03, 0x04} // arbitrary bytes
+	rawCBOR1 := []byte{0xa4, 0x01, 0x02, 0x03, 0x04}
 	rawCBOR2 := []byte{0xb5, 0x06, 0x07, 0x08, 0x09}
 
 	hash1 := sha256.Sum256(rawCBOR1)
@@ -303,8 +300,7 @@ func TestCheckMDOCIntegrity_Tag24EncodedRawCBOR(t *testing.T) {
 }
 
 func TestCheckMDOCIntegrity_Tag24FailsWithInnerBytesDigest(t *testing.T) {
-	// A digest computed over the inner bytes alone does not match Tag-24
-	// encoded RawCBOR.
+	// Hashing only the inner bytes does not match the complete Tag-24 encoding.
 	innerCBOR := []byte{0xa4, 0x01, 0x02, 0x03, 0x04}
 	tag24Bytes := append([]byte{0xd8, 0x18, 0x45}, innerCBOR...)
 
@@ -531,8 +527,7 @@ func TestHandleValidate_SDJWTStatusCheckedWhenPresent(t *testing.T) {
 	bitstring := make([]byte, 16)
 	var statusSrv *httptest.Server
 	statusSrv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The sub claim has to be the URI the credential references, so the
-		// token is issued for the URL this server is actually reachable at.
+		// The status token's sub must match the URL referenced by the credential.
 		jwt, err := statuslist.GenerateStatusListJWT(bitstring, key, statuslist.StatusListConfig{
 			URI: statusSrv.URL,
 		})
@@ -755,8 +750,8 @@ func TestValidate_SignatureUsesLocalWalletFallback(t *testing.T) {
 }
 
 func TestHandleValidate_VerifyFormAlwaysPresent(t *testing.T) {
-	// The response carries all 5 checks whatever the signature outcome, so
-	// the UI can always show the verify form.
+	// Return all checks even when signature verification fails so the UI can still
+	// display the verification form.
 	jwt := makeSDJWT(
 		map[string]any{
 			"iss":     "https://issuer.example",
@@ -783,7 +778,6 @@ func TestHandleValidate_VerifyFormAlwaysPresent(t *testing.T) {
 		t.Errorf("expected 5 checks without key, got %d", len(checks1))
 	}
 
-	// An invalid key fails the signature check without dropping a check.
 	body2, _ := json.Marshal(map[string]any{
 		"input": jwt,
 		"key":   "not-a-valid-key",

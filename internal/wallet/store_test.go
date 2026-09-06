@@ -124,9 +124,7 @@ func TestWalletStore_Save_ConcurrentWritersLeaveValidFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOrCreate: %v", err)
 	}
-	// A second wallet with a much larger payload, so interleaved
-	// non-atomic writes would leave trailing garbage after the
-	// shorter document.
+	// Different document sizes expose trailing data left by interleaved writes.
 	big, err := store.LoadOrCreate()
 	if err != nil {
 		t.Fatalf("LoadOrCreate: %v", err)
@@ -297,7 +295,6 @@ func TestWalletStore_KeyPersistence(t *testing.T) {
 		t.Fatalf("LoadOrCreate: %v", err)
 	}
 
-	// Load again. Same keys should be used
 	w2, err := store.LoadOrCreate()
 	if err != nil {
 		t.Fatalf("LoadOrCreate second time: %v", err)
@@ -318,8 +315,6 @@ func TestNewWalletStore_DefaultDir(t *testing.T) {
 	}
 }
 
-// The file backend puts the wallet's files under its directory and the shared
-// CA one level up.
 func TestWalletStore_FileLayout(t *testing.T) {
 	store := NewWalletStoreOn("/tmp/test-wallet", storage.NewFile("/tmp"))
 	locate := store.Backend().Locate
@@ -349,13 +344,11 @@ func TestDefaultWalletDir(t *testing.T) {
 	t.Setenv("EUDI_DEV_HOME", "")
 	t.Setenv("OID4VC_DEV_HOME", "")
 
-	// Fresh system: the .eudi-dev state directory is used.
 	dir := DefaultWalletDir()
 	if !strings.Contains(dir, ".eudi-dev") || !strings.HasSuffix(dir, "wallet") {
 		t.Errorf("expected .eudi-dev wallet dir, got %s", dir)
 	}
 
-	// An existing .oid4vc-dev state directory keeps being used.
 	if err := os.MkdirAll(filepath.Join(home, ".oid4vc-dev"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -493,8 +486,7 @@ func TestWalletStore_LoadOrCreate_UsesSharedCA(t *testing.T) {
 	}
 }
 
-// A wallet file may hold its deferred credentials under "pending_issuances".
-// They are read on load, so collections already in flight survive an upgrade.
+// Older files use pending_issuances. Loading must preserve those deferred credentials.
 func TestLoadReadsTheLegacyPendingIssuancesField(t *testing.T) {
 	dir := t.TempDir()
 	store := NewWalletStoreOn(dir, storage.NewFile(filepath.Dir(dir)))
@@ -520,7 +512,6 @@ func TestLoadReadsTheLegacyPendingIssuancesField(t *testing.T) {
 		t.Errorf("transaction id = %q, want tx-1", got[0].TransactionID)
 	}
 
-	// Saving migrates the file: the new name is written and the old one goes.
 	if err := store.Save(w); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -536,17 +527,15 @@ func TestLoadReadsTheLegacyPendingIssuancesField(t *testing.T) {
 	}
 }
 
-// Two saves must land in snapshot order. The log sink saves without the
-// server lock, so a save that snapshotted before an import must not rename
-// over the import's save.
+// Log callbacks save outside the server lock. An earlier snapshot must not overwrite a
+// later import.
 func TestStoreSavesDoNotLoseConcurrentWrites(t *testing.T) {
 	store := NewWalletStore(t.TempDir())
 	w := generateTestWallet(t)
 	srv := NewServer(w, 0, func() { _ = store.Save(w) })
 	srv.SetStore(store)
 	store.saveDelay = func() { time.Sleep(2 * time.Millisecond) }
-	// A fat wallet widens the snapshot-to-rename window enough for the
-	// interleaving to show without the store mutex.
+	// A larger wallet makes concurrent saves more likely to overlap.
 	padding := strings.Repeat("x", 4096)
 	for i := 0; i < 100; i++ {
 		w.PutCredential(StoredCredential{ID: fmt.Sprintf("pad-%03d", i), Format: "dc+sd-jwt", Raw: padding})
@@ -554,7 +543,7 @@ func TestStoreSavesDoNotLoseConcurrentWrites(t *testing.T) {
 
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
-	// The log sink: every entry persists the wallet, off the server lock.
+	// Log callbacks run outside the server lock.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -567,7 +556,6 @@ func TestStoreSavesDoNotLoseConcurrentWrites(t *testing.T) {
 			}
 		}
 	}()
-	// The store reload every API request performs.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

@@ -29,8 +29,6 @@ const (
 	holderBindingNone       = "none"
 )
 
-// credentialIssuerIdentity reports who a credential says issued it, by what its
-// format actually carries. It returns nil when nothing names the issuer.
 func credentialIssuerIdentity(c StoredCredential) map[string]any {
 	if c.Format == "mso_mdoc" {
 		if identity := mdocIssuerCertIdentity(c.Raw); identity != nil {
@@ -46,7 +44,6 @@ func credentialIssuerIdentity(c StoredCredential) map[string]any {
 	return nil
 }
 
-// jwtIssuerClaim reads the iss payload claim of an SD-JWT or JWT VC.
 func jwtIssuerClaim(raw string) string {
 	token, err := sdjwt.ParseLenient(raw)
 	if err != nil || token == nil {
@@ -56,9 +53,7 @@ func jwtIssuerClaim(raw string) string {
 	return iss
 }
 
-// mdocIssuerCertIdentity names an mdoc issuer by its document signer leaf
-// certificate. The Subject CommonName is the readable name, with the full
-// Subject as the fallback for a certificate that carries none.
+// Use the document signer's CommonName for display, falling back to its full subject.
 func mdocIssuerCertIdentity(raw string) map[string]any {
 	doc, err := mdoc.Parse(raw)
 	if err != nil {
@@ -78,11 +73,9 @@ func mdocIssuerCertIdentity(raw string) map[string]any {
 	return map[string]any{"kind": "cert", "value": value}
 }
 
-// credentialSignatureState reports the issuer signature checked against only
-// the key material the credential embeds (an x5c chain or an embedded jwk).
-// self_consistent proves the credential was not altered after signing, never
-// issuer trust: this wallet holds no trust anchors (ADR-0009). It returns nil
-// when the algorithm cannot be determined.
+// self_consistent means the signature verifies against embedded key material. It does
+// not establish issuer trust (ADR-0009). Return nil if the algorithm cannot be
+// determined.
 func credentialSignatureState(c StoredCredential) map[string]any {
 	if c.Format == "mso_mdoc" {
 		return mdocSignatureState(c.Raw)
@@ -90,9 +83,8 @@ func credentialSignatureState(c StoredCredential) map[string]any {
 	return jwtSignatureState(c.Raw)
 }
 
-// jwtSignatureState verifies an SD-JWT or JWT VC against the key material it
-// embeds. The offline verifier stops at the embedded x5c leaf (or jwk) and
-// never fetches issuer metadata.
+// Verify only embedded key material here. Credential summaries must not fetch issuer
+// metadata.
 func jwtSignatureState(raw string) map[string]any {
 	token, err := sdjwt.ParseLenient(raw)
 	if err != nil || token == nil {

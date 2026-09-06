@@ -21,7 +21,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/format"
 )
 
-// Decode detects the credential format and returns a JSON-serializable map.
 func Decode(input string) (map[string]any, error) {
 	detected := detectCredentialFormat(input)
 
@@ -40,9 +39,8 @@ func Decode(input string) (map[string]any, error) {
 	}
 }
 
-// detectCredentialFormat coerces an OID4 result from format.Detect back to a
-// credential format when the input is structurally a JWT or SD-JWT: a
-// credential JWT may carry OID4-like fields such as client_id.
+// Credential JWTs can contain fields such as client_id that resemble OID4 requests.
+// Prefer their structural JWT or SD-JWT format here.
 func detectCredentialFormat(input string) format.CredentialFormat {
 	detected := format.Detect(input)
 

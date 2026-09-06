@@ -14,11 +14,8 @@
 
 package cmd
 
-// Output helpers for the wallet management commands. They format the wallet
-// server's API document shapes, which both walletService backends produce,
-// so managing the local store and a remote instance print identically. The
-// remote-only operations that have no local equivalent (accept flows and the
-// deprecated generate-pid) live here too.
+// Local and remote management return the same API documents and use these shared
+// output helpers. Remote flow handling also lives here.
 
 import (
 	"encoding/json"
@@ -41,9 +38,8 @@ func docString(m map[string]any, key string) string {
 	return s
 }
 
-// docNumber reads a number out of a wallet document. A document from a remote
-// instance travels through JSON (every number a float64), one from the local
-// store keeps its Go type.
+// Remote documents decode JSON numbers as float64. Local documents retain their Go
+// number types.
 func docNumber(m map[string]any, key string) (float64, bool) {
 	switch v := m[key].(type) {
 	case float64:
@@ -71,10 +67,8 @@ func docCredLabel(cred map[string]any) string {
 	return docString(cred, "format")
 }
 
-// warnAboutCredential reports what an imported credential cannot do: be
-// presented, because the wallet does not hold the key it is bound to, or be
-// verified, because its issuer key is named by a DID. Both go to stderr so a
-// JSON listing stays machine-readable.
+// Imported credentials may have an unavailable holder key or an unresolved DID issuer
+// key. Print those warnings to stderr to preserve JSON output on stdout.
 func warnAboutCredential(cred map[string]any) {
 	if notHeld, _ := cred["key_binding_not_held"].(bool); notHeld {
 		fmt.Fprintln(os.Stderr, "Warning: this credential is bound to a holder key the wallet does not hold. It can be listed and decoded, but presenting it fails the verifier's key binding check.")
@@ -109,9 +103,8 @@ func printCredentialList(creds []map[string]any, deferred []map[string]any) erro
 			credClaimCount(cred), credValidityLabel(cred), credStatusLabel(cred))
 	}
 	for _, entry := range deferred {
-		// The credential type when the issuer's metadata named one, so a
-		// waiting row reads like a delivered one. The configuration id is an
-		// issuer's internal name and only a fallback.
+		// Prefer the credential type over the issuer's internal configuration ID, just
+		// as for stored credentials.
 		label := docCredLabel(entry)
 		if label == "" {
 			label = docString(entry, "credential_configuration_id")
@@ -125,8 +118,6 @@ func printCredentialList(creds []map[string]any, deferred []map[string]any) erro
 	return tw.Flush()
 }
 
-// printDeferredDoc reports where a deferred issuance stands: who owes the
-// credential, and when the wallet asks next.
 func printDeferredDoc(entry map[string]any) error {
 	if jsonOutput {
 		data, err := json.MarshalIndent(entry, "", "  ")
@@ -163,7 +154,6 @@ func printDeferredDoc(entry map[string]any) error {
 	return nil
 }
 
-// orDash renders an empty string as a dash so a table column always reads.
 func orDash(s string) string {
 	if s == "" {
 		return "-"
@@ -193,14 +183,11 @@ func credDisplay(cred map[string]any) map[string]any {
 	return m
 }
 
-// credDisplayName is the issuer-declared display name, empty when none.
 func credDisplayName(cred map[string]any) string {
 	name, _ := credDisplay(cred)["name"].(string)
 	return name
 }
 
-// credDisplayDescription is the issuer-declared display description, empty when
-// none.
 func credDisplayDescription(cred map[string]any) string {
 	desc, _ := credDisplay(cred)["description"].(string)
 	return desc
@@ -217,8 +204,6 @@ func credClaimCount(cred map[string]any) int {
 	return len(claims)
 }
 
-// credStatusLabel summarizes revocation state and protection for the list,
-// e.g. "active, protected". Empty when the wallet knows neither.
 func credStatusLabel(cred map[string]any) string {
 	var parts []string
 	if status, ok := cred["status"].(map[string]any); ok {
@@ -229,15 +214,14 @@ func credStatusLabel(cred map[string]any) string {
 		case hasValue:
 			parts = append(parts, "active")
 		case status["uri"] != nil:
-			// Referenced somewhere else: this wallet cannot resolve it here.
 			parts = append(parts, "external")
 		}
 	}
 	if protected, _ := cred["protected"].(bool); protected {
 		parts = append(parts, "protected")
 	}
-	// A batch reads as one credential here too, marked with its copy count so
-	// the rotation of copies is not a surprise (the list shows the holder copy).
+	// Show the batch size because the wallet rotates copies while the listing shows
+	// only the holder copy.
 	if batch, _ := cred["batch"].(bool); batch {
 		if size, ok := docNumber(cred, "batch_size"); ok && size >= 2 {
 			parts = append(parts, fmt.Sprintf("batch of %d", int(size)))
@@ -265,9 +249,8 @@ func credExpiry(cred map[string]any) (time.Time, bool) {
 	return when, true
 }
 
-// credValidityLabel is the list column: how much longer the credential is
-// good for, in the one unit worth reading. It floors, so it never claims more
-// time than there is.
+// Floor the remaining lifetime so the label never overstates how long the credential
+// is valid.
 func credValidityLabel(cred map[string]any) string {
 	when, ok := credExpiry(cred)
 	if !ok {
@@ -297,8 +280,7 @@ func printCredentialDoc(cred map[string]any, decoded bool) error {
 		fmt.Println(raw)
 		return nil
 	}
-	// The decoded payload states the expiry as a Unix timestamp, which is not
-	// an answer to "is this still good".
+	// Show a readable validity label because the decoded payload uses Unix timestamps.
 	if !jsonOutput {
 		printed := false
 		if name := credDisplayName(cred); name != "" {
@@ -368,9 +350,7 @@ func remoteGeneratePID(c *remote.Client, claims map[string]any, vct string) erro
 
 func remoteAccept(c *remote.Client, uri, txCode string, interactive bool) error {
 	isVCI := isCredentialOfferURI(uri)
-	// Open the wallet UI so the consent dialog it is about to show is visible,
-	// naming the page so the request submitted below reaches it. A shared
-	// wallet then opens the dialog there rather than offering it to everyone.
+	// Assign an owner so this tab receives the consent request on a shared wallet.
 	if interactive && !noOpen {
 		owner := remote.NewOwnerToken()
 		target := strings.TrimRight(c.BaseURL, "/") + "/?focus=overview&owner=" + url.QueryEscape(owner)
@@ -409,10 +389,8 @@ func remoteAccept(c *remote.Client, uri, txCode string, interactive bool) error 
 // flow being watched uses.
 const signInPollInterval = 2 * time.Second
 
-// completeSignIn handles an offer the issuer wants the user to sign in for.
-// The wallet cannot do this itself (on a hosted one the browser that matters
-// is here, not there), so it hands over the URL and keeps the flow open. The
-// sign-in redirects back to the wallet, which finishes the issuance.
+// The hosted wallet returns a sign-in URL for the local browser. After sign-in, the
+// issuer redirects to the wallet and issuance resumes.
 func completeSignIn(c *remote.Client, pending map[string]any) (map[string]any, error) {
 	authURL, _ := pending["authorization_url"].(string)
 	offerID, _ := pending["offer_id"].(string)
@@ -449,17 +427,14 @@ func completeSignIn(c *remote.Client, pending map[string]any) (map[string]any, e
 	}
 }
 
-// isCredentialOfferURI reports whether a URI is an OID4VCI credential offer
-// (matching the wallet UI's detection).
 func isCredentialOfferURI(uri string) bool {
 	return strings.Contains(uri, "credential_offer") ||
 		strings.HasPrefix(uri, "openid-credential-offer://") ||
 		strings.HasPrefix(uri, "haip-vci://")
 }
 
-// opensSignInHere reports whether this process navigates to the authorization
-// URL itself. A client that named a page does not: the wallet sends that page
-// there.
+// A browser tab with an owner receives the sign-in URL from the wallet. Opening it
+// here too would use the authorization request twice.
 func opensSignInHere(c *remote.Client) bool {
 	return navigatesHere(c.ActsForAPage())
 }

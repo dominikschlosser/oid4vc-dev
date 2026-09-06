@@ -25,12 +25,8 @@ import (
 )
 
 const (
-	// deferredReadyDelay is how long the demo holds a deferred credential before
-	// it is ready, long enough for a wallet to show the "awaiting issuance" state
-	// and short enough not to make the demo wait.
-	deferredReadyDelay = 5 * time.Second
-	// deferredPollSeconds is the interval the demo tells a polling wallet to
-	// wait between attempts.
+	// Delay long enough to show the pending state without making the demo slow.
+	deferredReadyDelay  = 5 * time.Second
 	deferredPollSeconds = 2
 )
 
@@ -45,8 +41,6 @@ type deferredTicket struct {
 	expires    time.Time
 }
 
-// deferIssuance stores a pending issuance and returns the transaction id a
-// wallet polls the deferred endpoint with.
 func (d *DemoRP) deferIssuance(holderKeys []*ecdsa.PublicKey, granted ticketGrant, token string) string {
 	txID := randToken()
 	now := time.Now()

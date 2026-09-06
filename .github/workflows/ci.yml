@@ -6,9 +6,7 @@ on:
   pull_request:
     branches: [main]
 
-# Every suite runs once per storage backend. EUDI_DEV_STORAGE moves every
-# store the tests, the served wallets and the CLI commands open onto that
-# backend, so the same tests cover files, memory and Postgres.
+# EUDI_DEV_STORAGE selects the backend for tests, wallet servers and CLI commands.
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -83,9 +81,8 @@ jobs:
       - name: Test
         run: go test -coverprofile=coverage.out ./...
 
-      # The wallet serves requests while background work (the demo reset, the
-      # deferred poller) mutates the same state, and a race there corrupts a
-      # signature rather than crashing.
+      # Background resets and deferred issuance share state with request handlers.
+      # Races can corrupt signatures without crashing the process.
       - name: Test with the race detector
         run: go test -race ./...
 

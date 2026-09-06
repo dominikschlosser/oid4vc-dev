@@ -235,7 +235,6 @@ func runValidate(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("credential expired")
 			}
 		} else if leafKey != nil {
-			// Offline check against the embedded x5chain leaf certificate.
 			result := mdoc.Verify(doc, leafKey)
 			output.PrintVerifyResultMDOC(result, opts)
 			printLeafSourceNote(validate.SourceX5CLeaf, opts)
@@ -345,17 +344,14 @@ func checkStatus(claims map[string]any, tlCerts []trustlist.CertInfo, opts outpu
 	return nil
 }
 
-// haipCredentialFindings collects what HAIP 1.0 §6.1.1 asks of a credential
-// beyond the format itself: the issuer's signing certificate and its trust
-// chain travel in the x5c header, without the trust anchor, and the leaf is
-// not self-signed.
+// HAIP 1.0 §6.1.1 requires the issuer's signing certificate and chain in x5c, excludes
+// the trust anchor and forbids a self-signed leaf.
 func haipCredentialFindings(token *sdjwt.Token) []string {
 	return validate.HAIPCredentialFindings(token.Header, token.Payload)
 }
 
-// printSkippedSignatureNote says why no signature was checked. This tool
-// resolves issuer keys through x5c or issuer metadata, so a DID-named key is
-// reported as such rather than with a --key hint.
+// Report unsupported DID key resolution separately from a missing key so the user can
+// identify the cause.
 func printSkippedSignatureNote(token *sdjwt.Token) {
 	kid, _ := token.Header["kid"].(string)
 	iss, _ := token.Payload["iss"].(string)
@@ -366,9 +362,8 @@ func printSkippedSignatureNote(token *sdjwt.Token) {
 	fmt.Println("\n  Signature verification skipped (no --key/--trust-list and issuer metadata resolution unavailable)")
 }
 
-// printHAIPFindings reports profile findings without failing the command:
-// --haip asks what a credential breaks, and the exit code stays with the
-// validity checks.
+// HAIP findings are informational here. Only signature, expiry and revocation checks
+// affect the exit code.
 func printHAIPFindings(findings []string, opts output.Options) {
 	if opts.JSON {
 		return

@@ -7,7 +7,6 @@ async function createOffer(grant, status, authorization, deferred, batch) {
     if (status) params.set("status", status);
     if (deferred) params.set("deferred", "true");
     if (batch) params.set("batch", batch);
-    // Only the authorization code grant asks the user for anything.
     if (grant && authorization) params.set("authorization", authorization);
     const query = params.toString() ? "?" + params.toString() : "";
     const resp = await fetch("api/offers" + query, { method: "POST" });
@@ -27,7 +26,6 @@ async function createOffer(grant, status, authorization, deferred, batch) {
   }
 }
 
-// What each grant means for whoever is about to redeem the offer.
 const GRANT_HINTS = {
   "": "The offer carries the code, so the wallet redeems it without any sign-in.",
   authorization_code:
@@ -35,7 +33,6 @@ const GRANT_HINTS = {
     "This issuer is its own authorization server.",
 };
 
-// How the user authorizes an authorization code issuance.
 const AUTHORIZATION_HINTS = {
   browser: "You sign in here (alice / alice) while the wallet redeems the offer.",
   presentation:
@@ -46,8 +43,7 @@ const AUTHORIZATION_HINTS = {
     "not support interactive authorization is sent to the sign-in instead.",
 };
 
-// What a status list reference buys: without one there is nothing to revoke,
-// with one the wallet can revoke the ticket and the verifier will notice.
+// Credentials need a status reference before the wallet can revoke them.
 const STATUS_HINTS = {
   "": "The ticket carries no status reference, so nothing can revoke it.",
   true:
@@ -55,7 +51,6 @@ const STATUS_HINTS = {
     "UI and the demo verifier rejects the next presentation.",
 };
 
-// Whether the credential is handed over at once or after a wait.
 const DEFERRED_HINTS = {
   "": "The credential is issued at once.",
   true:
@@ -64,8 +59,6 @@ const DEFERRED_HINTS = {
     "wallet shows it awaiting issuance and collects it a few seconds later.",
 };
 
-// Whether the wallet receives one credential or a batch of distinct-key copies,
-// and how many.
 function batchHint(n) {
   return (
     "The issuer signs " + n + " credentials, each on its own key (OpenID4VCI " +
@@ -87,8 +80,6 @@ let authorization = "browser";
 let deferred = "";
 let batch = "";
 
-// Each toggle owns its own options, so the selection is scoped to the group
-// the clicked option belongs to.
 function bindToggle(id, key, hintID, hints, onChange) {
   const group = document.getElementById(id);
   if (!group) return;
@@ -101,7 +92,7 @@ function bindToggle(id, key, hintID, hints, onChange) {
         other.setAttribute("aria-checked", String(selected));
       }
       document.getElementById(hintID).textContent = hints[option.dataset[key] || ""];
-      // The offer shown belongs to the other setting, so it would be misleading.
+      // Clear the old offer when its settings change.
       document.getElementById("result").style.display = "none";
     });
   }
@@ -109,7 +100,6 @@ function bindToggle(id, key, hintID, hints, onChange) {
 
 bindToggle("grant-toggle", "grant", "grant-hint", GRANT_HINTS, (value) => {
   grant = value;
-  // The authorization choice only exists for the grant that asks the user.
   const shown = value === "authorization_code";
   document.getElementById("authorization-row").hidden = !shown;
   document.getElementById("authorization-hint").hidden = !shown;
@@ -130,9 +120,6 @@ bindToggle("batch-toggle", "batch", "batch-hint", BATCH_HINTS, (value) => {
 document.getElementById("create-btn")
   .addEventListener("click", () => createOffer(grant, status, authorization, deferred, batch));
 
-// The imprint is the wallet's, and it is only served when the operator
-// configured one, so the link appears only then. The status list toggle needs
-// a wallet that has a status list URL at all, which the same document reports.
 fetch("../api/config")
   .then((resp) => resp.json())
   .then((config) => {

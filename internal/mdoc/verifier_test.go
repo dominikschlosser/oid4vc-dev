@@ -133,9 +133,8 @@ func TestVerify(t *testing.T) {
 	}
 }
 
-// An mdoc whose MSO omits validityInfo states no validity period. ISO 18013-5
-// requires it, so Verify cannot report the credential as current: it leaves the
-// dates nil and marks neither Expired nor NotYetValid, letting the caller warn.
+// ISO 18013-5 requires validityInfo. When absent, leave dates and validity flags unset
+// so the caller can report the missing check.
 func TestVerify_NoValidityInfo(t *testing.T) {
 	key, _ := mock.GenerateKey()
 	doc := generateTestMDoc(t, mock.MDOCConfig{
@@ -318,8 +317,7 @@ func TestVerify_NilIssuerAuth(t *testing.T) {
 	}
 }
 
-// A parse that produced nothing hands its caller a nil document, which every
-// entry point reports rather than dereferences.
+// Handle a nil parsed document without dereferencing it.
 func TestVerify_NilDocument(t *testing.T) {
 	result := Verify(nil, nil)
 

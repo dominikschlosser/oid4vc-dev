@@ -1,18 +1,24 @@
 # A flow belongs to the browser that started it
 
-One wallet serves several people at once on the public demo, and one person locally. A consent request, an error report and an issuer sign-in prompt each belong to the flow that raised them. Each records the browser that started the flow and reaches only that browser.
+A shared wallet can serve several people at once. Each consent request, error report and issuer sign-in prompt records the browser that started its flow. Events with an owner go to that browser. Events without an owner follow the rules below.
 
-The browser is recognised by an opaque `eudi_session` cookie the wallet sets when it first serves it. A client that submits a flow on a page's behalf names that page instead. It puts the same value in the URL of the page it opens and in the `X-Eudi-Owner` header on the call it makes. The CLI does this, and the URL handler does it when it routes to a wallet somewhere else. A local wallet opens its own UI, so the handler names nothing there and the wallet names the request in the URL instead. `EventSource` sets no headers, so the event stream carries the value as a query parameter.
+The wallet identifies a browser through an opaque `eudi_session` cookie.
+
+The CLI and remote URL handler can start a flow for a particular browser tab. They put the same owner value in the tab URL and the API request's `X-Eudi-Owner` header. The event stream uses a query parameter because `EventSource` cannot set custom headers.
+
+For a local wallet, the URL handler leaves the owner unset. The wallet opens its UI with the request ID in the URL.
 
 ## Not a security boundary
 
-Anyone can send any cookie or any header. [ADR-0002](0002-the-wallet-http-api-is-unauthenticated.md) keeps this API open, and this decision does not close it. It only stops two people using one wallet from seeing and answering each other's flows. The activity log stays shared (`docs/public-demo.md`), so a visitor can still read another's request there.
+The owner determines where UI events appear. It does not authenticate callers. Anyone can supply a cookie or header, and the API remains open ([ADR-0002](0002-the-wallet-http-api-is-unauthenticated.md)). The activity log is shared, so visitors can still read other flows there.
 
 ## Unowned flows stay answerable
 
 A flow whose client named no browser is visible and answerable to every caller. That keeps the CLI, curl, CI, Testcontainers, the conformance harness and every URL handler working. `TestBackwardsCompatibility_ClientsThatNameNoBrowser` and `TestUnownedRequestStaysAnswerable` cover it.
 
-The sign-in prompt navigates a browser, so it reaches only its owner. A client that named no browser already has the URL, in the answer to the call it made. An error report only informs, so it follows the same rule as a consent request. A consent request with no owner waits in the banner. A local wallet names the request in the URL of the tab it opens, so that tab answers it directly.
+A sign-in prompt goes only to its owner because it navigates the browser. Clients without an owner receive the sign-in URL in the API response.
+
+Errors follow the consent routing rules. Consent requests without an owner appear in the shared banner. A tab opened by a local wallet can answer its request directly using the request ID in its URL.
 
 ## The redirect carries the request id
 
@@ -20,8 +26,8 @@ A browser the wallet redirects is given the request id in the URL. A call that c
 
 ## Consequences
 
-The owner is set when a signal is created and never changes. Nothing has to be published and then corrected, and the event streams read it without the registry lock.
+Set the owner when creating an event and keep it immutable. Event streams can then read it without taking the registry lock.
 
 The owner is never sent to a client. `ConsentRequest` is marshalled field by field, so a new field added there must not include it.
 
-The rule runs on every wallet, local or shared. Do not add a demo-only branch. The only difference between the two is how many event streams are open.
+Use the same owner routing for local and shared wallets.

@@ -48,7 +48,6 @@ func TestDailyScheduleNext(t *testing.T) {
 	}
 	s := wallet.DailySchedule{Hour: 0, Minute: 0, Location: berlin}
 
-	// Just before midnight: next reset is minutes away, same night.
 	now := time.Date(2026, 8, 4, 23, 30, 0, 0, berlin)
 	if got := s.Next(now); !got.Equal(time.Date(2026, 8, 5, 0, 0, 0, 0, berlin)) {
 		t.Errorf("before midnight: %v", got)
@@ -65,7 +64,6 @@ func TestDailyScheduleNext(t *testing.T) {
 	if next.Hour() != 0 || next.Day() != 29 {
 		t.Errorf("dst: %v", next)
 	}
-	// A UTC "now" must still resolve to Berlin midnight.
 	utcNow := time.Date(2026, 8, 4, 21, 0, 0, 0, time.UTC)
 	if got := s.Next(utcNow); !got.Equal(time.Date(2026, 8, 5, 0, 0, 0, 0, berlin)) {
 		t.Errorf("from utc: %v", got)

@@ -1,25 +1,39 @@
 # State goes through one storage layer
 
-Everything the tool keeps between runs (the wallet document, the holder and issuer keys, the TLS leaf, the shared CA, display assets, user templates) is written and read through `internal/storage`. A `Store` holds blobs under slash-separated keys. The wallet is a named subtree, laid out as the wallet directory, and the CA sits one level above it. Only the process bookkeeping below stays outside the layer.
+`internal/storage` stores the wallet's credentials, keys, certificates, display assets and user templates. Each value is a blob under a slash-separated key. Wallet data sits under the wallet's prefix. The shared CA sits one level above it.
 
-Three backends implement the store. `file` is the default and writes the wallet directory tree, so an existing wallet directory is a file store and the `--wallet-dir` contract holds. `memory` keeps the blobs in one store per process. Every opener in the process shares it. `postgres` keeps one row per key in one table, so several wallet servers pointed at the same database serve one wallet state.
+Three backends implement `Store`: `file` writes the existing wallet directory layout, `memory` shares one store within a process, and `postgres` stores one row per key. Wallet servers using the same database and wallet prefix share persisted state.
 
-The backend is chosen by `--storage` or `EUDI_DEV_STORAGE`, and every opener that takes no explicit spec follows the variable. That includes the test suites, so one variable moves a whole test run onto a backend. The container image sets `memory`. A container needs no volume and runs on a read-only filesystem. A deployment that persists sets `file` with a volume, or a database URL. `auto` picks files when a state directory was named or holds state (a mounted volume, empty or not) and memory otherwise. The instance registry a memory-backed server writes does not count as state, so `auto` picks memory again on the next start.
+Choose the backend with `--storage` or `EUDI_DEV_STORAGE`. Commands and tests that open a store without an explicit backend use the environment variable. The CLI defaults to `file`. The container image sets `memory`. Persistent deployments use `file` with a volume or a Postgres URL. `auto` selects files when a state directory was named, is empty, or contains wallet state. It selects memory when the directory is absent or contains only `instances/` and `remote.json`.
 
 ## What stays outside the layer
 
-The instance registry (`instances/*.json`), the active remote target and the detached server log describe processes on this machine. They stay files in the state directory, because older CLIs read the registry directly and route to a running server by its wallet directory. A served wallet therefore keeps its directory as its name on every backend, and reports it in `/api/config`.
+The instance registry (`instances/*.json`), active remote target and detached server log stay in local files. The CLI uses them to find processes on this machine. It identifies a running wallet by its directory on every backend. `/api/config` reports that directory.
 
 Files the user points at by path (a credential, a template, a key PEM) are read from the filesystem. The layer holds only the tool's own state.
 
-## Consequences
+## Postgres schema
 
-The file backend keeps the wallet as one `wallet.json`. The memory and database backends keep it as one blob per entity (a credential, a log entry, a status entry, a deferred issuance, an issued attestation, the settings) under `state/`, each keyed by the entity's identity. A save writes the entities that changed since the wallet was loaded and deletes the ones that went away, so two servers on one database only clash when they change the same entity. It keeps each credential as last stored and encodes only the ones that differ, so adding a credential costs one row however many the wallet holds. The status list counter moves with a compare-and-swap, so two servers issuing at once never hand out the same index.
+[ADR-0018](0018-postgres-stores-wallet-entities-as-keyed-blobs.md) explains why Postgres uses keyed blobs rather than a relational wallet schema.
 
-The per-request reload (ADR-0005) compares one revision row per section with the ones the server loaded and refreshes only the sections that changed. Within a section it compares the stamps of the rows with the ones it holds and reads only the rows that are new or changed, keeping the parsed form of the rest. A server writes the revision of a section it changed with a compare-and-swap, so it recognises its own change and skips it. The activity log is append-only: a server stores each entry as one row without comparing the rest of the wallet, and the log views load it on demand, so a presentation costs one server one row and the others nothing. The store trims the log to its cap on its own, since a server that only appends never loads it.
+`internal/storage/postgres.go` creates these objects on first use:
 
-The file and memory backends serve one wallet server. The CLI can work beside a file-backed server, which the reload picks up by the file's modification time. Several wallet servers on one wallet need the database backend.
+- `eudi_dev_state`: one table with `key TEXT PRIMARY KEY`, `data BYTEA NOT NULL`, `version BIGINT NOT NULL` and `updated_at TIMESTAMPTZ NOT NULL`.
+- `eudi_dev_state_prefix`: an index on `key text_pattern_ops` for prefix lookups, in addition to the primary-key index.
+- `eudi_dev_state_version`: a sequence that assigns write versions. Deleting and recreating a key gives it a new version.
 
-The keys, the CA and every credential are stored in the clear on every backend (ADR-0003). A shared database holding the CA key is a trust anchor.
+Credentials, logs, keys, certificates and revision markers all use this table. There are no separate tables for these entities. The storage layer treats their contents as bytes. The wallet layer handles JSON and PEM encoding.
+
+## Saving and reloading
+
+The file backend stores the wallet as one `wallet.json`. Memory and Postgres store each credential, log entry, status entry, deferred issuance, issued attestation and settings record separately under `state/`. A save writes changed entities, deletes removed entities and updates a revision marker for each affected section. Adding a credential leaves unchanged credential rows alone, but also writes revision markers and any related status or log entries.
+
+At request boundaries ([ADR-0005](0005-the-server-reloads-its-store-on-every-request.md)), the server compares section revisions and row versions with its cached values. It reads changed rows individually, or the whole section when more than 16 rows changed. Unchanged credentials keep their parsed form. The activity log loads on demand. Appending an entry writes the entry and its revision marker. The store trims old log entries every 64 saves or appends.
+
+Postgres writes are atomic per row. A wallet save spans several statements and is not a transaction across all entities. Concurrent writes to the same entity can overwrite each other. Revision markers tell a server when to reload. They do not lock entity writes. The status-list counter uses compare-and-swap to allocate distinct indices across servers.
+
+Use the file or memory backend for one wallet server. A file-backed server checks the wallet file's modification time and size, with a reload at least every two seconds while handling requests. Use Postgres to share persisted state across servers. Pending browser flows and demo issuer/verifier requests remain in memory, so requests in one flow must reach the same server.
+
+The keys, the CA and every credential are stored in the clear on every backend (ADR-0003). Anyone with access to the stored CA key can sign certificates trusted by verifiers that use this CA.
 
 Postgres is the only external backend. Another engine is another `Store` implementation behind the same keys.

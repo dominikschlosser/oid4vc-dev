@@ -29,8 +29,6 @@ func TestAnswers(t *testing.T) {
 	}{
 		{"same type", PIDVCT, nil, PIDVCT, true},
 		{
-			// A verifier asking for the country-independent PID is answered by
-			// the German one.
 			"extending type answers for the type it extends",
 			GermanPIDVCT, nil, PIDVCT, true,
 		},
@@ -68,8 +66,6 @@ func TestChain(t *testing.T) {
 		{"no inheritance", "urn:example:ticket:1", nil, []string{"urn:example:ticket:1"}},
 		{"empty type", "", []string{PIDVCT}, nil},
 		{
-			// A credential naming its parent explicitly must not have it
-			// listed twice.
 			"aka_vcts repeating a known parent",
 			GermanPIDVCT, []string{PIDVCT}, []string{GermanPIDVCT, PIDVCT},
 		},
@@ -103,7 +99,6 @@ func TestAkaVCTs(t *testing.T) {
 			map[string]any{AkaVCTsClaim: []any{PIDVCT, "urn:example:other:1"}},
 			[]string{PIDVCT, "urn:example:other:1"},
 		},
-		// A malformed aka_vcts claim is ignored.
 		{"not a list", map[string]any{AkaVCTsClaim: PIDVCT}, nil},
 		{"non-string entries", map[string]any{AkaVCTsClaim: []any{42, PIDVCT, ""}}, []string{PIDVCT}},
 	}
@@ -130,14 +125,11 @@ func TestExtends(t *testing.T) {
 		parent string
 	}{
 		{GermanPIDVCT, PIDVCT},
-		// A country this tool has no entry for.
 		{"urn:eudi:pid:fr:1", PIDVCT},
 		{"urn:eudi:pid:es:2", PIDVCT},
 		// A region code, which PID_06 allows for the mdoc namespace and
 		// PID_14 leaves open for the type.
 		{"urn:eudi:pid:de-by:1", PIDVCT},
-		// Not domestic: the country-independent type itself, and whatever a
-		// later rulebook numbers.
 		{PIDVCT, ""},
 		{"urn:eudi:pid:2", ""},
 		// Outside the PID namespace nothing is implied. Such a type states
@@ -160,8 +152,6 @@ func TestExtends(t *testing.T) {
 	}
 }
 
-// A national PID from any country answers a request for the type it extends
-// (PID_14).
 func TestAnswers_AnyDomesticPIDType(t *testing.T) {
 	for _, vct := range []string{GermanPIDVCT, "urn:eudi:pid:fr:1", "urn:eudi:pid:nl:1"} {
 		if !Answers(vct, nil, PIDVCT) {
@@ -171,7 +161,6 @@ func TestAnswers_AnyDomesticPIDType(t *testing.T) {
 			t.Errorf("%q answered a request for %q, but inheritance runs one way", PIDVCT, vct)
 		}
 	}
-	// Two domestic types are siblings, not relatives.
 	if Answers(GermanPIDVCT, nil, "urn:eudi:pid:fr:1") {
 		t.Error("the German PID answered a request for the French one")
 	}

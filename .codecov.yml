@@ -1,7 +1,4 @@
-# Coverage configuration for Codecov.
-# Files listed under "ignore" are excluded from coverage reporting
-# because they contain code that is impractical to unit-test
-# (CLI wiring, OS process management, terminal I/O, HTTP lifecycle, etc.).
+# Exclude CLI wiring, process management and UI lifecycle code from coverage.
 
 coverage:
   status:
@@ -10,19 +7,14 @@ coverage:
         target: auto
         threshold: 2%
 
-# Strip Go module prefix so ignore patterns match relative paths. This has to
-# be the module path in go.mod: a prefix that does not match strips nothing,
-# and every pattern below is then compared against a path that still carries
-# it. The module was renamed to eudi-dev and this was left behind.
+# Match go.mod so coverage paths become relative before applying ignore patterns.
 fixes:
   - "github.com/dominikschlosser/eudi-dev/::"
 
 ignore:
   - "main.go"
   - "cmd/.*"
-  # Sample applications that show how to use the toolkit. They ship as
-  # documentation, they are not part of what the CLI installs, and testing
-  # them measures the examples rather than the code they demonstrate.
+  # Example applications are outside the installed CLI.
   - "examples/.*"
   - "internal/output/printer.go"
   - "internal/proxy/subprocess.*"

@@ -321,10 +321,8 @@ func TestEncryptJWE_ReturnsCEK(t *testing.T) {
 	}
 }
 
-// A verifier's encryption key whose coordinate is narrower than P-256
-// requires breaks RFC 7518 section 6.2.1.2. Strict mode refuses it rather than
-// repair it. Debug mode reads it and reports what was wrong, so the flow still
-// reaches the step worth watching.
+// RFC 7518 §6.2.1.2 requires full-width coordinates. Strict mode rejects short ones.
+// Debug mode pads them and records a finding.
 func TestEncryptionJWKShortCoordinate_StrictRefusesDebugReports(t *testing.T) {
 	for attempt := 0; attempt < 20000; attempt++ {
 		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

@@ -38,12 +38,11 @@ const (
 	// authorization endpoint like any redirect flow.
 	interactionTypeAuthViaWeb = "urn:openid:dcp:ia:auth_via_web"
 
-	// challengePath is where the endpoint is mounted under the issuer.
 	challengePath = "/authorize-challenge"
 )
 
-// What an authorization code offer asks of the user. The choice belongs to the
-// issuer and travels with the offer, so one demo instance can show both.
+// Keep authorization mode on the offer so one demo can serve both presentation and
+// browser flows.
 const (
 	// authorizationPresentation requires a PID at the Authorization Challenge
 	// Endpoint (OpenID4VCI 1.1 §6).
@@ -53,8 +52,8 @@ const (
 	authorizationBrowser = "browser"
 )
 
-// normalizeAuthorizationMode reads the mode from the offer API. The browser
-// sign-in is the default, since it is the flow that works with every wallet.
+// Default to browser sign-in because it works with wallets that lack interactive
+// authorization.
 func normalizeAuthorizationMode(value string) string {
 	if strings.TrimSpace(value) == authorizationPresentation {
 		return authorizationPresentation
@@ -131,12 +130,9 @@ func (d *DemoRP) startInteractiveAuthorization(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// An offer whose issuer chose the browser sign-in is sent there: as the
-	// auth_via_web interaction (§6.2.1.2) when the wallet offers it, and
-	// otherwise with redirect_to_web (Section 5.2.2.1.1 of the
-	// first-party-apps specification: "The request is not able to be
-	// fulfilled with any further direct interaction with the user"), which
-	// needs no interaction support from the wallet.
+	// Use auth_via_web when advertised (OpenID4VCI 1.1 §6.2.1.2). Other wallets use
+	// redirect_to_web from first-party-apps §5.2.2.1.1, which requires no advertised
+	// interaction support.
 	issuerState := r.PostFormValue("issuer_state")
 	offered := r.PostFormValue("interaction_types_supported")
 	if d.offerAuthorization(issuerState) == authorizationBrowser {
@@ -265,9 +261,8 @@ func (d *DemoRP) continueInteractiveAuthorization(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, map[string]any{"authorization_code": code})
 }
 
-// offerAuthorization reports what the offer behind an issuer_state asks of the
-// user. An unknown issuer_state gets the browser sign-in, which every wallet
-// can complete.
+// Unknown issuer_state values default to browser sign-in for compatibility with
+// wallets without interactive authorization.
 func (d *DemoRP) offerAuthorization(issuerState string) string {
 	if issuerState == "" {
 		return authorizationBrowser
@@ -282,11 +277,8 @@ func (d *DemoRP) offerAuthorization(issuerState string) string {
 	return authorizationBrowser
 }
 
-// pushChallengeAuthRequest stores the pushed authorization request a browser
-// sign-in continues with, built from the challenge request's parameters. The
-// wallet redeems it at the authorization endpoint, so the code lands at its
-// redirect URI like in any redirect flow. It reports false when the state map
-// is full, the same cap the PAR endpoint enforces.
+// Build PAR state from the challenge request for browser sign-in. Apply the same state
+// limit as the PAR endpoint.
 func (d *DemoRP) pushChallengeAuthRequest(clientID, codeChallenge, issuerState, redirectURI, state, scope string) (*authRequestState, bool) {
 	request := &authRequestState{
 		requestURI:    requestURIPrefix + randToken(),
@@ -412,15 +404,10 @@ func (d *DemoRP) newInteractivePIDRequest() *requestState {
 	}
 }
 
-// interactivePresentationRequest is the openid4vp_request of §6.2.1.1: an
-// OpenID4VP Authorization Request shaped as the Digital Credentials API takes
-// one, with the response mode that sends the answer back here.
-//
-// It is a signed request object, so the wallet can authenticate the issuer as
-// the party asking for the presentation. The client_id is the hash of the
-// signing certificate (x509_hash), which the wallet verifies against the x5c
-// leaf in the request object with no trust list. When no signing material is
-// available it falls back to the unsigned form the draft's example uses.
+// OpenID4VCI 1.1 §6.2.1.1 uses a Digital Credentials API request form. Sign it with an
+// x509_hash client ID so the wallet can check the certificate binding. This verifies
+// the signature without establishing trust in the signer. If signing material is
+// unavailable, use the draft's unsigned form.
 func (d *DemoRP) interactivePresentationRequest(req *requestState) map[string]any {
 	sdjwtCred := map[string]any{
 		"id":     req.queryID,
@@ -479,8 +466,8 @@ func (d *DemoRP) interactivePresentationRequest(req *requestState) map[string]an
 		}}
 	}
 
-	// The signed request object: the client_id is the certificate hash, so the
-	// wallet authenticates the issuer without a trust list.
+	// The x509_hash client ID binds the request to its signing certificate. It does
+	// not establish trust in that certificate.
 	claims["client_id"] = wallet.X509HashClientID(chain[0])
 	jar, jerr := wallet.SignRequestObjectJWT(claims, signingKey, chain)
 	if jerr != nil {
@@ -528,9 +515,8 @@ func offersInteractionType(list, want string) bool {
 	return false
 }
 
-// presentedHolder names the person the presented PID identifies, so the
-// credential this issues carries the holder who authorized it rather than the
-// demo account no one signed in as.
+// Issue to the person identified by the presented PID. This flow does not use the demo
+// login account.
 func presentedHolder(claims map[string]any) string {
 	given, _ := claims["given_name"].(string)
 	family, _ := claims["family_name"].(string)

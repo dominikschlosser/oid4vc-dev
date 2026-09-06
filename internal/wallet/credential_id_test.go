@@ -16,8 +16,7 @@ package wallet
 
 import "testing"
 
-// The short id the UI shows is a prefix of the stored id, so a lookup resolves
-// a credential from an unambiguous prefix the way git resolves a short hash.
+// Accept an ID prefix only when it identifies one credential.
 func TestGetCredential_ResolvesByPrefix(t *testing.T) {
 	w := generateTestWallet(t)
 	w.RestoreCredential(StoredCredential{ID: "abcd1234ef567890", VCT: "urn:example:one"})

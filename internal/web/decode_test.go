@@ -187,7 +187,6 @@ func TestDecode_EmptyInput(t *testing.T) {
 }
 
 func TestDecode_MalformedJWT(t *testing.T) {
-	// Three parts but header is not valid base64url JSON
 	_, err := Decode("!!!.!!!.!!!")
 	if err == nil {
 		t.Fatal("expected error for malformed JWT")

@@ -166,7 +166,6 @@ func TestDemoReset(t *testing.T) {
 	}
 
 	creds := srv.wallet.GetCredentials()
-	// One SD-JWT and one mdoc PID per baseline type.
 	if want := 2 * len(BaselinePIDVCTs); len(creds) != want {
 		t.Fatalf("after reset: %d credentials (before %d), want the %d default PIDs", len(creds), before, want)
 	}
@@ -179,7 +178,6 @@ func TestDemoReset(t *testing.T) {
 		t.Fatalf("activity log not cleared: %d entries", len(srv.wallet.GetLog()))
 	}
 
-	// The reset state is persisted: a reload keeps the baseline.
 	if err := srv.reloadFromStore(); err != nil {
 		t.Fatalf("reload after reset: %v", err)
 	}
@@ -240,7 +238,6 @@ func TestStartDemoResetUsesDailySchedule(t *testing.T) {
 		t.Fatalf("next reset %s is not within the coming day", next)
 	}
 
-	// The schedule is also what /api/config advertises.
 	cfg := decodeJSON(t, serverRequest(t, srv, "GET", "/api/config", ""))
 	demo := cfg["demo"].(map[string]any)
 	if got, ok := demo["reset_daily_at"].(string); !ok || !strings.HasPrefix(got, "03:30 ") {
@@ -251,9 +248,7 @@ func TestStartDemoResetUsesDailySchedule(t *testing.T) {
 	}
 }
 
-// TestProtectedCredentials pins the baseline guarantee of a shared
-// deployment: visitors can do anything except remove or revoke the
-// credentials the wallet was seeded with.
+// Demo visitors must not remove or revoke protected baseline credentials.
 func TestProtectedCredentials(t *testing.T) {
 	srv := newDemoTestServer(t)
 	srv.SetStore(NewWalletStore(t.TempDir()))
@@ -356,13 +351,10 @@ func TestProtectedCredentials(t *testing.T) {
 	})
 }
 
-// TestGenerateProtectedDefaults_ReplacesABaselineOfAnyType covers a release
-// that changes the PID identifiers. The old baseline has to go, or the demo
-// ends up showing one PID per identifier it has ever used.
+// Replace the old baseline even if a release changes PID type identifiers.
 func TestGenerateProtectedDefaults_ReplacesABaselineOfAnyType(t *testing.T) {
 	w := generateTestWallet(t)
 
-	// A baseline from an earlier release, under a PID type no longer issued.
 	const retiredVCT = "urn:eudi:pid:xx:0"
 	w.Credentials = append(w.Credentials, StoredCredential{
 		ID:        "stale-baseline",
@@ -388,14 +380,12 @@ func TestGenerateProtectedDefaults_ReplacesABaselineOfAnyType(t *testing.T) {
 			protectedSDJWT++
 		}
 	}
-	// One per baseline type, and nothing left over from the retired one.
 	if want := len(BaselinePIDVCTs); protectedSDJWT != want {
 		t.Errorf("wallet holds %d protected SD-JWT PIDs, want exactly %d", protectedSDJWT, want)
 	}
 }
 
-// TestRefreshSigningCertificate covers the daily reset keeping the signing
-// leaf current without moving the CA anyone may have pinned.
+// Renew the signing leaf while keeping the CA stable for verifiers.
 func TestRefreshSigningCertificate(t *testing.T) {
 	w := generateTestWallet(t)
 	before := w.CertChain
@@ -421,10 +411,7 @@ func TestRefreshSigningCertificate(t *testing.T) {
 	}
 }
 
-// TestSigningKeyExpiry_FollowsTheCertificate covers what the wallet publishes
-// as its signing key expiry: it follows the current leaf, so a wallet running
-// for more than a day does not advertise an expired key in its JWKS and signed
-// issuer metadata.
+// Published key expiry must track the current leaf certificate.
 func TestSigningKeyExpiry_FollowsTheCertificate(t *testing.T) {
 	w := generateTestWallet(t)
 	s := NewServer(w, 0, nil)
@@ -436,7 +423,6 @@ func TestSigningKeyExpiry_FollowsTheCertificate(t *testing.T) {
 		t.Error("a fresh wallet should publish an expiry roughly a year out")
 	}
 
-	// Re-issuing the leaf moves the published expiry with it.
 	before := s.signingKeyExpiry()
 	if err := w.RefreshSigningCertificate(); err != nil {
 		t.Fatalf("RefreshSigningCertificate: %v", err)
@@ -446,9 +432,7 @@ func TestSigningKeyExpiry_FollowsTheCertificate(t *testing.T) {
 	}
 }
 
-// TestRefreshSigningCertificateIfExpiring covers the renewal a long-running
-// wallet depends on: nothing renews near expiry, everything does once inside
-// the window.
+// Renew the signing certificate only inside the renewal window.
 func TestRefreshSigningCertificateIfExpiring(t *testing.T) {
 	w := generateTestWallet(t)
 	expiry := w.SigningCertificateExpiry()
@@ -461,7 +445,6 @@ func TestRefreshSigningCertificateIfExpiring(t *testing.T) {
 		t.Error("a certificate with a year left should not be re-issued")
 	}
 
-	// A wallet that has been running until just before its leaf expires.
 	almostExpired := expiry.Add(-signingCertificateRenewBefore).Add(time.Hour)
 	renewed, err = w.RefreshSigningCertificateIfExpiring(almostExpired)
 	if err != nil {
@@ -478,9 +461,8 @@ func TestRefreshSigningCertificateIfExpiring(t *testing.T) {
 	}
 }
 
-// TestRenewIssuerTLSCertificateIfNeeded covers the HTTPS leaf on a wallet that
-// outlives it. The listener resolves the certificate per handshake, so a
-// renewal reaches clients without a restart.
+// The HTTPS listener reads its certificate per handshake, so renewal must take effect
+// without restart.
 func TestRenewIssuerTLSCertificateIfNeeded(t *testing.T) {
 	w := generateTestWallet(t)
 	w.IssuerURL = "https://localhost:8443"
@@ -501,15 +483,12 @@ func TestRenewIssuerTLSCertificateIfNeeded(t *testing.T) {
 	}
 	first := leaf.SerialNumber.String()
 
-	// Well before expiry nothing changes.
 	s.renewIssuerTLSCertificateIfNeeded(time.Now())
 	same, _ := x509.ParseCertificate(s.currentIssuerTLSCertificate().Certificate[0])
 	if same.SerialNumber.String() != first {
 		t.Error("a certificate with a year left was re-issued")
 	}
 
-	// Inside the renewal window it is replaced, and the listener sees the new
-	// one because it asks for it per handshake.
 	s.renewIssuerTLSCertificateIfNeeded(leaf.NotAfter.Add(-time.Hour))
 	renewed, err := x509.ParseCertificate(s.currentIssuerTLSCertificate().Certificate[0])
 	if err != nil {
@@ -523,8 +502,7 @@ func TestRenewIssuerTLSCertificateIfNeeded(t *testing.T) {
 	}
 }
 
-// The request body cap applies to a plain wallet server as much as to a demo
-// one: the size of a request it reads into memory is not the caller's choice.
+// Apply body limits to ordinary servers as well as demo servers.
 func TestRequestBodyIsCapped(t *testing.T) {
 	for _, demo := range []bool{false, true} {
 		name := "plain"
@@ -537,10 +515,8 @@ func TestRequestBodyIsCapped(t *testing.T) {
 				srv.SetDemo(DemoOptions{})
 			}
 
-			// An oversized credential is refused either way, so the status
-			// alone proves nothing. The import handler answers "reading
-			// body" only when the read itself failed, which is the cap
-			// firing rather than the credential being rejected.
+			// An oversized credential also fails parsing. Check the body-read error to
+			// prove the limit rejected it first.
 			oversized := strings.Repeat("a", maxRequestBodyBytes+1)
 			req := httptest.NewRequest("POST", "/api/credentials", strings.NewReader(oversized))
 			req.Host = "localhost:8085"
@@ -554,8 +530,6 @@ func TestRequestBodyIsCapped(t *testing.T) {
 	}
 }
 
-// Clearing the activity log changes what every other visitor sees, and
-// nothing on a demo instance needs it.
 func TestDemoBlocksClearingSharedHistory(t *testing.T) {
 	srv := newDemoTestServer(t)
 
@@ -568,8 +542,8 @@ func TestDemoBlocksClearingSharedHistory(t *testing.T) {
 	}
 }
 
-// A visitor dismisses the error their own flow raised: it is not shared
-// history, and one they cannot dismiss is shown again on every load.
+// Allow visitors to dismiss their own flow errors so the error does not reappear on
+// each reload.
 func TestDemoVisitorDismissesItsOwnError(t *testing.T) {
 	srv := newDemoTestServer(t)
 	srv.wallet.NotifyError(WalletError{Message: "this visitor's flow", Owner: "browser-a"})
@@ -587,7 +561,6 @@ func TestDemoVisitorDismissesItsOwnError(t *testing.T) {
 	}
 }
 
-// A local wallet still clears its own log.
 func TestLocalWalletStillClearsItsLog(t *testing.T) {
 	srv := newTestServer(t, false)
 	req := httptest.NewRequest(http.MethodDelete, "/api/log", nil)
@@ -599,10 +572,8 @@ func TestLocalWalletStillClearsItsLog(t *testing.T) {
 	}
 }
 
-// The demo baseline follows the pre-defined PID templates through the same
-// resolution every issuance uses, so a user template saved under the same
-// name (or a --templates-dir) decides what the demo seeds and what every
-// reset restores.
+// Use normal template resolution for baseline generation and resets so template
+// overrides apply consistently.
 func TestProtectedDefaultsFollowTemplateOverrides(t *testing.T) {
 	w := generateTestWallet(t)
 	dir := t.TempDir()

@@ -12,20 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package httpsec holds the browser security headers every UI in this toolkit
-// serves. All of them render content someone else supplied: credentials,
-// issuer metadata, verifier requests, proxied traffic. These headers keep a
-// hole in the escaping from becoming code execution.
+// Package httpsec applies browser security headers to pages that display untrusted
+// credentials, metadata and protocol messages. The headers limit the impact of an
+// escaping defect.
 package httpsec
 
 import "net/http"
 
-// ContentSecurityPolicy allows scripts and styles from the page's own origin
-// and nothing else. Without 'unsafe-inline' in script-src, an injected
-// handler or script tag does not run even when escaping fails. The remaining
-// directives close the paths an injection would otherwise use to exfiltrate:
-// no plugins, no base tag rewriting, no framing, forms and fetches to this
-// origin only, images from this origin or data URIs.
+// ContentSecurityPolicy restricts scripts and styles to this origin. Blocking inline
+// scripts prevents injected event handlers from running. Other directives restrict
+// plugins, framing, forms, fetches and images.
 const ContentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self'; " +
 	"style-src 'self' 'unsafe-inline'; " +

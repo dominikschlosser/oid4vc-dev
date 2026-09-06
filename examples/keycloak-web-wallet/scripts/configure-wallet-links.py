@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
-"""Points the verifier's identity providers at the wallet's URLs.
+"""Configure Keycloak to use the wallet web URLs.
 
-Sets `walletScheme` on the `oid4vp` provider to the wallet's /authorize endpoint
-(so Keycloak's login page links straight to the wallet web URL instead of a
-custom scheme) and `trustListUrl` on the `demo-trust-list` trust-material
-provider to the wallet's trust list. Both are derived from WALLET_BASE_URL, so
-port overrides keep working with the statically imported realm.
-"""
+Set walletScheme to /authorize and trustListUrl to the wallet trust list. Derive both from WALLET_BASE_URL so port overrides also update the imported realm."""
 import sys
 
 import oid4vp_demo as demo

@@ -26,7 +26,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/format"
 )
 
-// SubmitDirectPostObject submits an authorization response object via direct_post.
 func SubmitDirectPostObject(responseURI string, payload map[string]any) (*DirectPostResult, error) {
 	form := url.Values{}
 	for key, value := range payload {
@@ -66,26 +65,21 @@ func SubmitDirectPostObject(responseURI string, payload map[string]any) (*Direct
 	return result, nil
 }
 
-// SubmitDirectPost submits a VP token and optional id_token via direct_post to the response URI.
 func SubmitDirectPost(responseURI, state string, vpToken any, idToken string) (*DirectPostResult, error) {
 	return SubmitDirectPostObject(responseURI, buildPlainAuthorizationResponse(vpToken, idToken, state))
 }
 
-// SubmitDirectPostError submits an authorization error response via direct_post.
 func SubmitDirectPostError(responseURI, state, errorCode, errorDescription string) (*DirectPostResult, error) {
 	return SubmitDirectPostObject(responseURI, buildPlainAuthorizationErrorResponse(errorCode, errorDescription, state))
 }
 
-// DirectPostResult represents the result of a direct_post submission.
 type DirectPostResult struct {
 	StatusCode  int    `json:"status_code"`
 	Body        string `json:"body"`
 	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
-// SubmitDirectPostJWT submits an encrypted JARM response via direct_post.jwt.
-// The vp_token and state are inside the encrypted responseJWT payload.
-// If cek is non-nil, it is included as X-Debug-JWE-CEK header for proxy debugging.
+// SubmitDirectPostJWT exposes a supplied CEK in X-Debug-JWE-CEK for proxy debugging.
 func SubmitDirectPostJWT(responseURI string, responseJWT string, cek []byte) (*DirectPostResult, error) {
 	form := url.Values{}
 	form.Set("response", responseJWT)
@@ -124,8 +118,6 @@ func SubmitDirectPostJWT(responseURI string, responseJWT string, cek []byte) (*D
 	return result, nil
 }
 
-// BuildFragmentRedirect constructs a redirect URL with vp_token, optional id_token, and state as
-// fragment parameters per OID4VP 1.0 fragment response mode.
 func BuildFragmentRedirect(redirectURI, state string, vpToken any, idToken string) (string, error) {
 	fragment := url.Values{}
 	if vpToken != nil {
@@ -145,11 +137,8 @@ func BuildFragmentRedirect(redirectURI, state string, vpToken any, idToken strin
 	return appendFragmentParams(redirectURI, fragment), nil
 }
 
-// appendFragmentParams adds authorization response parameters to the fragment
-// of a redirect URI. RFC 6749 §4.2.2 has the wallet "add the following
-// parameters to the fragment component of the redirection URI", and adding
-// means merging: RFC 3986 §3.5 makes the fragment everything after the first
-// "#", so a second one would nest the response inside the existing value.
+// RFC 6749 §4.2.2 adds response parameters to the redirect URI's fragment. Merge with
+// existing values, since RFC 3986 §3.5 treats a second # as part of the fragment.
 func appendFragmentParams(redirectURI string, params url.Values) string {
 	encoded := params.Encode()
 	base, existing, hadFragment := strings.Cut(redirectURI, "#")
@@ -162,8 +151,6 @@ func appendFragmentParams(redirectURI string, params url.Values) string {
 	return base + "#" + existing + "&" + encoded
 }
 
-// BuildFragmentErrorRedirect constructs a redirect URL with authorization error
-// parameters as fragment members per OID4VP 1.0 fragment response mode.
 func BuildFragmentErrorRedirect(redirectURI, state, errorCode, errorDescription string) string {
 	fragment := url.Values{}
 	fragment.Set("error", errorCode)
@@ -176,7 +163,6 @@ func BuildFragmentErrorRedirect(redirectURI, state, errorCode, errorDescription 
 	return appendFragmentParams(redirectURI, fragment)
 }
 
-// FormatDirectPostResult formats a direct post result for terminal output.
 func FormatDirectPostResult(result *DirectPostResult) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Response: %d", result.StatusCode)

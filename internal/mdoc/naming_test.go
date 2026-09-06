@@ -48,7 +48,6 @@ func TestNameCOSEHeaderIsEmptyForAnEmptyHeader(t *testing.T) {
 	}
 }
 
-// An unregistered algorithm identifier survives as its number.
 func TestNameCOSEHeaderKeepsAnUnknownAlgorithm(t *testing.T) {
 	named := NameCOSEHeader(map[string]any{"1": int64(-999)})
 
@@ -57,9 +56,8 @@ func TestNameCOSEHeaderKeepsAnUnknownAlgorithm(t *testing.T) {
 	}
 }
 
-// testCertDER builds a document signer issued by an IACA, so that subject and
-// issuer are genuinely different: x509.CreateCertificate takes the issuer from
-// the parent it signs with, not from the template's Issuer field.
+// x509.CreateCertificate takes the issuer from the parent certificate, not the
+// template's Issuer field. Use a separate IACA to test distinct names.
 func testCertDER(t *testing.T) []byte {
 	t.Helper()
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -101,8 +99,7 @@ func testCertDER(t *testing.T) []byte {
 	return der
 }
 
-// x5chain arrives as raw DER, which tells a reader nothing. It is replaced by
-// something placeable, and a chain that does not parse still has to appear.
+// Show readable certificate details while retaining malformed chains for inspection.
 func TestNameCOSEHeaderDescribesCertificates(t *testing.T) {
 	der := testCertDER(t)
 
@@ -200,8 +197,6 @@ func TestNameCOSEKeyKeepsUnknownValues(t *testing.T) {
 	}
 }
 
-// The thumbprint identifies a device key the way a kid does elsewhere, so it
-// has to be stable for one key and different for another.
 func TestDeviceKeyThumbprint(t *testing.T) {
 	key := testKey(t)
 
@@ -262,8 +257,8 @@ func TestItemDigestErrors(t *testing.T) {
 		}
 	})
 
-	// A namespace the MSO says nothing about yields no signed digest rather
-	// than an error, and the empty want is what marks it unverifiable.
+	// A namespace absent from the MSO has no signed digest. An empty expected digest
+	// marks it as unverifiable.
 	t.Run("a namespace the MSO does not cover", func(t *testing.T) {
 		doc := docWithDigest(raw, signed[:])
 		_, want, err := ItemDigest(doc, "other", doc.NameSpaces["ns"][0])
@@ -309,8 +304,8 @@ func TestDigestHasher(t *testing.T) {
 	}
 }
 
-// CBOR decoders hand back whichever integer type fits, so every one of them
-// has to read back as the same number.
+// CBOR decoders can use different Go integer types for the same value. Accept each
+// representation.
 func TestCOSEInt(t *testing.T) {
 	tests := []struct {
 		name string

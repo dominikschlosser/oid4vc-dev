@@ -16,12 +16,9 @@ for arg in "$@"; do
   esac
 done
 
-# The compose file publishes KEYCLOAK_PORT, WALLET_PORT and APP_PORT with
-# listen port == published port (see docker-compose.yml). The defaults live in
-# the 9xxx range to stay clear of a locally running eudi-dev wallet (8085) or
-# Keycloak (8080). If one is taken anyway, the next free port is picked.
-# Explicit overrides are validated but respected, and a port held by this
-# project's own keycloak container counts as free so a re-run reuses the binding.
+# Published ports must match listener ports. Defaults use the 9xxx range to avoid common
+# wallet and Keycloak ports. Reuse this project's existing bindings and select free ports
+# otherwise.
 
 port_listening() {
   (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
@@ -76,9 +73,7 @@ resolve_port KEYCLOAK_PORT 9080
 resolve_port WALLET_PORT 9085 2
 resolve_port APP_PORT 9090
 
-# The extension jar comes from scripts/download-extension.sh (0.11.1). A local
-# checkout of keycloak-extension-oid4vp is preferred when present, so changes to
-# the extension can be tested before release.
+# Prefer a local verifier extension checkout so unreleased changes can be tested.
 EXTENSION_REPO="${KEYCLOAK_OID4VP_REPO:-${SCRIPT_DIR}/../../../keycloak-extension-oid4vp}"
 if [[ ! -f providers/keycloak-extension-oid4vp.jar ]]; then
   if [[ -d "${EXTENSION_REPO}" ]] && command -v mvn >/dev/null 2>&1; then
@@ -100,8 +95,8 @@ docker compose build wallet-init
 current_ca="$(docker compose run --rm -T wallet-init wallet ca-cert)"
 compose_up_flags=""
 if [[ ! -f wallet-ca-cert.pem ]] || [[ "$(cat wallet-ca-cert.pem)" != "${current_ca}" ]]; then
-  # The CA changes when the wallet volume is recreated, and Keycloak only
-  # reads the truststore at startup, so recreate the containers in that case.
+  # Keycloak reads its truststore at startup. Recreate containers when the wallet CA
+  # changes.
   printf '%s\n' "${current_ca}" > wallet-ca-cert.pem
   compose_up_flags="--force-recreate"
 fi

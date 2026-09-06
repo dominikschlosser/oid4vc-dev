@@ -1,6 +1,8 @@
 # Comments
 
-A comment stays only if a competent reader of the code would not reach the same conclusion without it.
+Human readability is the main writing priority. Use familiar words and clear sentences. Name the actor, explain one idea at a time and write for someone outside the conversation. Avoid prose semicolons and dashes when a short sentence is clearer. Preserve identifiers, syntax and exact specification quotes.
+
+Keep a comment only when it adds information that the code cannot show.
 
 ## Write one for
 

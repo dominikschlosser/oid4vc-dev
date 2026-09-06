@@ -36,7 +36,6 @@ func init() {
 	}
 }
 
-// unmarshalTag24 decodes CBOR Tag 24, returning the inner bytes.
 func unmarshalTag24(data []byte) ([]byte, error) {
 	var raw cbor.RawTag
 	if err := cborDecMode.Unmarshal(data, &raw); err != nil {
@@ -53,7 +52,6 @@ func unmarshalTag24(data []byte) ([]byte, error) {
 	return inner, nil
 }
 
-// decodeCBOR decodes CBOR bytes into a generic Go value.
 func decodeCBOR(data []byte) (any, error) {
 	var result any
 	if err := cborDecMode.Unmarshal(data, &result); err != nil {
@@ -62,7 +60,6 @@ func decodeCBOR(data []byte) (any, error) {
 	return result, nil
 }
 
-// convertCBORMapToStringKeys converts map[any]any to map[string]any recursively.
 func convertCBORMapToStringKeys(m map[any]any) map[string]any {
 	result := make(map[string]any)
 	for k, v := range m {

@@ -53,8 +53,6 @@ const (
 	walletProviderRevocationServiceType = "http://uri.etsi.org/19602/SvcType/WalletSolution/Revocation"
 )
 
-// IssuedAttestationSpec describes an attestation type the local test issuer is
-// configured to issue.
 type IssuedAttestationSpec struct {
 	Format                      string   `json:"format"`
 	VCT                         string   `json:"vct,omitempty"`
@@ -190,7 +188,6 @@ func NormalizeIssuedAttestationSpec(spec IssuedAttestationSpec, trustProfileHint
 
 	switch trustProfileHint {
 	case "", "auto":
-		// Use attestation-type defaults below.
 	case "pid":
 		spec = applyPIDTrustProfileDefaults(spec)
 	case "local":

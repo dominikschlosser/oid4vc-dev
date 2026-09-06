@@ -119,7 +119,6 @@ func TestValidateCertChain_InvalidChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Different CA in trust list
 	_, _, otherCADER := generateCACert(t)
 	otherCACert, _ := x509.ParseCertificate(otherCADER)
 
@@ -136,7 +135,6 @@ func TestValidateCertChain_InvalidChain(t *testing.T) {
 func TestValidateCertChain_WithIntermediate(t *testing.T) {
 	rootCert, rootKey, rootDER := generateCACert(t)
 
-	// Intermediate CA
 	intKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +154,6 @@ func TestValidateCertChain_WithIntermediate(t *testing.T) {
 	}
 	intCert, _ := x509.ParseCertificate(intDER)
 
-	// Leaf signed by intermediate
 	_, _, leafDER := generateLeafCert(t, intCert, intKey)
 	leafCert, _ := x509.ParseCertificate(leafDER)
 
@@ -178,7 +175,6 @@ func TestValidateCertChain_InvalidTrustListCert(t *testing.T) {
 	_, _, leafDER := generateLeafCert(t, caCert, caKey)
 	leafCert, _ := x509.ParseCertificate(leafDER)
 
-	// Garbage DER in the trust list is skipped.
 	tlCerts := []trustlist.CertInfo{
 		{PublicKey: nil, Raw: []byte("not a certificate")},
 	}
@@ -232,7 +228,7 @@ func TestExtractAndValidateX5C_InvalidBase64(t *testing.T) {
 }
 
 func TestExtractAndValidateX5C_ValidBase64InvalidDER(t *testing.T) {
-	header := map[string]any{"x5c": []any{"bm90IGEgY2VydA=="}} // "not a cert"
+	header := map[string]any{"x5c": []any{"bm90IGEgY2VydA=="}}
 	tlCerts := []trustlist.CertInfo{{Raw: []byte("x")}}
 
 	_, err := ExtractAndValidateX5C(header, tlCerts)

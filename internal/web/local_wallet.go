@@ -23,8 +23,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// loadLocalWallet loads the wallet the decoder is mounted on, the default
-// wallet when the decoder runs on its own.
+// Use the mounted wallet, or the default wallet when running the decoder alone.
 func loadLocalWallet(store *wallet.WalletStore) (*wallet.Wallet, error) {
 	if store == nil {
 		store = wallet.NewWalletStore("")
@@ -32,9 +31,7 @@ func loadLocalWallet(store *wallet.WalletStore) (*wallet.Wallet, error) {
 	return store.LoadOrCreate()
 }
 
-// localWalletTrustAnchors returns the local wallet's CA certificates as
-// trust list entries. Credentials issued by the local wallet then validate
-// with a full chain, without a network lookup or an explicit trust list.
+// The local CA lets locally issued credentials verify without fetching a trust list.
 func localWalletTrustAnchors(store *wallet.WalletStore) []trustlist.CertInfo {
 	w, err := loadLocalWallet(store)
 	if err != nil || w == nil || len(w.CertChain) == 0 {

@@ -31,24 +31,20 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// ValidateOpts holds the options for credential validation.
 type ValidateOpts struct {
 	Key          string
 	TrustListURL string
 	TrustListRaw string
 	CheckStatus  bool
-	// Offline runs only the checks that need no lookup at a counterparty.
-	// The status list fetch and the issuer metadata fetch are reported as
-	// skipped and marked NeedsNetwork, so the decoder can show a credential
-	// before those answers are in.
+	// Skip network checks and mark them NeedsNetwork so the UI can display offline
+	// results first.
 	Offline bool
-	// WalletStore is the wallet whose CA and issuer key verify credentials it
-	// issued. Nil opens the default wallet.
+	// Use this wallet's CA and issuer key for locally issued credentials. Nil selects
+	// the default wallet.
 	WalletStore *wallet.WalletStore
 }
 
-// Validate decodes a credential and runs validation checks.
-// It returns the same structure as Decode, plus a "validation" object.
+// Validate adds a validation object to the decoded result.
 func Validate(input string, opts ValidateOpts) (map[string]any, error) {
 	detected := detectCredentialFormat(input)
 
@@ -56,8 +52,8 @@ func Validate(input string, opts ValidateOpts) (map[string]any, error) {
 
 	switch detected {
 	case format.FormatSDJWT:
-		// Inspect records rule breaks on the token as deviations, so the
-		// decoder still shows a credential a strict parser would reject.
+		// Inspect retains malformed credentials and records deviations so the decoder
+		// can still show them.
 		token, err := sdjwt.Inspect(input)
 		if err != nil {
 			return nil, fmt.Errorf("parsing SD-JWT: %w", err)
@@ -303,9 +299,8 @@ func checkSDJWTSignature(token *sdjwt.Token, opts ValidateOpts) CheckResult {
 	}
 }
 
-// offlineSDJWTSignature verifies what the token and the caller already carry.
-// A signature that only the issuer metadata endpoint can answer for is
-// reported as still open rather than waited on.
+// Verify using supplied or embedded keys. Mark checks requiring issuer metadata as
+// pending network access.
 func offlineSDJWTSignature(token *sdjwt.Token, pubKeys []crypto.PublicKey, tlCerts []trustlist.CertInfo, opts ValidateOpts) CheckResult {
 	result, source, err := validate.VerifyJWTSignatureOffline(token, pubKeys, tlCerts)
 	if err != nil {
@@ -350,8 +345,8 @@ func offlineSDJWTSignature(token *sdjwt.Token, pubKeys []crypto.PublicKey, tlCer
 			Detail: fmt.Sprintf("Valid (%s)", result.Algorithm),
 		}
 	}
-	// A key that is here and does not match is an answer, unless the issuer
-	// metadata holds another one that the online pass still has to try.
+	// A local key mismatch may still need an online check if issuer metadata can
+	// provide another key.
 	if validate.CanResolveJWTIssuerMetadata(token) {
 		return CheckResult{
 			Name:         "signature",
@@ -493,10 +488,8 @@ func checkMDOCStatus(doc *mdoc.Document, opts ValidateOpts) []CheckResult {
 	return checkStatusRef(ref, tlCerts)
 }
 
-// statusCheckNotRun reports the outcome for a status check that never gets to
-// the status list itself. A credential without a reference has a final answer
-// already. One with a reference is only answerable by fetching the list, so an
-// offline pass leaves it open.
+// No status reference needs no network check. An existing reference remains unresolved
+// until its list is fetched.
 func statusCheckNotRun(ref *statuslist.StatusRef, opts ValidateOpts) (CheckResult, bool) {
 	if ref == nil {
 		return CheckResult{
@@ -523,8 +516,7 @@ func statusCheckNotRun(ref *statuslist.StatusRef, opts ValidateOpts) (CheckResul
 	return CheckResult{}, false
 }
 
-// checkStatusRef reports the revocation status and, separately, whether the
-// status list's own signature chains to a trust anchor.
+// Report credential status separately from trust in the status list signature.
 func checkStatusRef(ref *statuslist.StatusRef, tlCerts []trustlist.CertInfo) []CheckResult {
 	if ref == nil {
 		return []CheckResult{{Name: "status", Status: "skipped", Detail: "No status list reference in credential"}}
@@ -588,8 +580,7 @@ func resolveKeys(opts ValidateOpts) ([]crypto.PublicKey, []trustlist.CertInfo, e
 	}
 
 	if opts.TrustListURL != "" && !opts.Offline {
-		// The URL comes from the HTTP request body. ReadRemoteInput never
-		// touches the server's filesystem.
+		// The URL is caller-supplied. ReadRemoteInput cannot read local files.
 		tlRaw, err := format.ReadRemoteInput(opts.TrustListURL)
 		if err != nil {
 			return nil, nil, fmt.Errorf("fetching trust list: %w", err)

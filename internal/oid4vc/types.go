@@ -15,7 +15,6 @@
 // Package oid4vc parses OID4VCI credential offers and OID4VP authorization requests.
 package oid4vc
 
-// RequestType identifies whether a request is VCI or VP.
 type RequestType int
 
 const (
@@ -23,7 +22,6 @@ const (
 	TypeVP
 )
 
-// CredentialOffer represents a parsed OID4VCI credential offer.
 type CredentialOffer struct {
 	CredentialIssuer           string
 	CredentialConfigurationIDs []string
@@ -31,7 +29,6 @@ type CredentialOffer struct {
 	FullJSON                   map[string]any
 }
 
-// OfferGrants holds the grant types in a credential offer.
 type OfferGrants struct {
 	PreAuthorizedCode string
 	TxCode            map[string]any // input_mode, length, description
@@ -39,7 +36,6 @@ type OfferGrants struct {
 	IssuerState       string
 }
 
-// AuthorizationRequest represents a parsed OID4VP authorization request.
 type AuthorizationRequest struct {
 	ClientID         string
 	ResponseType     string
@@ -62,14 +58,12 @@ type AuthorizationRequest struct {
 	FullJSON       map[string]any
 }
 
-// RequestObjectJWT holds the decoded header and payload of a JWT request object.
 type RequestObjectJWT struct {
 	Raw     string
 	Header  map[string]any
 	Payload map[string]any
 }
 
-// ParseOptions configures optional behavior for the OID4VP/VCI parser.
 type ParseOptions struct {
 	// FetchRequestURI is called to retrieve the request object from request_uri.
 	// url is the request_uri value, method is "get" or "post".

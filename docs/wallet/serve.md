@@ -6,7 +6,7 @@
 
 ## `wallet serve`
 
-Starts the wallet HTTP server with a web UI for managing credentials and handling OID4VP/OID4VCI flows. It loads credentials from disk, saves state on every credential change, logs requests, and shows a consent dialog for incoming requests.
+Starts the wallet HTTP server with a UI for managing credentials and handling OID4VP/OID4VCI flows. It loads credentials from the selected storage backend, saves changes and logs requests. Interactive requests show a consent dialog.
 
 The server exposes:
 - Web UI for credential management and consent (list, show, import, remove, and issue credentials, with credential templates and CA and TLS certificate downloads)
@@ -17,29 +17,51 @@ The server exposes:
 - HTTPS wallet endpoints on the wallet's effective issuer URL, including `/.well-known/jwt-vc-issuer`, `/.well-known/openid-credential-issuer`, `/api/trustlist`, `/api/trustlists`, `/api/statuslist`, and `/api/registrar/wrp`
 - A management API mirroring the wallet CLI (list, show, import, and remove credentials, issue credentials, generate PIDs, export certificates). It has no authentication (see [HTTP API](http-api.md))
 
-The consent dialog for a credential offer shows the issuer's name and origin, the flow the offer uses, whether a transaction code is required, and for each offered credential its format, type, display name, description and claims. Everything beyond the offer itself comes from the issuer's metadata and is optional. An offer delivered as a `credential_offer_uri` is fetched for the dialog and fetched again on approval (OpenID4VCI 1.0 §4.1.3). When an issuer consumes the offer on the first read, the approved issuance continues with the offer the dialog resolved, and the activity log warns about the failed read. When the dialog could not retrieve the offer at all, it shows the issuer the URI points at, and approving retries. An offer whose pre-authorized grant requires a `tx_code` is refused before the pre-authorized code is used when the issuance has no code (an auto-accepting wallet, or an API caller that left it out). The refusal states the length and input mode the offer asked for.
+The offer consent dialog shows the issuer, the issuance flow and any required transaction code. It also shows each credential's format, type, display name, description and claims when available from issuer metadata.
+
+For `credential_offer_uri`, the wallet fetches the offer for the dialog and again on approval (OpenID4VCI 1.0 §4.1.3). If the issuer serves the offer only once, issuance uses the copy shown in the dialog and logs the failed second fetch. If the first fetch failed, the dialog shows the issuer from the URI and approval retries the fetch.
+
+If the offer requires a transaction code, issuance rejects a missing code before using the pre-authorized code. This also applies to API callers and wallets using `--auto-accept`. The error gives the required code length and input mode.
 
 Once a credential is stored, the wallet calls the issuer's Notification Endpoint where one is published. The endpoint is optional (OpenID4VCI 1.0 §11), so a refused call produces a warning and the credential stays in the wallet. The warning quotes the answer and compares it with §11.3 (an Authorization Error Response for a rejected token, a 400 for a bad `notification_id`).
 
 The consent dialog for a presentation request also shows the purpose the verifier registered. The wallet reads it from the wallet-relying-party registration certificate (typ `rc-wrp+jwt`, in a `verifier_info` entry of format `registration_cert`) per OpenID4VP 1.0 §5.1. A certificate whose signature fails against its own x5c leaf is skipped with a warning in the activity log. The built-in demo verifier and demo issuer send such certificates with every request.
 
-The dialog opens with the wallet's automatic selection. When a request has alternatives (several stored credentials match a query, or the DCQL `credential_sets` offer more than one option), a row above the credential cards says so and offers **Edit**. The Edit view lists the set options the wallet can satisfy and, per credential query id, the matching credentials. Changes apply immediately, **Done** returns to the summary, and **reset to auto** restores the wallet's choice. Deny and Approve apply to the whole presentation on both screens. The claim checkboxes stay on the main screen and belong to the picked credential. The consent request carries the alternatives as `credential_options`. `POST /api/requests/{id}/approve` takes the selection as `picks` (query id to credential id) and `set_choices` (option index per set, `-1` skips an optional set) next to `selected_claims`, so API clients can make the same choice. An approval that selects credentials the request did not offer is refused with `400` and the request stays pending. Auto-accept wallets submit the auto-selection without a dialog.
+The presentation dialog starts with the wallet's automatic credential selection. If alternatives are available, **Edit** lets the user choose a credential-set option and a credential for each query. Changes apply immediately. **Done** returns to the summary, and **reset to auto** restores the automatic selection. Claim checkboxes apply to the selected credential. **Deny** and **Approve** apply to the whole presentation. Auto-accept submits the automatic selection without a dialog.
+
+API clients receive the alternatives in `credential_options`. Send `picks` (query ID to credential ID), `set_choices` (option index per set, or `-1` to skip an optional set) and `selected_claims` to `POST /api/requests/{id}/approve`. An invalid selection returns `400` and leaves the request pending.
 
 ![Consent dialog](../assets/wallet-consent-ui.png)
 
 ![Consent credential selection](../assets/wallet-consent-edit-ui.png)
 
-A credential card shows the appearance the issuer declared (display name, logo, text and background colors, and a background image). Without one the card shows a monogram from the name or a generic glyph. An About control opens the credential's description. Two credentials of the same type differ by display name (the two PIDs are named `EUDI PID` and `German PID`). The technical type and a short id are on the meta line below.
+A credential card uses the issuer's display name, logo, colors and background image. If no artwork is available, it shows a monogram or generic icon. **About** opens the description.
+
+Display names distinguish credentials of the same type, such as `EUDI PID` and `German PID`. The technical type and short ID appear below the name.
 
 The Issue Credential dialog issues credentials from the web UI. It shows format specific fields and offers a claim builder next to a raw JSON editor. Selecting a credential template (for example `german-pid-sdjwt`) fills all fields for review before issuing. A status list selector controls the embedded status reference (the wallet's own list when configured, none, or a custom URI and index).
 
 Credential cards show the revocation status when a credential carries a status list reference. Credentials on the wallet's own status list show a live Active or Revoked badge plus a Revoke or Activate button. Credentials pointing at an external status list show a Check status action that fetches the list and resolves the current value.
 
-Every interactive control has a stable element id for browser automation. Credential cards expose data attributes for selection (`data-credential-id`, `data-format`, `data-vct`, `data-doctype`, `data-status`), so a test can select a card with `.credential-card[data-vct="urn:eudi:pid:1"]` and click its buttons (`show-<id>`, `delete-<id>`, `revoke-<id>`, `status-check-<id>`). Template manager rows (`template-row-<name>`, `template-edit-<name>`, `template-delete-<name>`) and the consent dialog (`consent-approve`, `consent-deny`, `consent-credential-<id>`, claim checkboxes with `data-cred` and `data-claim`, the selection controls `consent-edit-selection`, `consent-selection-done` and `consent-selection-reset`, set option radios `consent-set-<n>-option-<m>` (plus `consent-set-<n>-none` for an optional set), query sections `consent-query-<id>`, and candidate rows `consent-candidate-<query>-<credential>` with `data-query` and `data-cred`) follow the same pattern.
+UI controls have stable IDs for browser automation. Credential cards expose `data-credential-id`, `data-format`, `data-vct`, `data-doctype` and `data-status`. For example, select a PID with `.credential-card[data-vct="urn:eudi:pid:1"]`.
+
+| Control | ID or selector |
+|---|---|
+| Credential actions | `show-<id>`, `delete-<id>`, `revoke-<id>`, `status-check-<id>` |
+| Template rows and actions | `template-row-<name>`, `template-edit-<name>`, `template-delete-<name>` |
+| Consent actions | `consent-approve`, `consent-deny` |
+| Consent credential | `consent-credential-<id>` |
+| Claim checkboxes | `data-cred` and `data-claim` |
+| Selection controls | `consent-edit-selection`, `consent-selection-done`, `consent-selection-reset` |
+| Set options | `consent-set-<n>-option-<m>`, `consent-set-<n>-none` for optional sets |
+| Query sections | `consent-query-<id>` |
+| Candidate rows | `consent-candidate-<query>-<credential>`, with `data-query` and `data-cred` |
 
 ![Issue credential dialog](../assets/wallet-issue-ui.png)
 
-The UI header links to the project on GitHub and to CLI install instructions. It also has an Auto-accept toggle (filled while active) that changes the setting at runtime on a locally hosted wallet. The demo keeps it fixed. The **Trust & certificates** dialog (opened from the header) lists the wallet's trust list URLs with copy buttons, each labelled with the provider profile it describes, plus downloads for the CA, signing and HTTPS keys. A verifier uses them to trust the wallet's self-issued credentials. An issuer uses them to verify the wallet attestation and key attestation. Both chain to the same CA.
+The header links to GitHub and CLI installation instructions. Local wallets let users change **Auto-accept**. Demo wallets show the fixed setting.
+
+**Trust & certificates** lists trust list URLs and offers CA, signing and HTTPS certificates. Verifiers use the CA for wallet-issued credentials. Issuers use it for wallet and key attestations.
 
 A fresh wallet uses a local issuer URL on `https://localhost:<port+1>`. An https `--base-url` becomes the issuer URL directly, so issuer metadata, trust lists, and status lists are served from the public origin behind an external TLS terminator (see [public demo hosting](../public-demo.md)).
 
@@ -68,7 +90,7 @@ An issuer needs the same CA. The wallet attestation (`OAuth-Client-Attestation`)
 
 The startup banner warns about a persisted Docker hostname outside Docker and about stored credentials whose issuer or status list URLs this server does not serve. Those credentials fail validation and status checks until they are issued again.
 
-Every trust list a wallet serves carries the same certificate, its own CA. The profiles differ in what they declare that CA to be (LoTE type, entity name, service types). `eudi wallet trust-list` uses the wallet the CLI is pointed at, so with an active remote target it fetches from that wallet.
+Every trust list a wallet serves carries the same certificate, its own CA. The profiles describe different roles for that CA through the LoTE type, entity name and service types. `eudi wallet trust-list` uses the wallet the CLI is pointed at, so with an active remote target it fetches from that wallet.
 
 The wallet groups registered attestation entries by trust-list profile. Each group is exposed as its own trust list under `/api/trustlists/{id}`. The `id` is a stable profile identifier:
 - `pid` for the built-in PID profile
@@ -160,7 +182,7 @@ eudi wallet serve -d                   # run in the background (stop with `eudi 
 | `--session-transcript`  | `oid4vp` | mDoc session transcript mode: `oid4vp` or `iso`  |
 | `--register`            | `false`  | Register OS URL scheme handlers                  |
 | `--no-register`         | `false`  | Skip URL scheme registration (overrides --register) |
-| `--key-attestation-level` | — | What the key attestation claims as `key_storage` and `user_authentication` (OpenID4VCI Appendix D.2): whatever the issuer requires (default), `none`, or a level such as `iso_18045_high` for both. The wallet keeps its keys in plain files, so this is a test setting (see [SECURITY.md](../../SECURITY.md)). Changeable at runtime from the Conformance panel |
+| `--key-attestation-level` | — | What the key attestation claims as `key_storage` and `user_authentication` (OpenID4VCI Appendix D.2): whatever the issuer requires (default), `none`, or a level such as `iso_18045_high` for both. Keys are stored without encryption, so this is a test setting (see [SECURITY.md](../../SECURITY.md)). Changeable at runtime from the Conformance panel |
 | `--preferred-format`    | —        | Preferred credential format when multiple match: `dc+sd-jwt`, `mso_mdoc`, or `jwt_vc_json` |
 | `--status-list`         | `false`  | Embed status list references in generated credentials |
 | `--base-url`            | —        | Base URL for the wallet's HTTP endpoints. An https base URL becomes the issuer URL directly (external TLS terminator). An http base URL derives a self-signed HTTPS issuer URL on port+1. Existing persisted issuer URLs are reused unless this flag is set |

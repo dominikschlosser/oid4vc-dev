@@ -36,7 +36,6 @@ func mustGenerateKey(t *testing.T) *ecdsa.PrivateKey {
 	return key
 }
 
-// testChain returns an issuer key with a leaf and CA certificate for it.
 func testChain(t *testing.T) (*ecdsa.PrivateKey, *x509.Certificate, *x509.Certificate) {
 	t.Helper()
 	issuerKey := mustGenerateKey(t)
@@ -52,9 +51,7 @@ func testChain(t *testing.T) (*ecdsa.PrivateKey, *x509.Certificate, *x509.Certif
 	return issuerKey, leafCert, caCert
 }
 
-// statusListServer serves whatever gen produces for its own URL. The token's
-// sub claim has to be the URL it is served from, which is only known once the
-// server is listening.
+// Start the server before generating the token so sub can name its actual URL.
 func statusListServer(t *testing.T, gen func(uri string) (string, []byte)) *httptest.Server {
 	t.Helper()
 	var srv *httptest.Server
@@ -69,7 +66,6 @@ func statusListServer(t *testing.T, gen func(uri string) (string, []byte)) *http
 	return srv
 }
 
-// jwtServer serves a signed JWT status list token over the given bitstring.
 func jwtServer(t *testing.T, key *ecdsa.PrivateKey, bits int, bitstring []byte, chain []*x509.Certificate) *httptest.Server {
 	t.Helper()
 	return statusListServer(t, func(uri string) (string, []byte) {
@@ -240,7 +236,7 @@ func TestExtractStatus_OutOfRange(t *testing.T) {
 func TestCheck_WithMockServer(t *testing.T) {
 	key := mustGenerateKey(t)
 	bitstring := make([]byte, 16)
-	bitstring[0] = 1 << 5 // index 5 is revoked
+	bitstring[0] = 1 << 5
 	srv := jwtServer(t, key, 1, bitstring, nil)
 
 	result, err := Check(&StatusRef{URI: srv.URL, Idx: 0})
@@ -385,9 +381,8 @@ func TestZlibDecompress(t *testing.T) {
 	}
 }
 
-// idx comes from the credential's own status claim and bits from the fetched
-// status list, so both are somebody else's numbers. Reading an entry must
-// refuse hostile values rather than panic or invent a status.
+// Both idx and bits are untrusted. Reject invalid values without panicking or
+// returning a fabricated status.
 func TestExtractStatus_RefusesHostileParameters(t *testing.T) {
 	bitstring := []byte{0xFF, 0x00, 0xAA}
 
@@ -417,7 +412,6 @@ func TestExtractStatus_RefusesHostileParameters(t *testing.T) {
 	}
 }
 
-// The four widths the specification allows must still read correctly.
 func TestExtractStatus_ReadsEveryAllowedWidth(t *testing.T) {
 	for _, tc := range []struct {
 		bits, idx, want int
@@ -440,9 +434,8 @@ func TestExtractStatus_ReadsEveryAllowedWidth(t *testing.T) {
 	}
 }
 
-// The status list is fetched from a URL in the credential's own status claim
-// and inflated before anything is read out of it. The inflate is capped so a
-// credential cannot choose how much memory the checker allocates.
+// Limit decompression because credentials can point to attacker-controlled status
+// lists.
 func TestZlibDecompress_RefusesABomb(t *testing.T) {
 	var buf bytes.Buffer
 	w := zlib.NewWriter(&buf)
@@ -468,7 +461,6 @@ func TestZlibDecompress_RefusesABomb(t *testing.T) {
 	}
 }
 
-// An ordinary list still has to inflate.
 func TestZlibDecompress_ReadsAnHonestList(t *testing.T) {
 	var buf bytes.Buffer
 	w := zlib.NewWriter(&buf)

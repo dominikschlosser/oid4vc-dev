@@ -32,11 +32,8 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// The demo authorization server authenticates exactly one hardcoded account.
-// It exists so the authorization code flow can be demonstrated end to end
-// against a public demo instance. It is not an account system: there is no
-// registration, no password storage, no session beyond the flow it belongs
-// to, and the credentials are printed on the login page.
+// The demo uses one fixed account with credentials printed on the login page.
+// Authentication lasts only for the issuance flow.
 const (
 	demoAccountUsername  = "alice"
 	demoAccountPassword  = "alice"
@@ -48,11 +45,8 @@ const (
 
 	// requestURIPrefix is the URN form RFC 9126 requires for a PAR request URI.
 	requestURIPrefix = "urn:ietf:params:oauth:request_uri:"
-	// authRequestTTL bounds a pushed authorization request. Short by design,
-	// the wallet redeems it immediately.
-	authRequestTTL = 5 * time.Minute
-	// clockSkew is the tolerance applied to nbf and to a DPoP proof's iat.
-	clockSkew = time.Minute
+	authRequestTTL   = 5 * time.Minute
+	clockSkew        = time.Minute
 	// dpopProofMaxAge bounds how long a DPoP proof stays acceptable. Proofs
 	// are created per request, so this only has to cover the trip.
 	dpopProofMaxAge = 5 * time.Minute
@@ -66,9 +60,7 @@ const (
 	unauthenticatedClientAuth = "none"
 )
 
-// ClientAuthMode decides what this authorization server demands of a wallet at
-// the endpoints that authenticate a client, which here are the pushed
-// authorization request endpoint and the token endpoint.
+// ClientAuthMode controls authentication at the PAR and token endpoints.
 type ClientAuthMode string
 
 const (
@@ -84,7 +76,6 @@ const (
 	ClientAuthOptional ClientAuthMode = "optional"
 )
 
-// ParseClientAuthMode reads the mode from its command line spelling.
 func ParseClientAuthMode(value string) (ClientAuthMode, error) {
 	switch ClientAuthMode(strings.TrimSpace(value)) {
 	case "", ClientAuthRequired:
@@ -102,8 +93,6 @@ func (d *DemoRP) clientAuthMode() ClientAuthMode {
 	return ClientAuthRequired
 }
 
-// authRequestState is one pushed authorization request and the code issued
-// from it once the account has authenticated.
 type authRequestState struct {
 	requestURI    string
 	clientID      string
@@ -127,11 +116,8 @@ type authRequestState struct {
 	expires      time.Time
 }
 
-// authorizationServerMetadata describes this issuer in its authorization
-// server role, satisfying HAIP 1.0: PAR required, PKCE S256, DPoP and
-// attestation-based client authentication. The method list is the only place a
-// wallet reads whether it must authenticate, so it has to match what the
-// endpoints accept.
+// Advertise the authentication methods the endpoints actually accept, alongside HAIP
+// PAR, PKCE S256 and DPoP support.
 func (d *DemoRP) authorizationServerMetadata() map[string]any {
 	issuer := d.issuerID()
 	authMethods := []string{attestationClientAuth, attestationDPoPClientAuth}
@@ -160,11 +146,8 @@ func (d *DemoRP) authorizationServerMetadata() map[string]any {
 		// algorithms it may use.
 		"client_attestation_signing_alg_values_supported":     []string{"ES256"},
 		"client_attestation_pop_signing_alg_values_supported": []string{"ES256"},
-		// The proof of possession methods registry of the same document, whose
-		// values name how the client proves the attested key: a dedicated PoP
-		// JWT, or the DPoP proof standing in for one. Under optional client
-		// authentication the registry's none entry says what that mode means:
-		// the client MAY omit the attestation.
+		// Advertise dedicated PoP JWT and combined DPoP methods. In optional mode,
+		// none means the client may omit the attestation.
 		"client_attestation_pop_methods_supported": popMethods,
 	}
 	// Published only at the feature level that has it. The endpoint's presence
@@ -188,10 +171,7 @@ func (d *DemoRP) AuthorizationServerMetadataHandler() http.HandlerFunc {
 	}
 }
 
-// handleAuthorize resolves a pushed authorization request and asks the user to
-// authenticate. The offer is handed to the wallet unauthenticated, and the user
-// proves who they are during redemption, between the pushed authorization
-// request and the token exchange.
+// The user signs in while redeeming the offer, between PAR and the token exchange.
 func (d *DemoRP) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	request, err := d.lookupAuthRequest(r.URL.Query().Get("request_uri"))
 	if err != nil {
@@ -421,9 +401,8 @@ func (d *DemoRP) handleAuthorizationCodeToken(w http.ResponseWriter, r *http.Req
 		clientAuth:   &clientAuth,
 		expires:      time.Now().Add(entryTTL),
 	}
-	// This is a second state for the same offer, so what the offer was created
-	// with has to travel with it: the issuer_state is the only thing tying the
-	// two together.
+	// Copy offer settings into the token state. issuer_state is the link between those
+	// records.
 	if src := d.offerByIssuerState(granted.issuerState); src != nil {
 		offer.withStatus = src.withStatus
 		offer.deferred = src.deferred
@@ -434,9 +413,8 @@ func (d *DemoRP) handleAuthorizationCodeToken(w http.ResponseWriter, r *http.Req
 	d.tokens[offer.accessToken] = offer
 	d.mu.Unlock()
 
-	// No c_nonce. OpenID4VCI 1.0 §6.2 lists what a token response may add to
-	// RFC 6749 and defines no such parameter, and this issuer advertises a Nonce
-	// Endpoint (§7), which is where the challenge comes from.
+	// OpenID4VCI 1.0 §6.2 defines no c_nonce in the token response. The wallet gets it
+	// from the Nonce Endpoint (§7).
 	writeJSON(w, http.StatusOK, map[string]any{
 		"access_token": offer.accessToken,
 		"token_type":   "DPoP",
@@ -444,9 +422,8 @@ func (d *DemoRP) handleAuthorizationCodeToken(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// offerByIssuerState returns the offer an issuer_state belongs to, so the
-// settings it was created with (a status reference, deferred issuance) travel
-// to the token state the redemption builds. Nil when none matches.
+// Use issuer_state to carry the offer's status and deferred issuance settings into
+// token state.
 func (d *DemoRP) offerByIssuerState(issuerState string) *offerState {
 	if issuerState == "" {
 		return nil
@@ -508,10 +485,8 @@ func oauthError(code, description string) map[string]string {
 	return map[string]string{"error": code, "error_description": description}
 }
 
-// verifyDPoPProof checks the DPoP proof on a request (RFC 9449) and returns
-// the JWK thumbprint the resulting token is bound to. Minimal but real: the
-// signature must verify with the embedded key, and the method and URL must
-// match the request being made.
+// Verify the DPoP signature, HTTP method and URL under RFC 9449. Return the proof key
+// thumbprint for token binding.
 func (d *DemoRP) verifyDPoPProof(r *http.Request, expectedURL, accessToken string) (string, error) {
 	raw := strings.TrimSpace(r.Header.Get("DPoP"))
 	if raw == "" {
@@ -564,9 +539,8 @@ func (d *DemoRP) verifyDPoPProof(r *http.Request, expectedURL, accessToken strin
 	return mock.KeyIDForPublicKey(key), nil
 }
 
-// clientAuthentication is what one request proved about the wallet that made
-// it: which method authenticated it, who attested it, and whether that
-// attester is one this issuer was given.
+// Records the client authentication method, attester and whether that attester chains
+// to a configured CA.
 type clientAuthentication struct {
 	// method is the token endpoint authentication method that was used, one of
 	// attest_jwt_client_auth, attest_jwt_client_auth_dpop and none.
@@ -584,18 +558,13 @@ type clientAuthentication struct {
 	trusted bool
 }
 
-// clientAuthError is a client authentication failure and the OAuth error code
-// it is reported with.
 type clientAuthError struct {
 	code        string
 	description string
 }
 
-// authenticateTokenClient authenticates one token request and writes the
-// refusal where that fails. The bool says whether to go on. The untrusted
-// attester is logged here, once per token exchange rather than at every
-// authenticated endpoint, because it is the exchange that produces a
-// credential.
+// Log an unknown attester once per token exchange because this is the step that
+// produces a credential.
 func (d *DemoRP) authenticateTokenClient(w http.ResponseWriter, r *http.Request, clientID, jkt string) (clientAuthentication, bool) {
 	clientAuth, authErr := d.authenticateClient(r, clientID, jkt)
 	if authErr != nil {
@@ -622,23 +591,14 @@ func attestationFailed(format string, args ...any) *clientAuthError {
 	return &clientAuthError{code: "invalid_client_attestation", description: fmt.Sprintf(format, args...)}
 }
 
-// authenticateClient runs attestation-based client authentication
-// (draft-ietf-oauth-attestation-based-client-auth-10): the
-// OAuth-Client-Attestation JWT names the client and its key, and possession is
-// proven either by a dedicated PoP JWT or by the DPoP proof already on the
-// request (attest_jwt_client_auth_dpop). jkt is that proof key's thumbprint.
+// Authenticate with a Client Attestation and either a dedicated PoP JWT or the
+// request's DPoP proof (draft-ietf-oauth-attestation-based-client-auth-10). jkt is the
+// DPoP key thumbprint.
 //
-// Two deliberate weakenings make this issuer usable by wallets it was not
-// built alongside:
-//
-//   - an attestation that does not chain to a known wallet provider CA is
-//     accepted and marked untrusted rather than refused, since every wallet
-//     but this one signs with an attester nobody handed this issuer. What it
-//     did instead travels with the credential (clientAuthentication.
-//     ticketClaim). A real issuer would pin the CA from the provider's trust
-//     list, which this wallet publishes at /api/trustlists/wallet-provider.
-//   - a client that authenticates with nothing is accepted under
-//     ClientAuthOptional, which HAIP forbids and OpenID4VCI permits.
+// For interoperability tests, this demo accepts attestations from unknown wallet
+// provider CAs and records them as untrusted on the ticket. Its own CA is published at
+// /api/trustlists/wallet-provider. ClientAuthOptional also accepts requests without
+// authentication, a deviation from HAIP allowed by OpenID4VCI.
 func (d *DemoRP) authenticateClient(r *http.Request, clientID, jkt string) (clientAuthentication, *clientAuthError) {
 	// The validation checklist starts with "precisely one" of each header
 	// field, which keeps a second attestation from riding along unverified.
@@ -709,9 +669,8 @@ func (d *DemoRP) authenticateClient(r *http.Request, clientID, jkt string) (clie
 	if err != nil {
 		return clientAuthentication{}, attestationFailed("parsing client attestation cnf.jwk: %v", err)
 	}
-	// Tolerant acceptance across the supported drafts: the configured
-	// OpenID4VCI version pins one ABCA draft, and a shape another supported
-	// draft defines is taken with a note in the log.
+	// Accept a message valid under another supported ABCA draft and log the difference
+	// from the configured draft.
 	draft := d.abcaDraft()
 	if _, hasISS := attestation.payload["iss"]; draft <= 7 && !hasISS {
 		log.Printf("[Demo issuer] client attestation omits iss, which draft-07 (the configured OpenID4VCI 1.0 pin) requires. Accepted, since draft-08 and draft-10 define the shape without it")
@@ -777,9 +736,8 @@ func (d *DemoRP) authenticateClient(r *http.Request, clientID, jkt string) (clie
 	return authenticated, nil
 }
 
-// abcaDraft is the attestation-based client authentication draft the
-// configured OpenID4VCI version pins, which is the shape this server holds
-// attestations to before the tolerant cross-draft acceptance applies.
+// Use the draft pinned by the configured OpenID4VCI version as the first validation
+// target, then check other supported drafts.
 func (d *DemoRP) abcaDraft() int {
 	if d.wallet == nil {
 		return wallet.VCIVersion10.ABCADraft()
@@ -787,8 +745,6 @@ func (d *DemoRP) abcaDraft() int {
 	return d.wallet.VCIFeatureVersion().ABCADraft()
 }
 
-// attestationSigner is the certificate a wallet attestation was signed with,
-// and whether it belongs to a wallet provider this issuer trusts.
 type attestationSigner struct {
 	key     *ecdsa.PublicKey
 	leaf    *x509.Certificate
@@ -808,10 +764,8 @@ func (s attestationSigner) name(payload map[string]any) string {
 	return "unnamed attester"
 }
 
-// attestationSigner reads the signing key of a wallet attestation out of its
-// x5c header and reports whether it chains to the wallet provider CA. The
-// draft leaves key resolution to the deployment. This one takes the leaf the
-// attestation carries and treats the chain as the trust question.
+// The draft leaves key resolution to the deployment. Read the signing key from the x5c
+// leaf and check the chain against the wallet provider CA.
 func (d *DemoRP) attestationSigner(header map[string]any) (attestationSigner, error) {
 	rawChain, _ := header["x5c"].([]any)
 	if len(rawChain) == 0 {
@@ -837,10 +791,8 @@ func (d *DemoRP) attestationSigner(header map[string]any) (attestationSigner, er
 	return attestationSigner{key: key, leaf: certs[0], trusted: d.chainsToWalletProviderCA(certs)}, nil
 }
 
-// chainsToWalletProviderCA reports whether an attestation's certificate chain
-// reaches the one wallet provider CA this issuer was given. The attestation
-// carries the leaf only, so the anchor comes from the wallet this issuer is
-// mounted on, which is also what its trust lists publish.
+// The attestation carries only its leaf. Use the wallet provider CA from the local
+// wallet as the trust anchor.
 func (d *DemoRP) chainsToWalletProviderCA(certs []*x509.Certificate) bool {
 	anchor := d.wallet.TrustAnchorCertificate()
 	if anchor == nil || len(certs) == 0 {
@@ -882,8 +834,8 @@ func checkPoPFreshness(payload map[string]any) error {
 	return nil
 }
 
-// ticketClaim describes this authentication in the issued ticket, so a
-// credential collected without a trusted wallet attestation says so.
+// Record authentication on the ticket so an untrusted wallet attestation remains
+// visible.
 func (c *clientAuthentication) ticketClaim() string {
 	switch {
 	case c == nil || c.method == "" || c.method == unauthenticatedClientAuth:
@@ -895,7 +847,6 @@ func (c *clientAuthentication) ticketClaim() string {
 	}
 }
 
-// checkJWTValidity requires exp and applies nbf when present.
 func checkJWTValidity(payload map[string]any) error {
 	now := time.Now()
 	// exp is required: without it a leaked attestation would be usable forever.
@@ -913,8 +864,6 @@ func checkJWTValidity(payload map[string]any) error {
 }
 
 type loginPageData struct {
-	// Action is the form target relative to /issuer, always "authorize": the
-	// login exists only as a step of the authorization code flow.
 	Action      string
 	RequestURI  string
 	Title       string
@@ -1010,11 +959,9 @@ func renderLoginPage(w http.ResponseWriter, data loginPageData) {
 	_ = loginPageTemplate.Execute(w, data)
 }
 
-// loginContentSecurityPolicy widens form-action to the client's redirect_uri.
-// The authorization endpoint must redirect the browser there to hand back the
-// code, and a browser enforces form-action across that redirect, so the global
-// 'self' policy would block a cross-origin or custom-scheme redirect_uri. Every
-// other restriction is kept.
+// Allow the client's redirect_uri in form-action. Browsers apply this policy across
+// the post-login redirect, so 'self' alone would block external origins and custom
+// schemes.
 func loginContentSecurityPolicy(redirectURI string) string {
 	formAction := "'self'"
 	if src := redirectFormActionSource(redirectURI); src != "" {

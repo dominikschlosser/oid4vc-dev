@@ -31,7 +31,6 @@ import (
 // it, so List can hide such files.
 const tempPrefix = ".tmp-"
 
-// fileStore keeps every key as a file under root.
 type fileStore struct {
 	root string
 }
@@ -95,8 +94,6 @@ func (s *fileStore) Write(key string, data []byte, perm fs.FileMode) (Stamp, err
 	return stamp, nil
 }
 
-// createTemp opens a new file named tempPrefix + base + a random suffix in
-// dir, created exclusively with perm.
 func createTemp(dir, base string, perm fs.FileMode) (*os.File, error) {
 	for {
 		var suffix [4]byte
@@ -186,8 +183,6 @@ func (s *fileStore) Stamps(prefix string) (map[string]Stamp, error) {
 	return stamps, nil
 }
 
-// walk calls visit for every blob under prefix. A missing root or prefix
-// visits nothing.
 func (s *fileStore) walk(prefix string, visit func(key string, info fs.FileInfo, root fs.FS) error) error {
 	prefix, err := cleanPrefix(prefix)
 	if err != nil {

@@ -39,7 +39,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/web"
 )
 
-// walletServeOptions is what the wallet serve flags collect.
 type walletServeOptions struct {
 	Port                    int
 	AutoAccept              bool
@@ -76,9 +75,8 @@ func walletServeCmd() *cobra.Command {
 	return cmd
 }
 
-// walletServeCmdWithOptions builds the command and hands back the options its
-// flags write into, so a test can drive the same flag parsing and profile
-// resolution the command does.
+// Return the options so tests exercise the same flag parsing and demo defaults as the
+// command.
 func walletServeCmdWithOptions() (*cobra.Command, *walletServeOptions) {
 	var opts walletServeOptions
 
@@ -133,8 +131,6 @@ so the wallet automatically receives incoming protocol requests.`,
 	return cmd, &opts
 }
 
-// validateServeTLSBaseURL requires --serve-tls to name an https base URL
-// with an explicit port for the listener to bind.
 func validateServeTLSBaseURL(baseURL string) error {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || parsed.Host == "" {
@@ -149,8 +145,6 @@ func validateServeTLSBaseURL(baseURL string) error {
 	return nil
 }
 
-// loadVerifierTrustAnchors reads the CA certificates the demo verifier should
-// accept issuer chains under, one or more PEM certificates per file.
 func loadVerifierTrustAnchors(paths []string) ([]*x509.Certificate, error) {
 	var anchors []*x509.Certificate
 	for _, path := range paths {
@@ -183,9 +177,7 @@ func loadVerifierTrustAnchors(paths []string) ([]*x509.Certificate, error) {
 	return anchors, nil
 }
 
-// applyDemoProfileDefaults applies what --demo implies (--pid as the reset
-// baseline, --mode debug, --haip, --vci-version 1.1), each only where the
-// operator set nothing explicitly.
+// Apply demo defaults only where the user has not supplied an explicit flag.
 func applyDemoProfileDefaults(cmd *cobra.Command, opts *walletServeOptions, w *wallet.Wallet) {
 	if !cmd.Flags().Changed("pid") {
 		opts.PID = true
@@ -253,7 +245,6 @@ func servingConfigWarnings(w *wallet.Wallet, port int, docker bool) []string {
 	return warnings
 }
 
-// urlHostPort returns the host:port part of a URL, or "" when unparsable.
 func urlHostPort(raw string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Host == "" {
@@ -276,7 +267,6 @@ func isLocalTestHostPort(hostport string) bool {
 	return false
 }
 
-// runningInDocker reports whether this process runs inside a container.
 func runningInDocker() bool {
 	_, err := os.Stat("/.dockerenv")
 	return err == nil
@@ -297,9 +287,8 @@ func serializeWalletServeArgs(cmd *cobra.Command) ([]string, error) {
 		}
 		switch flag.Value.Type() {
 		case "bool":
-			// --name=value, not a bare --name: an explicitly-set false (e.g.
-			// --demo --haip=false) must reach the child as false, not be
-			// silently flipped back to true.
+			// Use --name=value to preserve explicit false values such as --haip=false
+			// when starting the child.
 			args = append(args, "--"+flag.Name+"="+flag.Value.String())
 		case "stringSlice", "stringArray":
 			values, getErr := flags.GetStringSlice(flag.Name)
@@ -350,7 +339,6 @@ func parseDemoReset(value string) (wallet.DemoOptions, error) {
 	return wallet.DemoOptions{ResetInterval: interval}, nil
 }
 
-// demoResetDescription renders the configured schedule for the startup banner.
 func demoResetDescription(opts wallet.DemoOptions) string {
 	switch {
 	case opts.ResetDaily != nil:
@@ -362,13 +350,10 @@ func demoResetDescription(opts wallet.DemoOptions) string {
 	}
 }
 
-// runWalletServe starts the wallet server.
 func runWalletServe(cmd *cobra.Command, opts *walletServeOptions) error {
 	if opts.Detached {
 		return spawnDetachedServe(cmd, opts.Port, opts.Register, opts.NoRegister)
 	}
-	// Parsed before anything is loaded or written, so a bad value fails
-	// before the server starts.
 	clientAuthMode, err := demorp.ParseClientAuthMode(opts.DemoIssuerClientAuth)
 	if err != nil {
 		return fmt.Errorf("--demo-issuer-client-auth: %w", err)
@@ -490,11 +475,9 @@ func runWalletServe(cmd *cobra.Command, opts *walletServeOptions) error {
 		}
 	}
 
-	// A wallet that serves a UI can redeem an authorization code offer:
-	// it identifies itself with its own origin and takes the code at
-	// its /callback endpoint. Without both values the flow is refused
-	// before the pushed authorization request, so an issuer never gets
-	// to see the wallet attestation. Explicit flags still win.
+	// Default the client ID and callback URI to this wallet's origin so authorization
+	// code offers work without extra flags. Both are required before PAR, where the
+	// wallet first sends its attestation.
 	{
 		base := strings.TrimRight(strings.TrimSpace(w.BaseURL), "/")
 		if base == "" {
@@ -514,11 +497,9 @@ func runWalletServe(cmd *cobra.Command, opts *walletServeOptions) error {
 	}
 
 	if opts.Demo {
-		// Installed here rather than with the other demo settings: it
-		// needs the resolved base and issuer URLs, so the wallet stays
-		// able to reach its own demo issuer and verifier (a
-		// request_uri or response_uri on its own origin) while every
-		// other internal address remains blocked.
+		// Install the address exceptions after resolving the serving URLs. The demo
+		// must reach its own issuer and verifier while other private addresses stay
+		// blocked.
 		format.SetFetchPolicy(format.AllowOwnOrigins(
 			format.BlockPrivateAddresses,
 			w.BaseURL,
@@ -607,7 +588,6 @@ func runWalletServe(cmd *cobra.Command, opts *walletServeOptions) error {
 		fmt.Printf("  Mode:        interactive (consent UI)\n")
 	}
 	fmt.Printf("  Transcript:  %s\n", w.SessionTranscript)
-	// Only worth a line when it is not the published version.
 	if w.VCIFeatureVersion() == wallet.VCIVersion11 {
 		fmt.Printf("  OID4VCI:     1.1 draft features used where an issuer offers them\n")
 	}
@@ -692,8 +672,6 @@ func runWalletServe(cmd *cobra.Command, opts *walletServeOptions) error {
 			return cred.Raw, true
 		},
 	}))
-	// Demo issuer and verifier: complete OID4VCI / OID4VP
-	// counterparties for out-of-the-box protocol flows.
 	demoRP := demorp.New(w, func() string {
 		if base := strings.TrimSpace(w.BaseURL); base != "" {
 			return base
@@ -702,9 +680,7 @@ func runWalletServe(cmd *cobra.Command, opts *walletServeOptions) error {
 	})
 	demoRP.SetClientAuthMode(clientAuthMode)
 	demoRP.SetVerifierTrustAnchors(verifierTrustAnchors)
-	// Issuing with a status list reserves an index on the wallet's own
-	// list, and every wallet API request reloads the store, so the
-	// reservation has to reach disk before the next one.
+	// Persist the reserved status index before another request reloads wallet state.
 	demoRP.SetOnWalletChange(func() {
 		if err := store.Save(w); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: saving wallet: %v\n", err)

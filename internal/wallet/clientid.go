@@ -81,12 +81,9 @@ func VerifyRequestObjectSignature(clientID string, reqObj *oid4vc.RequestObjectJ
 	return ""
 }
 
-// clientAuthState reports how a verifier's presentation request authenticated
-// itself, for the consent dialog's "who is asking" block. signed is true only
-// when a request object was present and its signature verified against the key
-// material the request itself carries (no trust anchor, no trust list). detail
-// says why the signature could not be verified (or that the request was
-// unsigned) and is empty when signed is true.
+// signed means the request signature verified using its supplied key material. It does
+// not establish trust in the signer. detail explains unsigned or unverified requests
+// to the consent dialog.
 func clientAuthState(params *AuthorizationRequestParams) (signed bool, detail string) {
 	if params == nil || params.RequestObject == nil {
 		return false, "The request was not a signed request object."
@@ -100,9 +97,8 @@ func clientAuthState(params *AuthorizationRequestParams) (signed bool, detail st
 	return true, ""
 }
 
-// clientMetadataName returns the self-asserted verifier name from a request's
-// client_metadata.client_name, empty when there is none. Request-object
-// metadata wins over the outer request metadata. The value is unverified.
+// client_name is self-asserted display text, not a verified identity. Prefer request
+// object metadata over outer parameters.
 func clientMetadataName(params *AuthorizationRequestParams) string {
 	if params == nil {
 		return ""
@@ -118,19 +114,13 @@ func clientMetadataName(params *AuthorizationRequestParams) string {
 	return name
 }
 
-// applyClientAuth records on a presentation consent request how the verifier's
-// request authenticated itself and the verifier's self-asserted name, both
-// read back by MarshalConsentRequest.
 func (r *ConsentRequest) applyClientAuth(params *AuthorizationRequestParams) {
 	r.ClientAuthSigned, r.ClientAuthDetail = clientAuthState(params)
 	r.ClientName = clientMetadataName(params)
 }
 
-// unverifiedSignatureFinding says why a signed Request Object went unverified.
-// Every prefix here resolves its key somewhere this wallet does not go, so the
-// finding names the mechanism ([ADR-0013]).
-//
-// [ADR-0013]: docs/adr/0013-only-the-eudi-stack-is-supported.md
+// Identify unsupported key resolution when a signed request remains unverified. See
+// docs/adr/0013-only-the-eudi-stack-is-supported.md.
 func unverifiedSignatureFinding(clientID string) string {
 	switch {
 	case strings.HasPrefix(clientID, "decentralized_identifier:"):
@@ -152,10 +142,8 @@ func unverifiedSignatureFinding(clientID string) string {
 	}
 }
 
-// clientIDVerifiesViaX5C reports whether the client_id prefix carries the
-// Request Object signing certificate in the JWS x5c header. Only the x509
-// prefixes do. The others resolve the key elsewhere (or leave the request
-// unsigned).
+// Only x509 prefixes identify a signing certificate in x5c. Other prefixes resolve
+// keys elsewhere or use unsigned requests.
 func clientIDVerifiesViaX5C(clientID string) bool {
 	return strings.HasPrefix(clientID, "x509_san_dns:") || strings.HasPrefix(clientID, "x509_hash:")
 }
@@ -226,7 +214,6 @@ func verifyX509SAN(clientID, prefix, scheme string, reqObj *oid4vc.RequestObject
 	return ""
 }
 
-// verifyX509Hash checks that SHA-256(leaf cert DER) matches the hash in client_id.
 func verifyX509Hash(clientID string, reqObj *oid4vc.RequestObjectJWT) string {
 	expectedHash := strings.TrimPrefix(clientID, "x509_hash:")
 
@@ -248,8 +235,6 @@ func verifyX509Hash(clientID string, reqObj *oid4vc.RequestObjectJWT) string {
 	return ""
 }
 
-// verifyRedirectURI checks that the redirect_uri: prefix value matches the
-// response URI and that no signed request object is used.
 func verifyRedirectURI(clientID string, reqObj *oid4vc.RequestObjectJWT, responseURI string) string {
 	expected := strings.TrimPrefix(clientID, "redirect_uri:")
 
@@ -320,8 +305,6 @@ func verifyDecentralizedIdentifier(clientID string, reqObj *oid4vc.RequestObject
 	return ""
 }
 
-// extractLeafCert extracts and parses the leaf certificate from the request
-// object's x5c header. Returns a warning if extraction fails.
 func extractLeafCert(reqObj *oid4vc.RequestObjectJWT) (*x509.Certificate, string) {
 	if reqObj == nil || reqObj.Header == nil {
 		return nil, "OID4VP 1.0 §5.9.3: client_id uses an x509 prefix but the request object has no x5c header"
@@ -445,7 +428,6 @@ func verifyAlgMatchesCert(reqObj *oid4vc.RequestObjectJWT) string {
 
 	cert, warning := extractLeafCert(reqObj)
 	if warning != "" {
-		// No x5c. Nothing to cross-check.
 		return ""
 	}
 

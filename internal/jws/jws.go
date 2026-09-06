@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package jws signs JSON Web Signatures with ES256.
-//
-// Everything this toolkit signs (credentials, presentations, trust lists,
-// status lists, issuer metadata, client attestations) ends up here, so the
-// signature encoding cannot drift between them: wrong here means a credential
-// some verifiers accept and others reject.
+// Package jws signs credentials, presentations, trust lists, status lists, metadata
+// and attestations with one ES256 implementation. This keeps signature encoding
+// consistent.
 package jws
 
 import (

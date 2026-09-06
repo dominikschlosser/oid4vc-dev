@@ -103,9 +103,7 @@ if __name__ == "__main__":
 
 
 class PurgeIssuedCredentialsTests(unittest.TestCase):
-    """One wallet serves every plan, so credentials an issuance plan deposits
-    are still present when a presentation plan runs. Only the baseline the
-    wallet was started with chains to the CA the plans trust."""
+    """Issuance credentials persist between plans but do not chain to the wallet CA trusted by presentation tests."""
 
     def _run(self, listed, baseline):
         deleted = []

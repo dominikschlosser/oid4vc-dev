@@ -26,12 +26,10 @@ type JSONWriter struct {
 	allTraffic bool
 }
 
-// NewJSONWriter creates a writer that emits NDJSON to stdout.
 func NewJSONWriter(allTraffic bool) *JSONWriter {
 	return NewJSONWriterTo(os.Stdout, allTraffic)
 }
 
-// NewJSONWriterTo creates a writer that emits NDJSON to the given writer.
 func NewJSONWriterTo(w io.Writer, allTraffic bool) *JSONWriter {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)

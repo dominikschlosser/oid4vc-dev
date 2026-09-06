@@ -19,8 +19,6 @@ import (
 	"testing"
 )
 
-// docWithDigest builds the smallest document VerifyValueDigests will look at:
-// one element in one namespace, against whatever digest the MSO claims for it.
 func docWithDigest(raw []byte, signed []byte) *Document {
 	return &Document{
 		NameSpaces: map[string][]IssuerSignedItem{
@@ -35,9 +33,8 @@ func docWithDigest(raw []byte, signed []byte) *Document {
 	}
 }
 
-// The digest comparison is what stops a holder changing an element value the
-// issuer never signed, so it has to reject every way the two can differ, not
-// just an equal-length mismatch.
+// Reject every digest mismatch, including different lengths, so altered claim values
+// cannot pass.
 func TestVerifyValueDigests(t *testing.T) {
 	raw := []byte("the encoded item")
 	correct := sha256.Sum256(raw)

@@ -69,11 +69,8 @@ func walletGeneratePIDCmd() *cobra.Command {
 				w.IssuerKey = issuerKey
 			}
 
-			// Serving URLs belong to `wallet serve`. Issuance only derives
-			// them when nothing is persisted yet (out-of-the-box use) or when
-			// the user explicitly asks for different ones. Overwriting them
-			// here would bake URLs into the new credentials that a running or
-			// later server does not actually serve.
+			// Reuse persisted serving URLs unless the user overrides them. Otherwise
+			// credentials could embed URLs that the wallet server does not serve.
 			walletPort := defaultWalletCommandPort()
 			explicitURLs := cmd.Flags().Changed("base-url") || cmd.Flags().Changed("docker")
 			effectiveBaseURL := ""
@@ -148,9 +145,6 @@ func walletGeneratePIDCmd() *cobra.Command {
 	return cmd
 }
 
-// printGeneratePIDDeprecation warns that generate-pid is deprecated and
-// prints the equivalent template-based issue commands, carrying over the
-// claim and VCT flags the user passed.
 func printGeneratePIDDeprecation(cmd *cobra.Command, claimsFlag, vctFlag string) {
 	sdTemplate, mdocTemplate, known := credtemplate.PIDTemplateNames(vctFlag)
 	sdEquiv := binaryName() + " issue sdjwt --wallet --template " + sdTemplate
@@ -159,8 +153,8 @@ func printGeneratePIDDeprecation(cmd *cobra.Command, claimsFlag, vctFlag string)
 		sdEquiv += " --claims '" + claimsFlag + "'"
 		mdocEquiv += " --claims '" + claimsFlag + "'"
 	}
-	// A type with templates of its own carries its vct already, and repeating
-	// it would suggest the flag is what picks the claim set.
+	// Templates already carry their VCT. Repeating --vct would suggest that the flag
+	// selects the claim set.
 	if cmd.Flags().Changed("vct") && !known {
 		sdEquiv += " --vct " + vctFlag
 	}

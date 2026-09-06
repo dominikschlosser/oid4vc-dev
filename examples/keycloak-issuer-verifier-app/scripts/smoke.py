@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
-"""Headless end-to-end check of the subject-binding login.
+"""Check login with a membership credential.
 
-First login: the wallet holds the PID alone, which identifies nobody. The user
-signs in with a password, the login is bound to that user, and a credential
-offer issues the membership credential carrying an opaque subject. Second login:
-the wallet presents the PID and the membership credential, and the subject in the
-membership credential signs the user in without a password.
-"""
+The first login combines a PID presentation with password sign-in and issues a membership credential containing an opaque subject. The second login presents both credentials and uses that subject to identify the account without a password."""
 import base64
 import hashlib
 import html.parser

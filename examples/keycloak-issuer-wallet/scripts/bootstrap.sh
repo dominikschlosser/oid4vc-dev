@@ -36,10 +36,9 @@ wait_for_endpoint "${issuer_metadata_url}"
 
 jq -er '.credential_issuer' < <(curl -fsS "${issuer_metadata_url}") >/dev/null
 
-# Keycloak 26.7 issues an offer only for a credential the user holds
-# (OID4VCUtil.hasVerifiableCredential checks a stored user record), so the user
-# is assigned the credential here. The master realm refuses admin auth over
-# plain HTTP, so the assignment runs through kcadm inside the container.
+# Keycloak 26.7 creates offers only for credentials assigned to the user. Run the
+# assignment through kcadm inside the container because the master realm rejects admin
+# authentication over plain HTTP.
 KEYCLOAK_ADMIN="${KEYCLOAK_ADMIN:-admin}"
 KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
 KEYCLOAK_SERVICE="${KEYCLOAK_SERVICE:-keycloak}"

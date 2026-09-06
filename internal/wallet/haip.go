@@ -115,14 +115,10 @@ func haipEncryptionKeyViolations(reqObj *oid4vc.RequestObjectJWT, clientMetadata
 	return nil
 }
 
-// isDCAPIResponseMode reports whether a response mode belongs to the Digital
-// Credentials API.
 func isDCAPIResponseMode(mode string) bool {
 	return mode == "dc_api" || mode == "dc_api.jwt"
 }
 
-// haipSignedRequestViolations checks the certificates a signed request
-// carries.
 func haipSignedRequestViolations(reqObj *oid4vc.RequestObjectJWT) []string {
 	if reqObj == nil || reqObj.Header == nil {
 		return nil
@@ -176,10 +172,7 @@ func haipCredentialFormatViolations(query map[string]any) []string {
 	return violations
 }
 
-// haipClientMetadataViolations checks what §5 requires a Verifier to publish
-// about response encryption. A Verifier listing neither of the content
-// encryption algorithms the profile names leaves the wallet nothing to
-// encrypt with.
+// Report missing usable response encryption algorithms under HAIP 1.0 §5.
 func haipClientMetadataViolations(metadata map[string]any) []string {
 	if metadata == nil {
 		return nil
@@ -190,11 +183,9 @@ func haipClientMetadataViolations(metadata map[string]any) []string {
 	return nil
 }
 
-// HAIPAdvisories reports what a Verifier gets wrong against HAIP 1.0 without
-// affecting the exchange. §5 has Verifiers list both A128GCM and A256GCM,
-// while a wallet needs only one of them, so a Verifier listing one is
-// reported in every mode and the response is encrypted with the algorithm it
-// names.
+// HAIPAdvisories reports encryption metadata that omits A128GCM or A256GCM, both required
+// by HAIP 1.0 §5. If only one is advertised, warn in every mode and use it to encrypt the
+// response.
 func HAIPAdvisories(params *AuthorizationRequestParams) []string {
 	if params == nil || params.ClientMetadata == nil || isInteractiveAuthorizationResponseMode(params.ResponseMode) {
 		return nil
@@ -205,8 +196,6 @@ func HAIPAdvisories(params *AuthorizationRequestParams) []string {
 	return nil
 }
 
-// haipContentEncryptionAlgorithms returns the content encryption algorithms
-// the Verifier lists in encrypted_response_enc_values_supported.
 func haipContentEncryptionAlgorithms(metadata map[string]any) map[string]bool {
 	values, _ := metadata["encrypted_response_enc_values_supported"].([]any)
 	listed := make(map[string]bool, len(values))
@@ -350,7 +339,6 @@ func secureIssuerOrigin(issuer string) bool {
 	return err == nil && addr.IsLoopback()
 }
 
-// metadataListContains reports whether a metadata array holds the value.
 func metadataListContains(meta map[string]any, key, want string) bool {
 	values, ok := meta[key].([]any)
 	if !ok {

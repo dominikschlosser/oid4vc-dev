@@ -15,10 +15,8 @@ PORT=${PORT:-$(pick_port_pair)}
 RUN_DIR=${OIDF_RUN_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/oidf-demorp-conformance.XXXXXX")}
 WALLET_DIR=${OIDF_WALLET_DIR:-"$RUN_DIR/wallet"}
 WALLET_URL=${OIDF_WALLET_URL:-"http://127.0.0.1:${PORT}"}
-# The demo issuer and verifier live on the wallet's https base URL: the suite
-# requires https for the verifier's request_uri and response_uri, and the HAIP
-# issuer metadata checks require an https credential issuer. --serve-tls has
-# the wallet bind this origin itself with its own certificate.
+# The suite requires HTTPS for issuer metadata and verifier request and response URLs.
+# --serve-tls lets the local wallet serve that origin.
 DEMO_BASE_URL=${OIDF_DEMO_BASE_URL:-"https://localhost:$((PORT + 1))"}
 WALLET_CA_CERT=${OIDF_WALLET_CA_CERT:-"$RUN_DIR/wallet-ca-cert.pem"}
 CONFORMANCE_MODE=${CONFORMANCE_MODE:-local}
@@ -33,9 +31,8 @@ case "$CONFORMANCE_MODE" in
     ;;
   hosted)
     CONFORMANCE_SERVER=${CONFORMANCE_SERVER:-https://demo.certification.openid.net/}
-    # Certification is sought for the wallet alone. The issuer and verifier
-    # plans stay off the production certification service, so nothing there
-    # ever mixes into a wallet certification package.
+    # Only wallet plans are submitted for certification. Run demo issuer and verifier
+    # plans on the local or demo suite.
     case "$CONFORMANCE_SERVER" in
       *www.certification.openid.net*)
         echo "error: the issuer and verifier plans are not run on the production certification service (only the wallet is certified). Use the demo service or the local suite." >&2
@@ -77,11 +74,8 @@ if [ "$CONFORMANCE_MODE" = "local" ]; then
   export CONFORMANCE_DEV_MODE DISABLE_SSL_VERIFY
 fi
 
-# The suite signs the credentials it presents to the demo verifier with its
-# own CAs: the vp-signing CA from certs-keys for SD-JWT VCs, and a built-in
-# mdoc IACA root for mdocs. The demo verifier is given both as extra trust
-# anchors. The IACA root is published at /mdoc-iaca-root.pem, with the source
-# constant as the fallback for a server build where that endpoint errors.
+# Trust the suite's SD-JWT signing CA and mdoc IACA root. Fetch the latter from
+# /mdoc-iaca-root.pem, with the source constant as a fallback for older server builds.
 SUITE_VP_SIGNING_CA="$RUN_DIR/suite-vp-signing-ca.pem"
 SUITE_MDOC_IACA_ROOT="$RUN_DIR/suite-mdoc-iaca-root.pem"
 cp "$SUITE_DIR/scripts/certs-keys/vp-signing-ca.crt" "$SUITE_VP_SIGNING_CA"
@@ -146,8 +140,7 @@ until curl -fsS "$WALLET_URL/api/credentials" >/dev/null 2>&1 \
   fi
   sleep 1
 done
-# The shared CA is a file only on the file backend. The other backends
-# (EUDI_DEV_STORAGE) hand it out over the API.
+# Only file storage exposes the CA on disk. Other backends export it through the API.
 if [ ! -f "$WALLET_CA_CERT" ]; then
   if ! curl -fsS "$WALLET_URL/api/certificates/ca" -o "$WALLET_CA_CERT"; then
     echo "error: could not fetch the wallet CA from $WALLET_URL/api/certificates/ca" >&2

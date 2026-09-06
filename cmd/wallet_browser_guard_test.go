@@ -21,11 +21,8 @@ import (
 	"testing"
 )
 
-// browserOpeners is every place this package sends the user's browser
-// somewhere, and why each one is the only arrival at that URL. navigatesHere
-// says why a second arrival is a defect.
-//
-// A new entry belongs here with its own reason.
+// Each browser opener needs a reason to navigate. Some authorization URLs can be used
+// only once, so duplicate navigation breaks the flow. Add new call sites to this list.
 var browserOpeners = map[string]string{
 	"cmd/wallet_present.go:openBrowser(addr)": "enlists a browser for the local consent UI, which nothing else is showing",
 	"cmd/wallet_present.go:openBrowser(redirectURI)": "guarded by navigatesHere through followVerifierRedirect: " +
@@ -37,9 +34,8 @@ var browserOpeners = map[string]string{
 	"cmd/wallet_serve.go:openBrowser(target)": "guarded by AttachedUIs: a tab already watching is told over its event stream",
 }
 
-// TestEveryBrowserOpenIsAccountedFor fails when a call site appears that this
-// list does not know about, so the question gets asked before the second
-// browser arrives somewhere that only survives one.
+// Unlisted browser openers could navigate to a URL twice. Require an explicit entry
+// explaining each call site.
 func TestEveryBrowserOpenIsAccountedFor(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {

@@ -56,7 +56,6 @@ var classLabels = map[TrafficClass]string{
 	ClassOIDCCallback:         "OIDC Callback",
 }
 
-// Label returns a human-readable label for the traffic class.
 func (c TrafficClass) Label() string {
 	if l, ok := classLabels[c]; ok {
 		return l
@@ -64,7 +63,6 @@ func (c TrafficClass) Label() string {
 	return "Unknown"
 }
 
-// TrafficEntry represents a single intercepted HTTP request/response pair.
 type TrafficEntry struct {
 	ID               int64          `json:"id"`
 	Timestamp        time.Time      `json:"timestamp"`

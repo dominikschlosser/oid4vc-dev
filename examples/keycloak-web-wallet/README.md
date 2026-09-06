@@ -1,15 +1,15 @@
 # Keycloak + Web Wallet (Web URLs Instead of Custom Schemes)
 
-This example runs the complete triangle in one Docker compose project: a Keycloak issuer, a Keycloak verifier (`keycloak-extension-oid4vp`), and the `eudi-dev` wallet as a **web wallet**. It drives issuance and verification by invoking the wallet at its own localhost URL instead of a custom URL scheme. The verifier is configured with the wallet's URL and verification is an ordinary browser OIDC login.
+Run a Keycloak issuer, a Keycloak verifier (`keycloak-extension-oid4vp`) and the `eudi-dev` web wallet in one Docker compose project. Issuance and presentation use the wallet's localhost web endpoints. Verification starts through a normal OIDC browser login.
 
-Custom schemes (`openid4vp://`, `openid-credential-offer://`) need OS-level handler registration, which only exists on macOS and never inside containers or CI. The wallet's web endpoints take exactly the same query parameters:
+This wallet implements OS registration for custom URL schemes only on macOS. Containers and other platforms can use web endpoints with the same query parameters:
 
 | Custom scheme | Wallet URL |
 |---------------|------------|
 | `openid4vp://?<params>` or `openid4vp://authorize?<params>` | `http://localhost:9085/authorize?<params>` |
 | `openid-credential-offer://?<params>` | `http://localhost:9085/credential-offer?<params>` |
 
-When a browser navigates to those URLs, the wallet behaves like a same-device wallet app: it presents (or imports) and then redirects the browser onward, either to the verifier's `redirect_uri` or into the wallet UI. See [Invoking the wallet by URL](../../docs/wallet.md#invoking-the-wallet-by-url).
+When a browser navigates to those URLs, the wallet behaves like a same-device wallet app: it presents (or imports) and then redirects the browser onward, either to the verifier's `redirect_uri` or into the wallet UI. See [Invoking the wallet by URL](../../docs/wallet/presenting.md#invoking-the-wallet-by-url).
 
 ## Quick Start
 
@@ -23,7 +23,7 @@ cd examples/keycloak-web-wallet
 - **Issuance**: creates a credential offer in Keycloak and shows a clickable `http://localhost:9085/credential-offer?...` link (plus the equivalent custom-scheme URI). Clicking it delivers the offer to the wallet and lands in the wallet UI, which shows the consent request. Approving imports the membership credential.
 - **Verification**: "Login with wallet" is a plain OIDC login: the browser goes to Keycloak, whose login page links directly to `http://localhost:9085/authorize?...` (the identity provider's `walletScheme` is configured with the wallet URL). The link lands in the wallet UI showing the consent request. Approving presents the PID credential, sends the browser back to Keycloak, and the login completes at the app's `/callback` with the ID-token claims on screen. **Logout** ends the session via OIDC RP-initiated logout against Keycloak's `end_session_endpoint` (`post.logout.redirect.uris` is configured on the `wallet-mock` client), so the next login requires the wallet again.
 
-The wallet runs interactively (no `--auto-accept`): browser navigations redirect straight to the wallet UI with the consent request pending, and the flow continues once it is approved there. The headless demos invoke the wallet via its JSON API instead. Those calls block until the scripts approve the consent through the same consent API the UI's "Approve" button uses.
+Browser flows open the wallet UI and wait for consent. The headless scripts request interactive handling explicitly and approve through the consent API.
 
 To run the headless demos individually:
 
@@ -41,7 +41,7 @@ KEYCLOAK_PORT=18080 WALLET_PORT=18085 APP_PORT=18090 ./start.sh
 
 ## How It Works
 
-Every service joins Keycloak's network namespace (`network_mode: service:keycloak`), so `localhost:<port>` means the same thing in the host browser and inside every container. Keycloak pages, wallet links, `request_uri`, and all redirects use plain localhost. The listen ports equal the published ports, which is why the port overrides must be set together.
+Services share Keycloak's network namespace through `network_mode: service:keycloak`. Published host ports match the ports used inside it, so browser links and container requests can use the same `localhost` URLs. Set port overrides together to preserve this mapping.
 
 Services:
 
@@ -100,7 +100,7 @@ sequenceDiagram
     W-->>B: 303 back to Keycloak (complete-auth)
     B->>KC: complete broker login
     KC-->>B: 302 to app /callback?code=...
-    B->>APP: /callback — code exchange
+    B->>APP: /callback, code exchange
     APP-->>B: logged in as 123456782
 ```
 

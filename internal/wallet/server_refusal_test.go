@@ -16,10 +16,8 @@ package wallet
 
 import "testing"
 
-// What a refused request reports. RFC 6749 §5.2 defines error and
-// error_description, and a server answering outside that format puts the HTTP
-// status phrase in error and its reason in a message, which is the difference
-// between "Bad Request" and a sentence naming what was wrong.
+// RFC 6749 §5.2 uses error and error_description. Other servers may return the reason
+// in message instead.
 func TestOAuthErrorMessage(t *testing.T) {
 	for _, tc := range []struct {
 		name string

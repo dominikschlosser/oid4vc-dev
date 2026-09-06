@@ -72,7 +72,6 @@ func TestGenerateHARWithEntries(t *testing.T) {
 		t.Fatalf("expected 2 HAR entries, got %d", len(harEntries))
 	}
 
-	// Check first entry
 	e1 := harEntries[0]
 	if e1["startedDateTime"] != "2025-06-15T10:30:00.000Z" {
 		t.Errorf("unexpected startedDateTime: %v", e1["startedDateTime"])
@@ -95,7 +94,6 @@ func TestGenerateHARWithEntries(t *testing.T) {
 		t.Errorf("unexpected response body: %v", content["text"])
 	}
 
-	// Check second entry has postData
 	e2 := harEntries[1]
 	req2 := e2["request"].(map[string]any)
 	postData, ok := req2["postData"].(map[string]any)

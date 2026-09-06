@@ -1,8 +1,8 @@
 # Keycloak + Public Demo Wallet (eudi-test.dev)
 
-This example is the [`keycloak-web-wallet`](../keycloak-web-wallet/README.md) scenario pointed at the shared public demo wallet at <https://eudi-test.dev> instead of a local wallet container. Keycloak (issuer and verifier) and the demo UI still run locally in Docker compose. Realm imports, the extension jar, the demo UI, and the helper scripts are reused from the local example, so the integration is configured exactly the same way.
+This example connects local Keycloak issuer and verifier services to the shared wallet at <https://eudi-test.dev>. It reuses the realms, extension, demo UI and scripts from [`keycloak-web-wallet`](../keycloak-web-wallet/README.md).
 
-One structural change follows from using a public wallet: the wallet fetches the verifier's request object and calls the issuer's token endpoint server side, so the local Keycloak must be reachable from the internet. `start.sh` starts an ngrok tunnel for that and Keycloak generates public URLs for requests that arrive through it (`--proxy-headers=xforwarded`).
+The public wallet fetches request objects and calls token endpoints from its server, so Keycloak must be reachable from the internet. `start.sh` opens an ngrok tunnel, and `--proxy-headers=xforwarded` lets Keycloak generate public URLs for tunneled requests.
 
 ## Requirements
 

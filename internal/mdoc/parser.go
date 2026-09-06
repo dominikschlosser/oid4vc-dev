@@ -24,7 +24,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/format"
 )
 
-// Parse decodes an mDOC credential from hex or base64url encoded input.
 func Parse(raw string) (*Document, error) {
 	raw = strings.TrimSpace(raw)
 
@@ -132,15 +131,13 @@ func parseIssuerSigned(data []byte) (*Document, error) {
 		NameSpaces: make(map[string][]IssuerSignedItem),
 	}
 
-	// Parse nameSpaces (the ISO/IEC 18013-5 IssuerNameSpaces CBOR map). A
-	// malformed part is dropped and noted, not fatal, so docType, validity and
-	// signature still read.
+	// Skip malformed namespace parts with a finding so the rest of the document
+	// remains inspectable.
 	if ns, ok := issuerSigned["nameSpaces"]; ok {
 		nsMap, isMap := ns.(map[any]any)
 		if !isMap {
 			doc.Deviations = append(doc.Deviations, "the nameSpaces value is not a CBOR map (ISO/IEC 18013-5), so no claims are read")
 		}
-		// A nil nsMap (the not-a-map case above) ranges zero times.
 		for nsKey, nsVal := range nsMap {
 			namespace := fmt.Sprintf("%v", nsKey)
 			items, ok := nsVal.([]any)
@@ -336,7 +333,6 @@ func parseIssuerAuth(raw any) (*IssuerAuth, error) {
 		}
 	}
 
-	// Signature
 	var sig []byte
 	if err := cborDecMode.Unmarshal(coseArr[3], &sig); err == nil {
 		ia.Signature = sig

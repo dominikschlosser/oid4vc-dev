@@ -1,6 +1,6 @@
 # Validate
 
-Check a credential's signature, expiry, and revocation status. `decode` parses and displays, `validate` checks.
+Check a credential's signature, expiry and revocation status. Use `decode` to inspect its contents.
 
 Signature keys are resolved in this order:
 
@@ -30,7 +30,7 @@ eudi validate credential.txt
 | `--trust-list`    | ETSI trust list JWT (file path or URL), optional   |
 | `--status-list`   | Check revocation via status list when the credential contains a status reference (enabled by default) |
 | `--allow-expired` | Accept expired credentials                         |
-| `--haip` | Also check the credential against HAIP 1.0 and report what it breaks |
+| `--haip` | Also check the credential against HAIP 1.0 and report violations |
 
 ## Revocation status
 

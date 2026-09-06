@@ -40,11 +40,8 @@ func (w *Wallet) EvaluateDCQL(query map[string]any) []CredentialMatch {
 	return matches
 }
 
-// EvaluateDCQLWithOptions additionally returns the alternatives the consent
-// dialog can offer: every matching credential per query id, and per
-// credential set the options the wallet can satisfy. The returned matches
-// are the first candidate of each query the first option of each set needs,
-// so approving without edits presents them unchanged.
+// EvaluateDCQLWithOptions returns matching credentials and satisfiable set options for
+// consent. The first candidate and option are the automatic selection.
 func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatch, *ConsentCredentialOptions) {
 	credentials := w.GetCredentials()
 	credQueries, _ := query["credentials"].([]any)
@@ -71,8 +68,7 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 
 		queryID, _ := cqMap["id"].(string)
 		queryFormat, _ := cqMap["format"].(string)
-		// The log names every matched credential. The skipped ones are only
-		// interesting when nothing matched, and then by reason.
+		// Log skipped credentials by reason only when nothing matches.
 		matched := 0
 		skipped := make(map[string]int)
 
@@ -141,8 +137,8 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 		}
 	}
 
-	// A batch matches once per copy: keep the one unused copy that will be
-	// presented, so a batch reads as one credential from here on.
+	// Keep one unused batch copy so consent and presentation treat the batch as one
+	// credential.
 	matches = w.collapseBatchMatches(matches, credentials)
 
 	sortMatchesNewestFirst(matches, credentials)
@@ -153,13 +149,11 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 
 	sortMatchesTrustedFirst(matches)
 
-	// Applied last so it wins: a credential that answers every requested claim
-	// is the auto-selection over one that leaves some unsatisfiable.
+	// Apply completeness last so a full claim match wins automatic selection.
 	sortMatchesCompleteFirst(matches)
 
-	// Everything that matched, in preference order: the collapse below keeps
-	// the first entry per query, so per query the first candidate is the
-	// wallet's own choice.
+	// Keep candidates in preference order. The first per query becomes the automatic
+	// choice.
 	candidates := append([]CredentialMatch(nil), matches...)
 
 	matches = keepOnePresentationPerQuery(matches)
@@ -192,10 +186,8 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 	return matches, buildConsentCredentialOptions(candidates, credSets, w.PreferredFormat)
 }
 
-// buildConsentCredentialOptions assembles the consent dialog's alternatives
-// from every match the evaluation found. candidates arrive in preference
-// order, so per query the first candidate and per set the first option are
-// the wallet's own choice.
+// Preserve candidate order so the first credential and option remain the automatic
+// selection.
 func buildConsentCredentialOptions(candidates []CredentialMatch, credSets []any, preferredFormat string) *ConsentCredentialOptions {
 	if len(candidates) == 0 {
 		return nil
@@ -240,8 +232,6 @@ func buildConsentCredentialOptions(candidates []CredentialMatch, credSets []any,
 	return options
 }
 
-// satisfiableOption returns the query ids of a credential_sets option when
-// every one of them has a matching credential.
 func satisfiableOption(opt any, byQuery map[string][]CredentialMatch) ([]string, bool) {
 	optArr, ok := opt.([]any)
 	if !ok {
@@ -261,8 +251,6 @@ func satisfiableOption(opt any, byQuery map[string][]CredentialMatch) ([]string,
 	return ids, true
 }
 
-// orderOptionsByPreferredFormat moves options containing the preferred
-// format to the front, keeping the request's order otherwise.
 func orderOptionsByPreferredFormat(options []any, byQuery map[string][]CredentialMatch, preferredFormat string) []any {
 	if preferredFormat == "" {
 		return options
@@ -282,9 +270,7 @@ func orderOptionsByPreferredFormat(options []any, byQuery map[string][]Credentia
 	return ordered
 }
 
-// unmatchedCredentialQueries lists the credential query ids no stored
-// credential answers. A query that is not an object, or carries no id, is
-// reported under its position in the credentials array.
+// Report malformed queries by array position when no query ID is available.
 func unmatchedCredentialQueries(credQueries []any, matches []CredentialMatch) []string {
 	matched := make(map[string]bool, len(matches))
 	for _, m := range matches {
@@ -389,9 +375,8 @@ func isDCQLIdentifier(id string) bool {
 	return true
 }
 
-// sortMatchesNewestFirst orders the candidates for each query id by issuance
-// time, newest first, so a renewed credential supersedes the one it replaced.
-// Credentials stating no issuance time sort last, and ties keep their order.
+// Sort by issuance time so renewed credentials take precedence. Undated credentials
+// come last and ties keep their order.
 func sortMatchesNewestFirst(matches []CredentialMatch, credentials []StoredCredential) {
 	matched := make(map[string]bool, len(matches))
 	for _, m := range matches {
@@ -415,10 +400,8 @@ func sortMatchesNewestFirst(matches []CredentialMatch, credentials []StoredCrede
 	})
 }
 
-// sortMatchesTrustedFirst moves the credentials whose trusted_authorities
-// matched ahead of the ones offered only by debug leniency, within each query
-// id. The newest-first and preferred-format order stays intact within each
-// group.
+// Prefer credentials that match trusted_authorities. Preserve the existing order
+// within matched and debug-only groups.
 func sortMatchesTrustedFirst(matches []CredentialMatch) {
 	sort.SliceStable(matches, func(i, j int) bool {
 		if matches[i].QueryID != matches[j].QueryID {
@@ -428,10 +411,8 @@ func sortMatchesTrustedFirst(matches []CredentialMatch) {
 	})
 }
 
-// sortMatchesCompleteFirst prefers a credential that satisfies every requested
-// claim over one that leaves some unsatisfiable (debug mode offers the latter).
-// It runs last, so a complete match is the wallet's auto-selection when one
-// exists.
+// Prefer complete claim matches over partial matches allowed in debug mode. Apply this
+// priority last.
 func sortMatchesCompleteFirst(matches []CredentialMatch) {
 	sort.SliceStable(matches, func(i, j int) bool {
 		if matches[i].QueryID != matches[j].QueryID {
@@ -466,8 +447,6 @@ func keepOnePresentationPerQuery(matches []CredentialMatch) []CredentialMatch {
 	return kept
 }
 
-// skipReasons lists the reasons credentials were skipped, most frequent
-// first, for the no-match log line.
 func skipReasons(skipped map[string]int) string {
 	reasons := slices.Sorted(maps.Keys(skipped))
 	slices.SortStableFunc(reasons, func(a, b string) int { return skipped[b] - skipped[a] })
@@ -481,8 +460,6 @@ func skipReasons(skipped map[string]int) string {
 	return strings.Join(parts, ", ")
 }
 
-// sortMatchesByPreferredFormat moves the preferred format to the front within
-// each query id, leaving everything else where it was.
 func sortMatchesByPreferredFormat(matches []CredentialMatch, preferred string) {
 	sort.SliceStable(matches, func(i, j int) bool {
 		if matches[i].QueryID != matches[j].QueryID {
@@ -562,7 +539,6 @@ func matchesMeta(cred StoredCredential, cqMap map[string]any) bool {
 	return true
 }
 
-// selectClaims determines which claims to disclose based on the query.
 func (w *Wallet) selectClaims(cred StoredCredential, cqMap map[string]any) claimSelection {
 	claimsQuery, ok := cqMap["claims"].([]any)
 	if !ok || len(claimsQuery) == 0 {
@@ -623,7 +599,6 @@ func selectFromClaimSets(cred StoredCredential, claimsQuery []any, claimSets []a
 	return nil
 }
 
-// buildClaimByID builds a map of claim id → Claims Query from claims query entries.
 func buildClaimByID(claimsQuery []any) map[string]map[string]any {
 	byID := make(map[string]map[string]any)
 	for _, cq := range claimsQuery {
@@ -722,9 +697,6 @@ func claimSelectorFromPath(cred StoredCredential, path []any) string {
 	return claimPathString(path)
 }
 
-// missingClaimLabel names a requested claim a credential cannot satisfy, in the
-// same form as the claims the credential does disclose: namespace:element for an
-// mdoc data element, and the dotted path with array brackets otherwise.
 func missingClaimLabel(cred StoredCredential, path []any) string {
 	if cred.Format == "mso_mdoc" && len(path) == 2 {
 		ns, nsOK := path[0].(string)
@@ -1047,7 +1019,6 @@ func claimPathExists(value any, path []any) bool {
 	}
 }
 
-// filterClaims returns only the selected claims, keyed by their exact selector.
 func filterClaims(cred StoredCredential, selectedKeys []string) map[string]any {
 	filtered := make(map[string]any, len(selectedKeys))
 	for _, k := range selectedKeys {
@@ -1213,8 +1184,6 @@ func applyCredentialSets(matches []CredentialMatch, credSets []any, preferredFor
 			continue
 		}
 
-		// Try each option (array of credential query IDs), preferred format
-		// first, and take the first the wallet can satisfy.
 		satisfied := false
 		for _, opt := range orderOptionsByPreferredFormat(options, byQuery, preferredFormat) {
 			ids, ok := satisfiableOption(opt, byQuery)
@@ -1233,8 +1202,6 @@ func applyCredentialSets(matches []CredentialMatch, credSets []any, preferredFor
 		}
 	}
 
-	// No option of any set could be satisfied, so there is no set of
-	// credentials to return.
 	if len(needed) == 0 {
 		return nil
 	}
@@ -1250,8 +1217,6 @@ func applyCredentialSets(matches []CredentialMatch, credSets []any, preferredFor
 	return result
 }
 
-// optionMatchesFormat checks if a credential_sets option contains query IDs
-// whose matches are all of the given format.
 func optionMatchesFormat(opt any, queryFormat map[string]string, format string) bool {
 	optArr, ok := opt.([]any)
 	if !ok {
@@ -1280,7 +1245,6 @@ func checkTrustedAuthorities(cred StoredCredential, taList []any) bool {
 		}
 		taType, _ := taMap["type"].(string)
 
-		// Collect trust list URLs from "values" (array, per spec)
 		var urls []string
 		if valuesRaw, ok := taMap["values"].([]any); ok {
 			for _, v := range valuesRaw {
@@ -1429,8 +1393,6 @@ func extractMDOCX5Chain(doc *mdoc.Document) ([]*x509.Certificate, error) {
 	return certs, nil
 }
 
-// checkETSITrustList fetches an ETSI trust list and validates the credential's
-// issuer certificate chain against it.
 func checkETSITrustList(cred StoredCredential, trustListURL string) bool {
 	tlRaw, err := format.FetchURL(trustListURL)
 	// A verifier in Docker names the host as host.docker.internal, which the

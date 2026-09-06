@@ -15,7 +15,6 @@
 // Package dcql generates Digital Credentials Query Language (DCQL) queries from existing credentials.
 package dcql
 
-// Query is a DCQL query.
 type Query struct {
 	Credentials []CredentialQuery `json:"credentials"`
 }
@@ -31,7 +30,6 @@ type CredentialQuery struct {
 	Claims []ClaimQuery   `json:"claims,omitempty"`
 }
 
-// CredentialMeta contains format-specific metadata.
 type CredentialMeta struct {
 	VCTValues    []string `json:"vct_values,omitempty"`
 	DoctypeValue string   `json:"doctype_value,omitempty"`

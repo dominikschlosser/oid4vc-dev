@@ -1,7 +1,5 @@
-# Caddy with the rate limiting plugin, which the standard image does not
-# carry (https://github.com/mholt/caddy-ratelimit). The Caddyfile's rate_limit
-# block needs it, and Caddy refuses to start on an unknown directive, so the
-# demo runs this image rather than caddy:2.
+# Build Caddy with https://github.com/mholt/caddy-ratelimit because the standard image
+# cannot read the rate_limit directive.
 FROM caddy:2-builder AS builder
 
 RUN xcaddy build --with github.com/mholt/caddy-ratelimit

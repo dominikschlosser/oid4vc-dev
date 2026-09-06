@@ -57,8 +57,6 @@ func TestParseVCIVersion(t *testing.T) {
 	}
 }
 
-// Interactive Authorization is the wallet's half of a negotiation, so the
-// feature level is the only thing that decides whether the wallet is willing.
 func TestVCIVersionUsesInteractiveAuthorization(t *testing.T) {
 	if VCIVersion10.UsesInteractiveAuthorization() {
 		t.Error("1.0 must not use interactive authorization")
@@ -68,8 +66,7 @@ func TestVCIVersionUsesInteractiveAuthorization(t *testing.T) {
 	}
 }
 
-// A wallet built without a feature level behaves like the published version
-// rather than like an empty one, so nothing has to remember to set it.
+// An unset version must use the published version's behavior.
 func TestVCIFeatureVersionDefaultsToThePublishedVersion(t *testing.T) {
 	w := &Wallet{}
 	if got := w.VCIFeatureVersion(); got != VCIVersion10 {
@@ -77,10 +74,8 @@ func TestVCIFeatureVersionDefaultsToThePublishedVersion(t *testing.T) {
 	}
 }
 
-// redirectFlowIssuer is a scripted issuer running the ordinary redirect flow:
-// PAR, an authorization endpoint that immediately redirects back with a code,
-// token and credential endpoints. withChallengeEndpoint also publishes an
-// authorization_challenge_endpoint alongside them.
+// The test issuer supports the redirect flow. withChallengeEndpoint also advertises
+// Interactive Authorization.
 type redirectFlowIssuer struct {
 	url             string
 	parCalled       bool
@@ -190,10 +185,8 @@ func redirectFlowOfferURI(issuerURL string) string {
 	return "openid-credential-offer://?credential_offer=" + url.QueryEscape(string(offerJSON))
 }
 
-// The feature level decides what the wallet uses, not what it tolerates: an
-// authorization server that offers Interactive Authorization to a wallet set
-// to 1.0 still gets the redirect flow it also published, and the credential
-// still arrives.
+// A 1.0 wallet must use the redirect flow even when the server also offers Interactive
+// Authorization.
 func TestAuthorizationCodeOfferAtVCI10IgnoresAnInteractiveAuthorizationOffer(t *testing.T) {
 	w := generateTestWallet(t)
 	w.VCIClientID = "wallet-client"
@@ -216,17 +209,14 @@ func TestAuthorizationCodeOfferAtVCI10IgnoresAnInteractiveAuthorizationOffer(t *
 		t.Error("wallet did not reach the token endpoint")
 	}
 
-	// Declining it silently would leave an operator guessing why a flow they
-	// expected to be interactive was not.
+	// Explain when the configured version prevents using an advertised feature.
 	if !hasInteractiveAuthorizationNote(w, "--vci-version 1.1") {
 		t.Errorf("no log entry named the declined interactive authorization offer, log: %v", w.Log)
 	}
 }
 
-// The other half of the negotiation: a 1.1 wallet against an authorization
-// server that publishes no challenge endpoint runs the redirect flow it
-// always ran, pushing its own authorization request via PAR. This is what
-// every issuer without interactive authorization looks like to a 1.1 wallet.
+// A 1.1 wallet falls back to the redirect flow when the server has no challenge
+// endpoint.
 func TestAuthorizationCodeOfferAtVCI11WorksWithoutAChallengeEndpoint(t *testing.T) {
 	w := generateTestWallet(t)
 	w.VCIClientID = "wallet-client"
@@ -251,14 +241,13 @@ func TestAuthorizationCodeOfferAtVCI11WorksWithoutAChallengeEndpoint(t *testing.
 	if !issuer.tokenCalled {
 		t.Error("wallet did not reach the token endpoint")
 	}
-	// There was no interactive authorization to decline, so nothing is noted.
 	if _, ok := findInteractiveAuthorizationNote(w); ok {
 		t.Errorf("logged an interactive authorization note for a server that offers none, log: %v", w.Log)
 	}
 }
 
-// A server that requires interactive authorization says so in the note, since
-// the redirect flow the wallet is about to attempt will probably be refused.
+// Warn when the server requires Interactive Authorization but the configured version
+// cannot use it.
 func TestNoteDeclinedInteractiveAuthorizationNamesARequirement(t *testing.T) {
 	w := generateTestWallet(t)
 	w.VCIVersion = VCIVersion10
@@ -279,7 +268,6 @@ func TestNoteDeclinedInteractiveAuthorizationNamesARequirement(t *testing.T) {
 	}
 }
 
-// An authorization server with no challenge endpoint gets no note at all.
 func TestNoteDeclinedInteractiveAuthorizationStaysQuietWithoutAnEndpoint(t *testing.T) {
 	w := generateTestWallet(t)
 	w.noteDeclinedInteractiveAuthorization(map[string]any{"issuer": "https://issuer.example"}, "")
@@ -288,9 +276,6 @@ func TestNoteDeclinedInteractiveAuthorizationStaysQuietWithoutAnEndpoint(t *test
 	}
 }
 
-// The feature level is a conformance setting like the others: reported by
-// GET /api/config, changed at runtime on a local wallet, and restored by the
-// reset that restores the rest.
 func TestConformanceAPICarriesTheVCIFeatureVersion(t *testing.T) {
 	srv := newTestServer(t, true)
 	srv.defaultVCIVersion = VCIVersion10
@@ -307,7 +292,6 @@ func TestConformanceAPICarriesTheVCIFeatureVersion(t *testing.T) {
 		t.Fatalf("wallet feature version = %q, want 1.1", got)
 	}
 
-	// A version nobody published is refused, and leaves the setting alone.
 	req := httptest.NewRequest(http.MethodPut, "/api/config/conformance", strings.NewReader(`{"vci_version":"2.0"}`))
 	rec := httptest.NewRecorder()
 	srv.mux.ServeHTTP(rec, req)
@@ -323,9 +307,6 @@ func TestConformanceAPICarriesTheVCIFeatureVersion(t *testing.T) {
 	}
 }
 
-// The key attestation level is a conformance setting like the others: it is
-// reported, changed at runtime, refused when it is not an Appendix D.2 value,
-// and restored by the reset.
 func TestConformanceAPICarriesTheKeyAttestationLevel(t *testing.T) {
 	srv := newTestServer(t, true)
 

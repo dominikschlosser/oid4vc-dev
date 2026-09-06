@@ -1,9 +1,6 @@
-"""Shared helpers for the URI-based issuance/verification demos and the demo UI.
+"""Shared helpers for the issuance and verification demos.
 
-All flows drive Keycloak server-side (with per-flow curl cookie jars) and
-invoke the wallet at its plain web URLs — the same query parameters the
-custom-scheme links carry, no URL scheme registration involved.
-"""
+Each flow uses a separate curl cookie jar for Keycloak and invokes the wallet through its web URLs."""
 import base64
 import hashlib
 import html.parser
@@ -112,7 +109,7 @@ def decode_jwt_payload(jwt_token):
 
 
 def fetch(cookie_jar, url, method="GET", data=None, headers=None):
-    """One curl request with a persistent cookie jar; returns (status, headers, body)."""
+    """Send one curl request using a persistent cookie jar. Return status, headers and body."""
     with tempfile.NamedTemporaryFile() as header_file, tempfile.NamedTemporaryFile() as body_file:
         cmd = [
             "curl",
@@ -163,7 +160,7 @@ def fetch(cookie_jar, url, method="GET", data=None, headers=None):
 
 
 def http_json(url, data=None, json_data=None, headers=None, method=None):
-    """Cookie-less JSON request; returns (status, parsed body)."""
+    """Send a JSON request without cookies. Return status and parsed body."""
     headers = dict(headers or {})
     if json_data is not None:
         body = json.dumps(json_data).encode()
@@ -211,11 +208,7 @@ def parse_first_broker_form(html_text, base_url):
 
 
 def to_wallet_web_url(wallet_link, wallet_base_url=None):
-    """Converts a custom-scheme wallet link to the wallet's /authorize URL.
-
-    In a custom-scheme URI everything before the `?` only addresses the wallet;
-    the wallet URL form keeps the query string and replaces that prefix.
-    """
+    """Convert a wallet link to /authorize while preserving its query string."""
     if "?" not in wallet_link:
         raise DemoError(f"Wallet link has no query parameters: {wallet_link}")
     query = wallet_link.split("?", 1)[1]
@@ -248,13 +241,9 @@ def wallet_pending_requests():
 
 
 def invoke_wallet_interactively(invoke, timeout=90):
-    """Runs a blocking wallet invocation and approves the consent it creates.
+    """Submit a wallet request in a thread and approve its consent through the UI API.
 
-    The wallet runs without --auto-accept, so it holds the invocation open
-    until the request is approved. This plays the user's role: the invocation
-    runs in a thread while the new consent request is approved through the
-    same API the wallet UI's "Approve" button calls.
-    """
+    The submission blocks until consent is resolved because the wallet runs without auto-accept."""
     known_ids = {request.get("id") for request in wallet_pending_requests()}
     outcome = {}
 
@@ -290,7 +279,6 @@ def invoke_wallet_interactively(invoke, timeout=90):
     return outcome["value"]
 
 
-# --- Issuance -----------------------------------------------------------
 
 
 def ensure_user_credential_assignment():
@@ -336,7 +324,7 @@ def ensure_user_credential_assignment():
 
 
 def create_credential_offer():
-    """Creates and resolves a pre-authorized offer in Keycloak; returns the offer JSON."""
+    """Create and resolve a pre-authorized Keycloak offer. Return the offer JSON."""
     ensure_user_credential_assignment()
     status, token_response = http_json(
         f"{KEYCLOAK_BASE_URL}/realms/{ISSUER_REALM}/protocol/openid-connect/token",
@@ -359,8 +347,7 @@ def create_credential_offer():
     if status != 200:
         raise DemoError(f"Offer creation failed ({status}): {offer_ref}")
 
-    # Keycloak's offer URI is one-shot, so resolve it once and hand the wallet
-    # the offer by value (see the keycloak-issuer-wallet example for details).
+        # Keycloak offer URLs can be read once. Resolve here and pass the offer by value.
     offer_uri = f"{offer_ref['issuer'].rstrip('/')}/{offer_ref['nonce'].lstrip('/')}"
     status, credential_offer = http_json(offer_uri)
     if status != 200:
@@ -403,7 +390,6 @@ def delete_credentials_by_vct(vct):
     return removed
 
 
-# --- Verification -------------------------------------------------------
 
 
 def build_authorize_url(state, code_challenge):
@@ -515,7 +501,7 @@ def exchange_code(code, code_verifier):
 
 
 def complete_login(cookie_jar, redirect_uri, state, code_verifier):
-    """Follows the complete-auth redirect and exchanges the code; returns id_token claims."""
+    """Follow the completion redirect and exchange the code. Return the ID token claims."""
     callback_url = follow_complete_auth(cookie_jar, redirect_uri)
     callback_params = urllib.parse.parse_qs(urllib.parse.urlparse(callback_url).query)
     code = callback_params.get("code", [None])[0]

@@ -34,7 +34,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/format"
 )
 
-// Client calls the management REST API of a running wallet server.
 type Client struct {
 	BaseURL string
 	HTTP    *http.Client
@@ -43,7 +42,6 @@ type Client struct {
 	owner string
 }
 
-// NewClient creates a client for the wallet server at baseURL.
 func NewClient(baseURL string) *Client {
 	return &Client{
 		BaseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
@@ -51,8 +49,6 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
-// do runs a request and decodes the JSON response into out (when out is not
-// nil). Non-2xx responses become errors carrying the server's error message.
 func (c *Client) do(method, path string, body any, out any) error {
 	return c.doWithTimeout(0, method, path, body, out)
 }
@@ -83,8 +79,8 @@ func (c *Client) doWithTimeout(timeout time.Duration, method, path string, body 
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	// Name the client and the release it came from, so a wallet can tell a
-	// current CLI from one that predates a change it has to work around.
+	// Report the CLI version so the server can recognize older clients that need
+	// compatibility handling.
 	req.Header.Set(config.ClientHeader, "eudi-cli/"+version)
 	if c.owner != "" {
 		req.Header.Set(config.OwnerHeader, c.owner)
@@ -132,55 +128,46 @@ func (c *Client) doWithTimeout(timeout time.Duration, method, path string, body 
 	return nil
 }
 
-// Version returns the remote wallet's /api/version document (build id, pid).
 func (c *Client) Version() (map[string]any, error) {
 	var out map[string]any
 	err := c.do(http.MethodGet, "/api/version", nil, &out)
 	return out, err
 }
 
-// ServerConfig returns the remote wallet's /api/config document.
 func (c *Client) ServerConfig() (map[string]any, error) {
 	var out map[string]any
 	err := c.do(http.MethodGet, "/api/config", nil, &out)
 	return out, err
 }
 
-// Credentials lists the remote wallet's credentials.
 func (c *Client) Credentials() ([]map[string]any, error) {
 	var out []map[string]any
 	err := c.do(http.MethodGet, "/api/credentials", nil, &out)
 	return out, err
 }
 
-// Credential returns one credential by ID.
 func (c *Client) Credential(id string) (map[string]any, error) {
 	var out map[string]any
 	err := c.do(http.MethodGet, "/api/credentials/"+id, nil, &out)
 	return out, err
 }
 
-// ImportCredential imports a raw credential string.
 func (c *Client) ImportCredential(raw string) (map[string]any, error) {
 	var out map[string]any
 	err := c.do(http.MethodPost, "/api/credentials", raw, &out)
 	return out, err
 }
 
-// RefreshCredential asks the remote wallet to renew a credential from its
-// issuer.
 func (c *Client) RefreshCredential(id string) (map[string]any, error) {
 	var out map[string]any
 	err := c.doWithTimeout(config.SlowRequestTimeout, http.MethodPost, "/api/credentials/"+id+"/refresh", nil, &out)
 	return out, err
 }
 
-// RemoveCredential deletes one credential by ID.
 func (c *Client) RemoveCredential(id string) error {
 	return c.do(http.MethodDelete, "/api/credentials/"+id, nil, nil)
 }
 
-// RemoveAllCredentials deletes all credentials and returns the count.
 func (c *Client) RemoveAllCredentials() (int, error) {
 	var out struct {
 		Deleted int `json:"deleted"`
@@ -197,7 +184,6 @@ func (c *Client) Issue(req map[string]any) (map[string]any, error) {
 	return out, err
 }
 
-// GeneratePID regenerates the default PID credentials.
 func (c *Client) GeneratePID(claims map[string]any, vct string) error {
 	body := map[string]any{}
 	if claims != nil {
@@ -209,40 +195,34 @@ func (c *Client) GeneratePID(claims map[string]any, vct string) error {
 	return c.do(http.MethodPost, "/api/generate-pid", body, nil)
 }
 
-// Log returns the remote wallet's interaction log as raw JSON.
 func (c *Client) Log() ([]byte, error) {
 	var out []byte
 	err := c.do(http.MethodGet, "/api/log", nil, &out)
 	return out, err
 }
 
-// ClearLog removes all activity log entries on the managed instance.
 func (c *Client) ClearLog() error {
 	return c.do(http.MethodDelete, "/api/log", nil, nil)
 }
 
-// Templates lists all credential templates.
 func (c *Client) Templates() ([]map[string]any, error) {
 	var out []map[string]any
 	err := c.do(http.MethodGet, "/api/templates", nil, &out)
 	return out, err
 }
 
-// Template returns one template by name.
 func (c *Client) Template(name string) (map[string]any, error) {
 	var out map[string]any
 	err := c.do(http.MethodGet, "/api/templates/"+name, nil, &out)
 	return out, err
 }
 
-// PutTemplate creates or replaces a user template.
 func (c *Client) PutTemplate(name string, doc any) (map[string]any, error) {
 	var out map[string]any
 	err := c.do(http.MethodPut, "/api/templates/"+name, doc, &out)
 	return out, err
 }
 
-// DeleteTemplate deletes a user template.
 func (c *Client) DeleteTemplate(name string) error {
 	return c.do(http.MethodDelete, "/api/templates/"+name, nil, nil)
 }
@@ -259,10 +239,7 @@ func (c *Client) Certificate(kind, format string) ([]byte, error) {
 	return out, err
 }
 
-// interactiveTimeout is how long a call waits when the wallet is asked to show
-// the consent dialog rather than auto-accept: the wallet holds the response
-// until the user decides (up to ConsentTimeout), plus room for the submission
-// or a deferred credential afterwards.
+// Allow time for consent and the protocol exchange that follows it.
 const interactiveTimeout = config.ConsentTimeout + config.SlowRequestTimeout
 
 // Present sends a presentation request URI to the remote wallet. With
@@ -291,8 +268,8 @@ func (c *Client) AcceptOffer(uri, txCode string, interactive bool) (map[string]a
 	if txCode != "" {
 		body["tx_code"] = txCode
 	}
-	// An issuer can defer the credential, and the wallet polls for it, so this
-	// call waits as long as the wallet server is willing to.
+	// Use the server's timeout for issuance requests that can outlast an ordinary API
+	// call.
 	timeout := config.SlowRequestTimeout
 	if interactive {
 		body["interactive"] = true
@@ -331,7 +308,6 @@ func TrustListPath(id, vct, docType string) string {
 	return "/api/trustlist"
 }
 
-// TrustLists lists the trust list profiles the remote wallet serves.
 func (c *Client) TrustLists() ([]map[string]any, error) {
 	var out struct {
 		TrustLists []map[string]any `json:"trust_lists"`
@@ -351,23 +327,18 @@ func (c *Client) OfferStatus(id string) (map[string]any, error) {
 	return out, err
 }
 
-// DeferredIssuances lists the credentials the remote wallet is still
-// collecting from their issuers.
 func (c *Client) DeferredIssuances() ([]map[string]any, error) {
 	var out []map[string]any
 	err := c.do(http.MethodGet, "/api/deferred", nil, &out)
 	return out, err
 }
 
-// CollectDeferred asks the remote wallet to make one deferred credential
-// request immediately instead of waiting for the next scheduled attempt.
 func (c *Client) CollectDeferred(id string) (map[string]any, error) {
 	var out map[string]any
 	err := c.doWithTimeout(config.SlowRequestTimeout, http.MethodPost, "/api/deferred/"+id+"/collect", nil, &out)
 	return out, err
 }
 
-// AbandonDeferred stops the remote wallet collecting a deferred credential.
 func (c *Client) AbandonDeferred(id string) (map[string]any, error) {
 	var out map[string]any
 	err := c.do(http.MethodDelete, "/api/deferred/"+id, nil, &out)
@@ -380,7 +351,6 @@ func (c *Client) SetCredentialStatus(id string, status int) error {
 	return c.do(http.MethodPost, "/api/credentials/"+id+"/status", map[string]any{"status": status}, nil)
 }
 
-// Shutdown asks the remote wallet server to exit.
 func (c *Client) Shutdown() error {
 	return c.do(http.MethodPost, "/api/shutdown", nil, nil)
 }
@@ -388,15 +358,12 @@ func (c *Client) Shutdown() error {
 // version is the release this binary was built as, set by the cmd package.
 var version = "dev"
 
-// SetVersion records the release the CLI reports to a wallet it drives.
 func SetVersion(v string) {
 	if v = strings.TrimSpace(v); v != "" {
 		version = v
 	}
 }
 
-// NewOwnerToken creates the value that ties a page this CLI opens to the request
-// it submits for that page.
 func NewOwnerToken() string {
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
@@ -405,14 +372,10 @@ func NewOwnerToken() string {
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
-// ActsForAPage reports whether this client named a browser to the wallet. The
-// wallet then hands consent to that browser rather than to this client.
 func (c *Client) ActsForAPage() bool {
 	return c.owner != ""
 }
 
-// ActingFor names the browser this client submits on behalf of, so the wallet
-// puts the consent in front of that page.
 func (c *Client) ActingFor(owner string) {
 	c.owner = strings.TrimSpace(owner)
 }

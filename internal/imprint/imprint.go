@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package imprint renders the operator-supplied imprint (legal notice) page
-// served at /imprint by the wallet and decoder servers. Hosting either UI
-// publicly in the EU requires an imprint naming the site operator. The
-// operator supplies the content, this package supplies the page shell.
+// Package imprint wraps the operator's legal notice in a page served at /imprint by
+// the wallet and decoder.
 package imprint
 
 import (
@@ -29,10 +27,8 @@ import (
 // is appended to every imprint page.
 const disclaimer = `This site runs <a href="https://github.com/dominikschlosser/eudi-dev">eudi-dev</a>, an independent open source project. It is <strong>not</strong> an official service of the European Commission or the European Union, has no affiliation with them, and is not endorsed by them. &ldquo;EUDI&rdquo; is used descriptively (a developer tool for the European Digital Identity ecosystem).`
 
-// pageTemplate is the shell the operator's snippet goes into. It carries no
-// script of any kind, including the back link: every server that mounts this
-// page sends script-src 'self' without 'unsafe-inline', which blocks a
-// scripted URL, so a link back to the site root is the only form that works.
+// Use a plain link back to the site root. The server's script-src policy blocks inline
+// scripts and javascript: links.
 const pageTemplate = `<!doctype html>
 <html lang="en">
 <head>

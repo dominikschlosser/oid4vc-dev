@@ -42,8 +42,6 @@ func findEncryptionJWK(reqObj *oid4vc.RequestObjectJWT, clientMetadata map[strin
 	return firstJWK(encryptionJWKS(reqObj, clientMetadata))
 }
 
-// encryptionJWKS returns the verifier's jwks value, preferring the request
-// object's client_metadata when it carries one.
 func encryptionJWKS(reqObj *oid4vc.RequestObjectJWT, clientMetadata map[string]any) any {
 	if reqObj != nil && reqObj.Payload != nil {
 		if clientMeta, ok := reqObj.Payload["client_metadata"].(map[string]any); ok {
@@ -110,8 +108,6 @@ func firstJWK(jwksVal any) map[string]any {
 	return fallback
 }
 
-// usableEncryptionJWK reports whether the wallet can encrypt to the given JWK:
-// an EC key on P-256 (ECDH-ES) or an RSA key (RSA-OAEP), not marked signing-only.
 func usableEncryptionJWK(jwk map[string]any) bool {
 	if use, ok := jwk["use"].(string); ok && use != "enc" {
 		return false
@@ -119,8 +115,6 @@ func usableEncryptionJWK(jwk map[string]any) bool {
 	return encryptableKeyMaterial(jwk)
 }
 
-// encryptableKeyMaterial reports whether a JWK holds a key the wallet can
-// encrypt to (an EC key on P-256, or an RSA key), ignoring its declared use.
 func encryptableKeyMaterial(jwk map[string]any) bool {
 	switch kty, _ := jwk["kty"].(string); kty {
 	case "EC":
@@ -183,8 +177,8 @@ type encryptionKeyInfo struct {
 	RSAKey *rsa.PublicKey
 	Kid    string
 	Alg    string // JWE algorithm (e.g. "ECDH-ES" or "RSA-OAEP"), required by OID4VP 1.0
-	// Finding records a specification violation the debug path read past.
-	// Strict mode never produces one: it refuses the document instead.
+	// Finding records a specification violation accepted in debug mode. Strict mode
+	// rejects the document.
 	Finding string
 }
 
@@ -235,7 +229,6 @@ func extractEncryptionKey(mode ValidationMode, reqObj *oid4vc.RequestObjectJWT, 
 	}
 }
 
-// joinFindings combines the non-empty findings into one line.
 func joinFindings(findings ...string) string {
 	out := ""
 	for _, f := range findings {
@@ -250,22 +243,19 @@ func joinFindings(findings ...string) string {
 	return out
 }
 
-// HasEncryptionKey checks if the request object contains a valid encryption JWK.
 func HasEncryptionKey(reqObj *oid4vc.RequestObjectJWT) bool {
 	_, err := extractEncryptionKey(ValidationModeDebug, reqObj, nil)
 	return err == nil
 }
 
-// HasEncryptionKeyForParams checks if the verifier metadata contains a valid
-// encryption JWK, preferring Request Object metadata when present.
+// HasEncryptionKeyForParams gives Request Object metadata precedence over URL parameters.
 func HasEncryptionKeyForParams(reqObj *oid4vc.RequestObjectJWT, clientMetadata map[string]any) bool {
 	_, err := extractEncryptionKey(ValidationModeDebug, reqObj, clientMetadata)
 	return err == nil
 }
 
-// encryptDirectPostJWTPayload encrypts a direct_post.jwt response payload.
-// The caller is responsible for providing top-level JSON members as required
-// by OID4VP 1.0 for both success and error responses.
+// The payload must include the top level members required by OID4VP 1.0 for success or
+// error responses.
 func (w *Wallet) encryptDirectPostJWTPayload(payload map[string]any, mdocNonce string, params PresentationParams) (string, []byte, error) {
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -282,8 +272,8 @@ func (w *Wallet) encryptDirectPostJWTPayload(payload map[string]any, mdocNonce s
 
 	enc := detectEncAlgorithm(params.RequestObject, params.ClientMetadata, "A128GCM")
 
-	// An RSA verifier key is wrapped with RSA-OAEP, which has no key agreement
-	// and so no ephemeral key, apu or apv.
+	// RSA-OAEP wraps the key without key agreement, so the response has no ephemeral
+	// key, apu or apv.
 	if keyInfo.RSAKey != nil {
 		return EncryptJWERSA(payloadJSON, keyInfo.RSAKey, keyInfo.Kid, keyInfo.Alg, enc)
 	}
@@ -300,16 +290,13 @@ func (w *Wallet) encryptDirectPostJWTPayload(payload map[string]any, mdocNonce s
 	return EncryptJWE(payloadJSON, keyInfo.Key, keyInfo.Kid, keyInfo.Alg, enc, apu, apv)
 }
 
-// EncryptResponse encrypts vp_token, optional id_token, and state as a JWE, for
-// the response modes that carry an encrypted response. Returns the JWE and the
-// derived content encryption key (CEK) for debugging.
+// EncryptResponse also returns the content encryption key (CEK) for debugging.
 func (w *Wallet) EncryptResponse(vpToken any, idToken, state string, mdocNonce string, params PresentationParams) (string, []byte, error) {
 	log.Printf("[VP] Encrypting response: response_mode=%s", params.ResponseMode)
 	payload := map[string]any{}
-	// OID4VP 1.0 Appendix A.2: "since the state parameter is not defined for
-	// the DC API, the Verifier cannot expect it to be included in the
-	// response". Over the redirect flows it binds the response to the request
-	// and is carried whenever the request supplied one.
+	// OID4VP 1.0 Appendix A.2: "since the state parameter is not defined for the DC
+	// API, the Verifier cannot expect it to be included in the response". Redirect
+	// flows include state when the request supplies it.
 	if state != "" && !isDCAPIResponseMode(params.ResponseMode) {
 		payload["state"] = state
 	}
@@ -339,8 +326,6 @@ func (w *Wallet) EncryptErrorResponse(errorCode, errorDescription, state string,
 	return w.encryptDirectPostJWTPayload(payload, "", params)
 }
 
-// detectEncAlgorithm reads the content encryption algorithm from
-// client_metadata.encrypted_response_enc_values_supported per OID4VP 1.0.
 func detectEncAlgorithm(reqObj *oid4vc.RequestObjectJWT, clientMetadata map[string]any, fallback string) string {
 	clientMeta := clientMetadata
 	if reqObj != nil && reqObj.Payload != nil {

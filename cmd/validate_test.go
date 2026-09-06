@@ -39,7 +39,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/validate"
 )
 
-// generateCACert creates a self-signed CA certificate and key.
 func generateCACert(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey, []byte) {
 	t.Helper()
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -70,7 +69,6 @@ func generateCACert(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey, []byte)
 	return caCert, caKey, caDER
 }
 
-// generateLeafCert creates a leaf certificate signed by the given CA.
 func generateLeafCert(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.PrivateKey) (*x509.Certificate, *ecdsa.PrivateKey, []byte) {
 	t.Helper()
 	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -137,7 +135,6 @@ func TestExtractAndValidateX5C_UntrustedChain(t *testing.T) {
 	caCert, caKey, _ := generateCACert(t)
 	_, _, leafDER := generateLeafCert(t, caCert, caKey)
 
-	// Trust list has a different CA
 	otherCACert, _, otherCADER := generateCACert(t)
 
 	header := map[string]any{
@@ -187,10 +184,8 @@ func TestExtractAndValidateX5C_NoTrustListCerts(t *testing.T) {
 }
 
 func TestExtractAndValidateX5C_WithIntermediate(t *testing.T) {
-	// Root CA
 	rootCert, rootKey, rootDER := generateCACert(t)
 
-	// Intermediate CA signed by root
 	intKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +205,6 @@ func TestExtractAndValidateX5C_WithIntermediate(t *testing.T) {
 	}
 	intCert, _ := x509.ParseCertificate(intDER)
 
-	// Leaf signed by intermediate
 	_, _, leafDER := generateLeafCert(t, intCert, intKey)
 
 	header := map[string]any{
@@ -220,7 +214,6 @@ func TestExtractAndValidateX5C_WithIntermediate(t *testing.T) {
 		},
 	}
 
-	// Trust list only has root
 	tlCerts := []trustlist.CertInfo{
 		{PublicKey: rootCert.PublicKey, Raw: rootDER},
 	}
@@ -241,7 +234,7 @@ func TestExtractAndValidateMDOCX5Chain_TrustedSingleCert(t *testing.T) {
 	doc := &mdoc.Document{
 		IssuerAuth: &mdoc.IssuerAuth{
 			UnprotectedHeader: map[any]any{
-				int64(33): leafDER, // single cert as []byte
+				int64(33): leafDER,
 			},
 		},
 	}
@@ -266,7 +259,7 @@ func TestExtractAndValidateMDOCX5Chain_TrustedCertArray(t *testing.T) {
 	doc := &mdoc.Document{
 		IssuerAuth: &mdoc.IssuerAuth{
 			UnprotectedHeader: map[any]any{
-				int64(33): []any{leafDER}, // array of certs
+				int64(33): []any{leafDER},
 			},
 		},
 	}
@@ -436,7 +429,6 @@ func TestCheckStatus_ReturnsErrorForRevokedCredential(t *testing.T) {
 	}
 }
 
-// encodeBase64Std is a test helper for standard base64 encoding.
 func encodeBase64Std(data []byte) string {
 	return base64.StdEncoding.EncodeToString(data)
 }
@@ -468,7 +460,6 @@ func TestValidateCommand_OfflineViaEmbeddedX5C(t *testing.T) {
 		t.Fatalf("offline validate must pass via the embedded x5c leaf: %v", err)
 	}
 
-	// mDOC: same offline expectation via the embedded x5chain.
 	mdocRaw, err := mock.GenerateMDOC(mock.MDOCConfig{
 		DocType:   "eu.example.test.1",
 		Namespace: "eu.example.test.1",

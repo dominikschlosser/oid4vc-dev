@@ -172,8 +172,6 @@ func TestWalletGeneratePID_PreservesPersistedServingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Without URL flags the persisted serving config stays untouched and the
-	// new credentials embed it.
 	rootCmd.SetArgs([]string{"wallet", "generate-pid"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("wallet generate-pid: %v", err)
@@ -193,7 +191,6 @@ func TestWalletGeneratePID_PreservesPersistedServingConfig(t *testing.T) {
 		t.Fatalf("expected iss https://localhost:9086, got %v", token.Payload["iss"])
 	}
 
-	// An explicit --base-url still overrides both URLs.
 	rootCmd.SetArgs([]string{"wallet", "generate-pid", "--base-url", "http://localhost:7085"})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("wallet generate-pid --base-url: %v", err)

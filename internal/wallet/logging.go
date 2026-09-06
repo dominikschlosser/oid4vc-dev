@@ -38,8 +38,6 @@ func (w *Wallet) addProtocolLog(action, event, detail string, success bool, deta
 	w.AddLogDetails(action, detail, success, protocolLogDetails(event, details))
 }
 
-// addProtocolWarning records a spec violation the wallet noted without failing
-// the flow.
 func (w *Wallet) addProtocolWarning(action, event, detail string, details map[string]any) {
 	w.AddWarning(action, detail, protocolLogDetails(event, details))
 }
@@ -81,8 +79,6 @@ func presentationRequestLogDetails(authReq *AuthorizationRequestParams) map[stri
 	return details
 }
 
-// RequestPayload returns the parsed request object payload when available,
-// otherwise the fallback authorization request payload.
 func RequestPayload(reqObj *oid4vc.RequestObjectJWT, fallback map[string]any) map[string]any {
 	if reqObj != nil && reqObj.Payload != nil {
 		return reqObj.Payload
@@ -90,8 +86,6 @@ func RequestPayload(reqObj *oid4vc.RequestObjectJWT, fallback map[string]any) ma
 	return fallback
 }
 
-// PresentationSubmissionLogDetails returns the structured detail payload used by
-// verbose wallet logs for successful presentation submissions.
 func PresentationSubmissionLogDetails(authReq *AuthorizationRequestParams, w *Wallet, matches []CredentialMatch, vpResult *VPTokenMapResult, idToken string, result *DirectPostResult) map[string]any {
 	details := presentationRequestLogDetails(authReq)
 	if result != nil {

@@ -133,7 +133,6 @@ func TestDetect_OID4_HTTPURL(t *testing.T) {
 }
 
 func TestDetect_OID4_JWT(t *testing.T) {
-	// Build JWTs with specific payload keys
 	encHeader := EncodeBase64URL([]byte(`{"alg":"ES256"}`))
 
 	vciPayload := EncodeBase64URL([]byte(`{"credential_issuer":"https://issuer.example.com"}`))
@@ -185,7 +184,6 @@ func TestDetect_OID4_JSON(t *testing.T) {
 }
 
 func TestDetect_TrustList_JWT(t *testing.T) {
-	// Build a JWT with the ETSI LoTE wrapper in the payload.
 	encHeader := EncodeBase64URL([]byte(`{"alg":"ES256"}`))
 	payload := EncodeBase64URL([]byte(`{"LoTE":{"TrustedEntitiesList":[{"TrustedEntityInformation":{"TEName":[{"value":"Test"}]}}]}}`))
 	jwt := encHeader + "." + payload + ".sig"

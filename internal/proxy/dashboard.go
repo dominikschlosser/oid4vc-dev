@@ -30,23 +30,19 @@ import (
 // line. A variable so tests do not have to wait for it.
 var streamKeepaliveInterval = 20 * time.Second
 
-// streamWriteTimeout bounds one write to a stream. It outlasts the keepalive,
-// so a reading client never hits it, while a client that stopped reading
-// stops holding a goroutine and a subscription.
+// A client that stops reading must eventually release its goroutine and subscription.
+// Allow enough time for keepalives to reach active readers.
 var streamWriteTimeout = 2 * time.Minute
 
-// Dashboard serves the web dashboard for live traffic inspection.
 type Dashboard struct {
 	store *Store
 	port  int
 }
 
-// NewDashboard creates a new dashboard server.
 func NewDashboard(store *Store, port int) *Dashboard {
 	return &Dashboard{store: store, port: port}
 }
 
-// Handler returns the dashboard HTTP handler.
 func (d *Dashboard) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -54,19 +50,16 @@ func (d *Dashboard) Handler() http.Handler {
 	mux.HandleFunc("GET /api/har", d.handleHAR)
 	mux.HandleFunc("GET /api/stream", d.handleStream)
 
-	// Mount the credential decoder web UI under /decode/
 	decodeMux := web.NewMux("")
 	mux.Handle("/decode/", http.StripPrefix("/decode", decodeMux))
 
 	sub, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
-	// The dashboard renders intercepted traffic, which is whatever the other
-	// end of the proxy sent.
+	// Apply security headers because captured traffic contains untrusted input.
 	return httpsec.Headers(mux)
 }
 
-// ListenAndServe starts the dashboard HTTP server.
 func (d *Dashboard) ListenAndServe() error {
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", d.port),
@@ -103,10 +96,9 @@ func (d *Dashboard) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The server's write timeout covers the whole response, which would cut
-	// the stream off mid-session. The deadline is pushed forward before every
-	// write rather than removed, so a client that stops reading still releases
-	// the handler and its subscription.
+	// Extend the deadline before each write. A fixed response deadline would end a
+	// healthy stream, while no deadline would leave stalled clients holding a
+	// subscription forever.
 	rc := http.NewResponseController(w)
 	extendDeadline := func() {
 		if err := rc.SetWriteDeadline(time.Now().Add(streamWriteTimeout)); err != nil {
@@ -142,9 +134,8 @@ func (d *Dashboard) handleStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		case <-keepalive.C:
 			extendDeadline()
-			// A comment line, which every SSE reader ignores. It keeps an
-			// idle stream from being dropped by whatever sits between the
-			// proxy and the client.
+			// Send SSE comments as keepalives so intermediaries do not close idle
+			// streams.
 			fmt.Fprint(w, ": keepalive\n\n") //nolint:errcheck // a dead connection ends the stream on the next write anyway
 			flusher.Flush()
 		case <-r.Context().Done():

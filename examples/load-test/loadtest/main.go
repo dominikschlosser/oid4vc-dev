@@ -77,7 +77,6 @@ func main() {
 
 var client = &http.Client{Timeout: 60 * time.Second, Transport: &http.Transport{MaxIdleConnsPerHost: 64}}
 
-// target is what requests go to: the ingress, or several servers in turn.
 type target struct {
 	urls []string
 	seq  atomic.Uint64
@@ -87,7 +86,6 @@ func (t *target) url(path string) string {
 	return t.urls[t.seq.Add(1)%uint64(len(t.urls))] + path
 }
 
-// timings collects request durations per operation.
 type timings struct {
 	mu   sync.Mutex
 	data map[string][]time.Duration
@@ -296,8 +294,6 @@ func run(opts options) error {
 			problems = append(problems, fmt.Sprintf("presentation %s carried no SD-JWT presentation", state))
 		}
 	}
-	// Every server is asked for its count: each one directly when they are
-	// named, otherwise the ingress twice per address it fronts.
 	agreeing := opts.servers
 	if len(agreeing) == 0 {
 		for range 2 * len(ingress.urls) {
@@ -387,7 +383,6 @@ func (t *target) present(callbackURL, state string) error {
 	return nil
 }
 
-// listing is one GET /api/credentials: the ids and the server that answered.
 type listing struct {
 	ids      map[string]bool
 	upstream string
@@ -415,7 +410,6 @@ func (t *target) list() (listing, error) {
 	return listing{ids: ids, upstream: resp.Header.Get("X-Upstream")}, nil
 }
 
-// callbackServer is the verifier: it receives the direct_post responses.
 type callbackServer struct {
 	mu       sync.Mutex
 	received map[string]string

@@ -74,7 +74,6 @@ func TestReadInputRaw_FileRead(t *testing.T) {
 }
 
 func TestReadInputRaw_JSONNotTreatedAsFile(t *testing.T) {
-	// A JSON string starting with { is never a file path.
 	raw, err := ReadInputRaw(`{"credential_issuer":"https://example.com"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -230,11 +229,8 @@ func TestFetchURLDoesNotRetryAnHTTPError(t *testing.T) {
 	}
 }
 
-// TestResolveRemoteTimeout covers the override. A counterparty sharing a
-// machine with the wallet can take far longer to answer than one that does
-// not, and the flow cannot be resumed once the wallet has given up, so the
-// wait is configurable. A value that cannot be read leaves the default rather
-// than turning every remote read into one that never times out.
+// Allow longer timeouts for slow counterparties. Invalid values must retain the
+// default instead of disabling timeouts.
 func TestResolveRemoteTimeout(t *testing.T) {
 	for _, tc := range []struct {
 		name string

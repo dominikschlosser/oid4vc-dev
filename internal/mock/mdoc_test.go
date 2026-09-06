@@ -116,7 +116,6 @@ func TestGenerateMDOC_PIDClaims(t *testing.T) {
 		t.Fatalf("mdoc.Parse: %v", err)
 	}
 
-	// The country-independent PID keeps everything in one namespace.
 	ns := doc.NameSpaces[PIDNamespace]
 	if len(ns) != len(MDOCPIDClaims) {
 		t.Errorf("expected %d claims in %s, got %d", len(MDOCPIDClaims), PIDNamespace, len(ns))
@@ -416,7 +415,7 @@ func TestGenerateMDOC_CustomExpiresIn(t *testing.T) {
 		Namespace: "eu.europa.ec.eudi.pid.1",
 		Claims:    DefaultClaims,
 		Key:       key,
-		ExpiresIn: 7 * 24 * time.Hour, // 7 days
+		ExpiresIn: 7 * 24 * time.Hour,
 	}
 
 	result, err := GenerateMDOC(cfg)
@@ -558,10 +557,7 @@ func TestGenerateMDOC_DatesAreTagged(t *testing.T) {
 	}
 }
 
-// TestGenerateMDOC_X5ChainOmitsTheRoot covers what the issuer signature
-// carries. A reader takes the trust anchor from its trust list, so a chain
-// that carries its own root proves nothing and only makes the credential
-// larger.
+// Omit the root because verifiers obtain their trust anchors from a trust list.
 func TestGenerateMDOC_X5ChainOmitsTheRoot(t *testing.T) {
 	caKey, err := GenerateKey()
 	if err != nil {

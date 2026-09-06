@@ -23,17 +23,16 @@ An unofficial developer toolkit for the EUDI and OpenID4VC ecosystem. Decode, is
 
 ## Highlights
 
-- **Testing Wallet**: stateful CLI wallet persisted to files, memory or Postgres, OID4VP/VCI flows, QR scanning, and OS URL scheme registration ([wallet](#wallet))
-- **Reverse Proxy**: intercept, classify, and decode OID4VP/VCI wallet traffic in real time ([proxy](#proxy))
-- **Web UI**: paste, decode, and validate credentials in a split-pane browser interface ([serve](#serve))
-- **Unified Decode**: a single `decode` command handles SD-JWT, JWT VC, JWT, mDOC, OID4VCI offers, OID4VP requests, and ETSI trust lists
-- **QR Screen Capture**: scan a QR code straight from your screen to decode credentials or OpenID requests ([decode --screen](#decode))
-- **Offline Decode & Validate**: SD-JWT, JWT VC, mDOC, JWT with signature verification and trust list support
-- **DCQL Generation**: generate Digital Credentials Query Language queries from existing credentials
+- **Wallet**: test issuance and presentation from the CLI or browser. Store state in files, memory or Postgres ([wallet](#wallet)).
+- **Proxy**: inspect live OID4VP and OID4VCI traffic ([proxy](#proxy)).
+- **Decoder**: inspect credentials, requests, offers and trust lists in the CLI or browser ([decode](#decode), [serve](#serve)).
+- **Validation**: check signatures, expiry and status, with optional trust lists ([validate](#validate)).
+- **QR scanning**: read credentials and requests from an image or your screen ([decode](#decode)).
+- **DCQL**: generate a query from a credential ([dcql](#dcql)).
 
 ## Compared to other EUDI tooling
 
-Most EUDI test tooling is an issuer or a verifier that you point a wallet at. This is the wallet, so the thing under test is your issuer or your verifier.
+Use eudi-dev as a wallet to test your issuer or verifier. The table below shows how it compares with other EUDI tools.
 
 | Tool | What it tests | Runs locally | Scriptable |
 |---|---|---|---|
@@ -148,23 +147,28 @@ eudi wallet scan --screen         # QR scan → auto-dispatch
 eudi wallet logs -f               # Follow persisted wallet interactions
 ```
 
-> **Security:** The wallet server has **no authentication**. Anyone who can reach its port controls the wallet and its credentials. Run it on localhost or an isolated test network, and never put real credentials in it. Every web page you visit can reach localhost, so the `/api/` endpoints refuse requests carrying an `Origin` from another site. The exception is `/api/dc-api`, which a verifier's page calls from its own origin. That endpoint relies on the reported origin and the consent dialog. For internet-facing hosting, the `--demo` profile disables the process and filesystem endpoints and blocks fetches into private networks. [eudi-test.dev](https://eudi-test.dev) runs this profile. See [public demo hosting](docs/public-demo.md).
+> **Security:** Anyone who can reach the wallet port controls its credentials. Use localhost or an isolated test network and store test data only. The API rejects requests from other web origins, except `/api/dc-api`, which uses the caller origin and consent dialog. For public hosting, use the `--demo` profile described in [public demo hosting](docs/public-demo.md).
 
-`wallet serve` starts the local wallet UI plus HTTP and HTTPS wallet endpoints for presentation, issuer metadata, trust lists, status lists, and test registrar responses. `issue ... --wallet --template pid-sdjwt` puts a PID into the wallet (`wallet generate-pid` is deprecated). `wallet ca-cert` and `wallet tls-cert` export the trust root or the HTTPS leaf certificate for a verifier. All of these operations are also on the server's unauthenticated [HTTP API](docs/wallet/http-api.md), so automated tests can drive a hosted or containerized wallet over HTTP.
+`wallet serve` hosts the UI and protocol endpoints, including issuer metadata, trust lists and status lists. Use `issue ... --wallet --template pid-sdjwt` to add a PID. `wallet ca-cert` and `wallet tls-cert` export certificates for verifier trust stores. The same operations are available through the [HTTP API](docs/wallet/http-api.md) for automated tests.
 
 The main commands:
+
 - `wallet serve` to run the wallet
 - `issue ... --wallet` (with `--template` or `--pid`) to preload credentials
-- `wallet ps` to find running wallet servers, `wallet use <url>` to manage one remotely over its REST API, and `wallet kill` to stop one. When a server already runs for the same wallet directory, CLI commands route through it. Discovery covers instances on this system plus the active remote target. A wallet inside a Docker container shows up after `wallet use <url>`, and clicked credential-offer or presentation links then route to it.
+- `wallet ps` to find running wallet servers
+- `wallet use <url>` to select a remote or containerized wallet
+- `wallet kill` to stop a wallet server
 - `wallet trust-list` to get the verifier trust-list URL or JWT
 - `wallet logs` to inspect wallet-side OID4VP/OID4VCI interactions
 - `wallet ca-cert` and `wallet tls-cert` to export certificate material
 - `wallet --mode debug|strict` and `--preferred-format ...` to control runtime behavior
 - `wallet serve --haip` to check verifiers and issuers against HAIP 1.0
 
-`--mode` and `--haip` are separate switches. `--haip` adds the HAIP 1.0 checks to the ones that always run. `--mode` decides how the wallet handles a finding, HAIP violations included. `--mode strict` stops the flow, `--mode debug` reports the finding and continues. See [HAIP 1.0 enforcement](docs/wallet/presenting.md#haip-10-enforcement).
+`--haip` adds HAIP 1.0 checks. `--mode strict` stops on findings, while `--mode debug` reports them and continues. This applies to HAIP findings too. See [HAIP enforcement](docs/wallet/presenting.md#haip-10-enforcement).
 
-When a wallet exposes multiple trust-list profiles, `/api/trustlists` lists the available IDs and routes. Use the entry's relative `path` when you reach the wallet through Docker port mappings or similar indirection. The web UI lists the same trust-list URLs with copy buttons above the certificate downloads.
+When a server already serves the selected wallet directory, CLI commands use its API. After `wallet use <url>`, commands and clicked offer or presentation links go to that target. Discovery lists local instances and the active remote target.
+
+Use `/api/trustlists` to list trust-list profiles. Each entry has a relative `path` that works with Docker port mappings. The web UI shows these URLs above the certificate downloads.
 
 ![Wallet UI](docs/assets/wallet-ui.png)
 
@@ -222,7 +226,7 @@ eudi serve --port 3000
 eudi serve credential.txt
 ```
 
-Opens a split-pane interface at `http://localhost:8080` (default) with auto-decode on paste, format detection, collapsible sections, signature verification, and dark/light theme. A credential passed as argument pre-fills the input. `--imprint-file` serves a legal notice at `/imprint` for public hosting.
+The UI opens at `http://localhost:8080` by default. Paste a credential to decode it, expand its sections and check its signature. A credential passed on the command line fills the input automatically. `--imprint-file` adds a legal notice at `/imprint`.
 
 ![Web UI screenshot](docs/assets/web-ui.png)
 

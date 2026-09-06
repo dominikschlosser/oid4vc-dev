@@ -30,8 +30,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/trustlist"
 )
 
-// CanResolveJWTIssuerMetadata reports whether the token has enough information
-// for kid-based issuer metadata key resolution.
 func CanResolveJWTIssuerMetadata(token *sdjwt.Token) bool {
 	if token == nil {
 		return false
@@ -107,9 +105,8 @@ func ResolveJWTIssuerMetadataKey(token *sdjwt.Token, tlCerts []trustlist.CertInf
 	return key, "issuer metadata", nil
 }
 
-// SourceX5CLeaf marks a signature verified against the credential's embedded
-// leaf certificate without chain validation. The signature is intact, but
-// nothing vouches for the issuer (pass a trust list for that).
+// SourceX5CLeaf denotes an embedded leaf check that establishes integrity but not issuer
+// trust. A trust list is needed to validate the chain.
 const SourceX5CLeaf = "x5c certificate, chain not validated"
 
 // VerifyJWTSignature verifies the token signature using, in order:
@@ -121,10 +118,8 @@ func VerifyJWTSignature(token *sdjwt.Token, pubKeys []crypto.PublicKey, tlCerts 
 	return verifyJWTSignature(token, pubKeys, tlCerts, true)
 }
 
-// VerifyJWTSignatureOffline verifies the token signature from what the caller
-// and the token already carry: x5c against a trust list, provided keys, and
-// the embedded leaf certificate. It stops there rather than fetching the
-// issuer metadata, so it answers without waiting on a counterparty.
+// VerifyJWTSignatureOffline uses only supplied keys and certificates. This path must
+// complete without network access.
 func VerifyJWTSignatureOffline(token *sdjwt.Token, pubKeys []crypto.PublicKey, tlCerts []trustlist.CertInfo) (*sdjwt.VerifyResult, string, error) {
 	return verifyJWTSignature(token, pubKeys, tlCerts, false)
 }

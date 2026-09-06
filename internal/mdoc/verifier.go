@@ -22,7 +22,6 @@ import (
 	"github.com/veraison/go-cose"
 )
 
-// VerifyResult contains the mDOC verification result.
 type VerifyResult struct {
 	SignatureValid bool
 	Expired        bool
@@ -33,12 +32,11 @@ type VerifyResult struct {
 	ValidUntil     *time.Time
 	Signed         *time.Time
 	Errors         []string
-	// Warnings records a signature that verifies but rests on a spec deviation
-	// worked around here.
+	// Warnings identify spec deviations accepted during otherwise successful signature
+	// verification.
 	Warnings []string
 }
 
-// Verify verifies the mDOC issuerAuth COSE_Sign1 signature.
 func Verify(doc *Document, pubKey crypto.PublicKey) *VerifyResult {
 	if doc == nil {
 		return &VerifyResult{Errors: []string{"no document to verify"}}

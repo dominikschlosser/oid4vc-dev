@@ -107,7 +107,6 @@ func TestIssuanceProofKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issuanceProofKeys with batch: %v", err)
 	}
-	// batch_size 10 is capped to the wallet's own ceiling.
 	if len(keys) != maxBatchProofKeys {
 		t.Fatalf("expected %d proof keys, got %d", maxBatchProofKeys, len(keys))
 	}
@@ -125,7 +124,6 @@ func TestSelectPrimaryCredentialReversedOrder(t *testing.T) {
 	holderCred := fakeSDJWT(t, &holder.PublicKey)
 	ephemeralCred := fakeSDJWT(t, &ephemeral.PublicKey)
 
-	// Credentials returned in reverse order of the proofs
 	resp := map[string]any{
 		"credentials": []any{
 			map[string]any{"credential": ephemeralCred},
@@ -169,10 +167,8 @@ func TestSelectPrimaryCredentialSingle(t *testing.T) {
 	}
 }
 
-// An issuer that advertises batch_credential_issuance makes the wallet send
-// several proofs, but OpenID4VCI 1.0 lets it issue fewer credentials. A single
-// credential is imported whichever proof key it names, here an ephemeral one
-// (its card then reads as bound to another key).
+// OpenID4VCI 1.0 allows fewer returned credentials than proofs. Accept a single
+// credential bound to any supplied proof key, including an ephemeral key.
 func TestSelectPrimaryCredentialSingleNotHolderBound(t *testing.T) {
 	holder := testKey(t)
 	ephemeral := testKey(t)
@@ -188,9 +184,8 @@ func TestSelectPrimaryCredentialSingleNotHolderBound(t *testing.T) {
 	}
 }
 
-// A single credential the issuer bound to an ephemeral proof key (rather than
-// the holder key) stays presentable: the wallet records that key against it, so
-// its key binding is signed with the key its cnf names.
+// Keep an ephemeral binding key with a single returned credential so it remains
+// presentable.
 func TestSingleCredentialBoundToEphemeralKeyIsPresentable(t *testing.T) {
 	w := generateTestWallet(t)
 	ephemeral := testKey(t)
@@ -260,7 +255,6 @@ func TestFirstJWKSkipsUnusableKeys(t *testing.T) {
 		t.Fatalf("expected kid 'usable', got %q", kid)
 	}
 
-	// Signing-only EC keys must be skipped too
 	jwks = map[string]any{
 		"keys": []any{
 			map[string]any{"kty": "EC", "crv": "P-256", "use": "sig", "kid": "sig-key", "x": "8Yrbbg", "y": "V2Ki0w"},
@@ -271,10 +265,8 @@ func TestFirstJWKSkipsUnusableKeys(t *testing.T) {
 	}
 }
 
-// An issuer that advertises a batch may issue fewer credentials than the proofs
-// sent and need not bind any of them to the holder key (each key binds to at
-// most one Credential). Two credentials bound to ephemeral proof keys, none to
-// the holder key, are accepted and the first is taken as the primary.
+// A partial batch may omit the holder key. Match copies to distinct proof keys and use
+// the first as primary when no holder copy exists.
 func TestSelectPrimaryCredentialFewerThanAdvertisedNoneHolderBound(t *testing.T) {
 	holder := testKey(t)
 	eph1, eph2 := testKey(t), testKey(t)
@@ -294,9 +286,7 @@ func TestSelectPrimaryCredentialFewerThanAdvertisedNoneHolderBound(t *testing.T)
 	}
 }
 
-// The copies of a partial batch the issuer bound to ephemeral keys (none to the
-// holder key) are stored under one batch group, each signing its key binding
-// with the key its cnf names.
+// Store partial batch copies together with the keys matching their cnf claims.
 func TestPartialBatchNoneHolderBoundIsStoredAndPresentable(t *testing.T) {
 	w := generateTestWallet(t)
 	eph1, eph2 := testKey(t), testKey(t)
@@ -338,8 +328,7 @@ func TestPartialBatchNoneHolderBoundIsStoredAndPresentable(t *testing.T) {
 	}
 }
 
-// Two credentials bound to the same proof key are a malformed batch: the wallet
-// rejects the response rather than storing one credential twice.
+// Reject two credentials bound to the same proof key.
 func TestSelectPrimaryCredentialRejectsDuplicateKey(t *testing.T) {
 	holder := testKey(t)
 	eph := testKey(t)

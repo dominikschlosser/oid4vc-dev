@@ -31,7 +31,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 )
 
-// captureLog collects everything the package logs while fn runs.
 func captureLog(t *testing.T, fn func()) string {
 	t.Helper()
 	var buf bytes.Buffer
@@ -42,9 +41,6 @@ func captureLog(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-// attestedTokenHeaders authenticates a raw token request the way this
-// authorization server requires by default: a client attestation and the PoP
-// proving possession of the attested key.
 func attestedTokenHeaders(t *testing.T) map[string]string {
 	t.Helper()
 	provider := foreignWalletProvider(t)
@@ -59,8 +55,6 @@ func attestedTokenHeaders(t *testing.T) map[string]string {
 	}
 }
 
-// preAuthTokenForm fetches a fresh offer and builds the token form redeeming
-// its pre-authorized code.
 func preAuthTokenForm(t *testing.T, d *DemoRP) url.Values {
 	t.Helper()
 	h := d.IssuerHandler()
@@ -78,11 +72,8 @@ func preAuthTokenForm(t *testing.T, d *DemoRP) url.Values {
 	return url.Values{"grant_type": {preAuthGrant}, "pre-authorized_code": {grants["pre-authorized_code"].(string)}}
 }
 
-// TestPreAuthTokenRequiresClientAuth holds the pre-authorized code exchange to
-// the same rule as the authorization code exchange: the token endpoint
-// advertises attestation-based client authentication as its only methods in
-// required mode, so a token request presenting none is refused, and one
-// presenting an attestation is served.
+// Required client authentication applies to pre-authorized code exchanges too.
+// Requests without an attestation must fail at the token endpoint.
 func TestPreAuthTokenRequiresClientAuth(t *testing.T) {
 	t.Run("without attestation refused in required mode", func(t *testing.T) {
 		d, _, _ := newDemoRP(t)
@@ -297,9 +288,7 @@ func TestDuplicateAttestationHeaderRejected(t *testing.T) {
 	}
 }
 
-// TestAttestationAlgRejected enforces the algorithm check of the validation
-// checklist on both JWTs: the advertised algorithms are the acceptable ones,
-// and a JWT naming another is refused with the algorithm named.
+// ABCA verification accepts only advertised signing algorithms for both JWTs.
 func TestAttestationAlgRejected(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
@@ -352,8 +341,7 @@ func TestAttestationAlgRejected(t *testing.T) {
 	}
 }
 
-// TestPoPIssuerMismatchRejected enforces that a PoP naming another client in
-// iss authenticates nobody: the value has to match the request's client_id.
+// A PoP iss must match the request's client_id.
 func TestPoPIssuerMismatchRejected(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 	provider := foreignWalletProvider(t)
@@ -382,8 +370,8 @@ func TestPoPIssuerMismatchRejected(t *testing.T) {
 	}
 }
 
-// TestPreAuthCodeSingleUse pins that the exchange spends the code: it binds
-// the offer to the redeeming client, so a second exchange is refused.
+// Exchanging a pre-authorized code binds the offer to that client and consumes the
+// code.
 func TestPreAuthCodeSingleUse(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 	form := preAuthTokenForm(t, d)
@@ -412,11 +400,9 @@ func postFormWithHeaders(t *testing.T, h http.Handler, target string, form url.V
 	return rec
 }
 
-// TestCrossDraftShapeWarnsButAccepts pins the tolerant acceptance: material
-// that violates the ABCA draft the configured OpenID4VCI version pins, while
-// being correct under another supported draft, is accepted with a logged
-// warning. At OpenID4VCI 1.0 the pinned draft is -07, which requires iss in
-// both JWTs. The test helpers build the draft-08/-10 shape without it.
+// Accept messages valid under another supported ABCA draft and log the difference.
+// OpenID4VCI 1.0 pins draft-07, which requires iss in both JWTs. These helpers use the
+// draft-08 and draft-10 form without iss.
 func TestCrossDraftShapeWarnsButAccepts(t *testing.T) {
 	t.Run("draft-08 shape at a draft-07 configuration", func(t *testing.T) {
 		d, w, _ := newDemoRP(t)
@@ -472,9 +458,8 @@ func TestCrossDraftShapeWarnsButAccepts(t *testing.T) {
 	})
 }
 
-// TestPopMethodsNoneInOptionalMode pins the metadata a server that lets the
-// attestation be omitted publishes: draft-10 defines the none entry of
-// client_attestation_pop_methods_supported exactly for that signal.
+// ABCA draft-10 uses none in client_attestation_pop_methods_supported to advertise
+// optional attestation.
 func TestPopMethodsNoneInOptionalMode(t *testing.T) {
 	d, _, _ := newDemoRP(t)
 	d.SetClientAuthMode(ClientAuthOptional)

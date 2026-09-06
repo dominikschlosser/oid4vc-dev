@@ -2,7 +2,7 @@
 
 Runnable integration scenarios live in this directory.
 
-For a documentation-style overview, see [docs/examples.md](../docs/examples.md).
+See [docs/examples.md](../docs/examples.md) for an overview.
 
 Each example should be self-contained in its own subfolder and include:
 
@@ -10,7 +10,7 @@ Each example should be self-contained in its own subfolder and include:
 - any compose files, scripts, or fixtures needed to run it
 - the exact versions or assumptions the scenario was tested against
 
-The examples in this directory prefer fixed ports, fixed demo identities, and static Keycloak realm files where that keeps the flow easier to understand. Bootstrap scripts are used only where runtime-generated keys, trust lists, or provider wiring are needed.
+Examples use fixed ports, demo identities and static Keycloak realms to make setup predictable. Bootstrap scripts add values that are only available at runtime, such as generated keys and trust list URLs.
 
 The example scripts are written for Bash. On Windows, run them from Git Bash or WSL. The wallet flows themselves avoid macOS-only assumptions and fall back to `eudi wallet accept '<uri>'` when custom URL handlers are unavailable.
 

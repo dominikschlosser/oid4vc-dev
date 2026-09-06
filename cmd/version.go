@@ -43,7 +43,6 @@ func init() {
 			Version = info.Main.Version
 		}
 	}
-	// The wallet a CLI drives is told which release is driving it.
 	remote.SetVersion(Version)
 	wallet.SetHandlerScriptVersion(Version)
 	rootCmd.AddCommand(versionCmd)

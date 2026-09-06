@@ -43,8 +43,6 @@ func TestIsWebURL(t *testing.T) {
 	}
 }
 
-// A wallet server on a headless host has no desktop to open a browser on, and
-// trying reaches nobody.
 func TestHasDesktopSession(t *testing.T) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skipf("no session heuristic on %s", runtime.GOOS)

@@ -19,8 +19,8 @@ import (
 	"testing"
 )
 
-// A warning is a third log state a bool cannot hold: not a failure (Success
-// stays true) but marked so the UI can render it distinctly.
+// Warnings retain Success=true but need separate severity so the UI can distinguish
+// them.
 func TestAddWarningSeverity(t *testing.T) {
 	w := generateTestWallet(t)
 	before := len(w.GetLog())
@@ -39,7 +39,6 @@ func TestAddWarningSeverity(t *testing.T) {
 		t.Error("a warning is not a failure, so Success must stay true")
 	}
 
-	// The severity crosses the JSON boundary to the frontend under "severity".
 	raw, err := json.Marshal(entry)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -52,7 +51,6 @@ func TestAddWarningSeverity(t *testing.T) {
 		t.Errorf("json severity = %v, want %q", decoded["severity"], severityWarning)
 	}
 
-	// A plain success carries no severity, so the field is omitted.
 	w.AddLog("issuance", "imported", true)
 	plain, _ := json.Marshal(w.GetLog()[len(w.GetLog())-1])
 	var plainMap map[string]any

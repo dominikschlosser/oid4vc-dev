@@ -80,8 +80,6 @@ func authorityChain(t *testing.T) (ca, leaf *x509.Certificate, leafKey *ecdsa.Pr
 	return ca, leaf, leafKey, subjectKeyID
 }
 
-// mdocWithChain issues an mdoc carrying the given chain in its x5chain
-// header, which is where the authority key identifier is read from.
 func mdocWithChain(t *testing.T, chain ...*x509.Certificate) StoredCredential {
 	t.Helper()
 	key, err := mock.GenerateKey()
@@ -317,11 +315,8 @@ func TestCheckTrustedAuthorities(t *testing.T) {
 	}
 }
 
-// An mdoc whose issuer certificate chains up to a CA named in an ETSI trust
-// list is accepted, and one from an unrelated authority is refused. The
-// end-to-end TestEvaluateDCQL_TrustedAuthorities_* tests cover this for SD-JWT.
-// mdoc runs a separate chain-validation path (ExtractAndValidateMDOCX5Chain),
-// so it needs its own coverage.
+// mdoc uses a separate chain validation path from SD-JWT. Check that it accepts a
+// listed CA and rejects an unrelated one.
 func TestCheckETSITrustListMDOC(t *testing.T) {
 	caCert, leafCert, _, _ := authorityChain(t)
 	tlJWT, err := GenerateTrustListJWT(mustGenerateKey(t), caCert)

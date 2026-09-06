@@ -38,8 +38,7 @@ func generateTestWallet(t testing.TB) *Wallet {
 		t.Fatalf("generating issuer key: %v", err)
 	}
 	w := New(holderKey, issuerKey, false)
-	// A store of its own keeps the developer's templates out of the tests and
-	// puts the templates on the backend the suite runs on.
+	// Use an isolated store so tests cannot load the developer's templates.
 	w.Templates = NewWalletStore(t.TempDir()).Templates()
 	return w
 }
@@ -137,7 +136,6 @@ func TestGenerateDefaultCredentials_SDJWTIssuerUsesWalletIssuerURL(t *testing.T)
 func TestGenerateDefaultCredentials_Overwrite(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
-	// A second run replaces the PIDs rather than duplicating them.
 	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
 		t.Fatalf("generating PID credentials second time: %v", err)
 	}
@@ -171,7 +169,6 @@ func TestGenerateDefaultCredentials_ClaimOverrides(t *testing.T) {
 	if sdjwtCred.Claims["family_name"] != "MUSTERMANN-OVERRIDE" {
 		t.Errorf("expected family_name MUSTERMANN-OVERRIDE, got %v", sdjwtCred.Claims["family_name"])
 	}
-	// A claim not overridden keeps its default.
 	if sdjwtCred.Claims["birthdate"] != "1978-02-12" {
 		t.Errorf("expected birthdate 1978-02-12, got %v", sdjwtCred.Claims["birthdate"])
 	}
@@ -199,12 +196,10 @@ func TestGenerateDefaultCredentials_OverwritePreservesOtherCreds(t *testing.T) {
 		t.Fatalf("generating PID: %v", err)
 	}
 
-	// Should have 3: test + SD-JWT PID + mDoc PID
 	if len(w.GetCredentials()) != 3 {
 		t.Fatalf("expected 3 credentials, got %d", len(w.GetCredentials()))
 	}
 
-	// Generating again replaces only the PIDs.
 	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
 		t.Fatalf("generating PID second time: %v", err)
 	}
@@ -690,10 +685,8 @@ func TestMarshalConsentRequest_MinimalFields(t *testing.T) {
 	}
 }
 
-// signedRequestParams builds authorization request params carrying a request
-// object signed by a certificate whose SAN matches its x509_san_dns client_id,
-// so clientAuthState verifies it as self-consistent. clientName, when set, is
-// placed in client_metadata.
+// The signing certificate's SAN matches client_id. This verifies signature consistency
+// without trusting the signer.
 func signedRequestParams(t *testing.T, dnsName, clientName string) *AuthorizationRequestParams {
 	t.Helper()
 	key, certB64, _ := testCertWithKeyDER([]string{dnsName})
@@ -752,7 +745,6 @@ func TestMarshalConsentRequest_ClientAuthSigned(t *testing.T) {
 }
 
 func TestMarshalConsentRequest_ClientAuthUnsigned(t *testing.T) {
-	// A presentation with no request object at all is an unsigned request.
 	req := &ConsentRequest{
 		ID:        "req-unsigned",
 		Type:      ConsentTypePresentation,
@@ -777,8 +769,7 @@ func TestMarshalConsentRequest_ClientAuthUnsigned(t *testing.T) {
 
 func TestMarshalConsentRequest_ClientAuthInvalidSignature(t *testing.T) {
 	params := signedRequestParams(t, "verifier.example", "")
-	// Break the signature so verification fails while the request object stays
-	// present and signed (alg ES256).
+	// Corrupt the signature while retaining the signed Request Object.
 	parts := strings.Split(params.RequestObject.Raw, ".")
 	params.RequestObject.Raw = parts[0] + "." + parts[1] + ".AAAA"
 
@@ -886,8 +877,7 @@ func TestHasEncryptionKey_TopLevelJWKSNotUsed(t *testing.T) {
 		t.Fatalf("parsing JWK: %v", err)
 	}
 
-	// OID4VP 1.0 reads the encryption key from client_metadata.jwks only, so a
-	// top-level jwks does not count.
+	// OID4VP 1.0 reads encryption keys only from client_metadata.jwks.
 	reqObj := &oid4vc.RequestObjectJWT{
 		Payload: map[string]any{
 			"client_metadata": map[string]any{
@@ -903,8 +893,8 @@ func TestHasEncryptionKey_TopLevelJWKSNotUsed(t *testing.T) {
 	}
 }
 
-// Regenerating the defaults keeps protected baseline PIDs, so a request
-// against a shared instance cannot replace them with unprotected ones.
+// Regeneration must not replace protected baseline credentials with unprotected
+// copies.
 func TestGenerateDefaultCredentials_KeepsProtected(t *testing.T) {
 	w := generateTestWallet(t)
 	if err := w.GenerateProtectedDefaults(); err != nil {
@@ -941,9 +931,7 @@ func TestGenerateDefaultCredentials_KeepsProtected(t *testing.T) {
 	}
 }
 
-// The vct picks the PID type, and with it the claim set: generating the
-// German PID under the country-independent claim set would produce a
-// credential that claims a rulebook it does not follow.
+// The selected PID type determines its required claim set.
 func TestGenerateDefaultCredentials_VCTSelectsTheClaimSet(t *testing.T) {
 	w := generateTestWallet(t)
 	if err := w.GenerateDefaultCredentials(nil, mock.GermanPIDVCT); err != nil {
@@ -969,13 +957,11 @@ func TestGenerateDefaultCredentials_VCTSelectsTheClaimSet(t *testing.T) {
 	if _, ok := sdjwt.Claims["source_document_type"]; !ok {
 		t.Error("the German PID was issued without its national claims")
 	}
-	// The credential says it is also of the type it extends, so a verifier
-	// asking for that type is answered by it.
+	// A credential can satisfy requests for a type it extends.
 	if !credtype.Answers(sdjwt.VCT, credtype.AkaVCTs(sdjwt.Claims), mock.DefaultPIDVCT) {
 		t.Errorf("the German PID does not answer for %q: aka_vcts=%v", mock.DefaultPIDVCT, sdjwt.Claims[credtype.AkaVCTsClaim])
 	}
-	// The doctype stays the country-independent one, and the national
-	// elements sit in their own namespace.
+	// National additions use a separate namespace under the shared doctype.
 	if mdoc.DocType != mock.PIDNamespace {
 		t.Errorf("doctype = %q, want %q", mdoc.DocType, mock.PIDNamespace)
 	}
@@ -984,8 +970,8 @@ func TestGenerateDefaultCredentials_VCTSelectsTheClaimSet(t *testing.T) {
 	}
 }
 
-// The two mdoc PIDs share a doctype, so regenerating one must not take the
-// other with it: the namespaces are what tell them apart.
+// EUDI and German PIDs share a doctype. Namespaces distinguish them during
+// regeneration.
 func TestGenerateDefaultCredentials_KeepsTheOtherPIDTypesMDoc(t *testing.T) {
 	w := generateTestWallet(t)
 	if err := w.GenerateDefaultCredentials(nil, mock.DefaultPIDVCT); err != nil {
@@ -1013,7 +999,6 @@ func TestGenerateDefaultCredentials_KeepsTheOtherPIDTypesMDoc(t *testing.T) {
 		t.Error("the German mdoc PID is missing")
 	}
 
-	// Regenerating one type replaces only its own credentials.
 	if err := w.GenerateDefaultCredentials(nil, mock.GermanPIDVCT); err != nil {
 		t.Fatalf("regenerating the German PID: %v", err)
 	}
@@ -1028,10 +1013,8 @@ func TestGenerateDefaultCredentials_KeepsTheOtherPIDTypesMDoc(t *testing.T) {
 	}
 }
 
-// A wallet file written before mdoc claim keys carried their namespace stores
-// them bare, and the credential is still the PID it always was. Regenerating
-// has to replace it rather than leave a second one behind: the duplicate is
-// silent, and both PIDs then answer every mdoc request.
+// Older files have unprefixed claim keys. Regeneration must still recognize and
+// replace their existing mdoc PIDs.
 func TestGenerateDefaultCredentials_ReplacesAMDocStoredWithoutNamespacedClaims(t *testing.T) {
 	w := generateTestWalletWithPID(t)
 
@@ -1055,8 +1038,7 @@ func TestGenerateDefaultCredentials_ReplacesAMDocStoredWithoutNamespacedClaims(t
 	if raw == "" {
 		t.Fatal("no mdoc PID to age")
 	}
-	// Loading the wallet rebuilds what the file does not carry, which is
-	// where the namespaces come back from.
+	// Loading rebuilds namespaces from the raw credential.
 	for i := range w.Credentials {
 		if err := w.Credentials[i].Rehydrate(); err != nil {
 			t.Fatalf("rehydrating: %v", err)
@@ -1078,8 +1060,6 @@ func TestGenerateDefaultCredentials_ReplacesAMDocStoredWithoutNamespacedClaims(t
 	}
 }
 
-// Without protection the defaults still get replaced, which is what
-// regenerating is for.
 func TestGenerateDefaultCredentials_ReplacesUnprotected(t *testing.T) {
 	w := generateTestWallet(t)
 	if err := w.GenerateDefaultCredentials(nil, ""); err != nil {
@@ -1106,9 +1086,8 @@ func TestGenerateDefaultCredentials_ReplacesUnprotected(t *testing.T) {
 	}
 }
 
-// The server's own baseline generation replaces what it created before,
-// protection included, so a shared demo serves the current release's PID
-// claim set after an update.
+// Baseline generation replaces protected defaults so upgrades pick up current template
+// claims.
 func TestGenerateProtectedDefaults_RefreshesOwnBaseline(t *testing.T) {
 	w := generateTestWallet(t)
 	if err := w.GenerateProtectedDefaults(); err != nil {
@@ -1141,16 +1120,14 @@ func TestGenerateProtectedDefaults_RefreshesOwnBaseline(t *testing.T) {
 	}
 }
 
-// Refreshing the baseline (on startup or the periodic reset) keeps a
-// visitor's own credential even when it shares the baseline's type.
+// Baseline refresh must preserve visitor credentials of the same type.
 func TestGenerateProtectedDefaults_KeepsVisitorCredentialOfBaselineType(t *testing.T) {
 	w := generateTestWallet(t)
 	if err := w.GenerateProtectedDefaults(); err != nil {
 		t.Fatalf("first GenerateProtectedDefaults: %v", err)
 	}
 
-	// Match the baseline SD-JWT's own type, whatever vct the templates use, so
-	// the collision is real regardless of release.
+	// Use the current template type to ensure a real collision.
 	var baselineVCT string
 	for _, c := range w.GetCredentials() {
 		if c.Format == "dc+sd-jwt" {
@@ -1166,7 +1143,6 @@ func TestGenerateProtectedDefaults_KeepsVisitorCredentialOfBaselineType(t *testi
 		VCT:    baselineVCT,
 	})
 
-	// A restart refreshes the baseline.
 	if err := w.GenerateProtectedDefaults(); err != nil {
 		t.Fatalf("second GenerateProtectedDefaults: %v", err)
 	}
@@ -1192,8 +1168,6 @@ func TestGenerateProtectedDefaults_KeepsVisitorCredentialOfBaselineType(t *testi
 	}
 }
 
-// The request-driven path leaves a protected baseline alone: that is the
-// whole point of the flag.
 func TestGenerateDefaultCredentials_APIPathCannotReplaceProtected(t *testing.T) {
 	w := generateTestWallet(t)
 	if err := w.GenerateProtectedDefaults(); err != nil {

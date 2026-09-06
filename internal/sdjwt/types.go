@@ -15,7 +15,6 @@
 // Package sdjwt parses and verifies SD-JWT (Selective Disclosure JWT) credentials.
 package sdjwt
 
-// Token represents a parsed SD-JWT.
 type Token struct {
 	Raw           string
 	Header        map[string]any
@@ -27,15 +26,11 @@ type Token struct {
 	// payload with every disclosed claim inserted, every undisclosed array
 	// element removed, and the _sd and _sd_alg keys gone.
 	ResolvedClaims map[string]any
-	// Warnings contains informational warnings about the credential structure.
-	Warnings []string
-	// Deviations names rules a strict consumer rejects but lenient parsing
-	// tolerates, resolving the claims anyway (an _sd_alg in a nested object,
-	// say). Parse records them, a strict caller turns them into a rejection.
+	Warnings       []string
+	// Recoverable violations accepted by lenient parsing. Strict parsing rejects them.
 	Deviations []string
 }
 
-// JWT represents a decoded JWT (header.payload.signature).
 type JWT struct {
 	Raw       string
 	Header    map[string]any
@@ -43,7 +38,6 @@ type JWT struct {
 	Signature []byte
 }
 
-// Disclosure represents a single SD-JWT disclosure.
 type Disclosure struct {
 	Raw          string // base64url-encoded
 	Decoded      string // JSON string

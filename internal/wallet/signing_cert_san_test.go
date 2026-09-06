@@ -8,9 +8,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
-// A signing leaf names the issuer identifier in its subject alternative
-// names, so a verifier that asks for them accepts it. A verifier built
-// against SD-JWT VC draft-08 refuses a leaf without them.
+// SD-JWT VC draft-08 requires the issuer identifier in the signing leaf's SANs.
 func TestIssuedCredentialLeafNamesTheIssuer(t *testing.T) {
 	w := generateTestWallet(t)
 	w.IssuerURL = "https://eudi-test.dev"
@@ -67,8 +65,7 @@ func TestIssuedCredentialLeafNamesTheIssuer(t *testing.T) {
 	}
 }
 
-// A wallet reached by address rather than by name puts the address where an
-// address belongs.
+// IP hosts require an IP SAN.
 func TestIssuedCredentialLeafNamesAnAddressIssuer(t *testing.T) {
 	w := generateTestWallet(t)
 	w.IssuerURL = "https://159.195.213.172:8443"

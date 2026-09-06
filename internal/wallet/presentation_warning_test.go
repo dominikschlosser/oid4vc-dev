@@ -22,8 +22,6 @@ import (
 	"testing"
 )
 
-// Importing a credential from the UI must leave an activity-log entry, the same
-// as issuing or deleting one.
 func TestImportCredentialLogsActivity(t *testing.T) {
 	srv := newTestServer(t, false)
 	raw := generateTestCredential(t, srv.wallet)
@@ -42,8 +40,6 @@ func TestImportCredentialLogsActivity(t *testing.T) {
 	t.Error("expected an activity-log entry for the manual credential import")
 }
 
-// A presentation submitted through /api/presentations is validated once, so
-// each validation warning appears once in the activity log for a flow.
 func TestPresentationAPILogsEachValidationWarningOnce(t *testing.T) {
 	srv := newTestServer(t, true)
 	srv.wallet.RequireHAIP = true
@@ -76,8 +72,6 @@ func TestPresentationAPILogsEachValidationWarningOnce(t *testing.T) {
 	}
 }
 
-// A tester's request carrying parameters no specification defines leaves a
-// warning naming them, in every mode.
 func TestUndefinedRequestParametersAreWarned(t *testing.T) {
 	srv := newTestServer(t, true)
 	srv.wallet.ValidationMode = ValidationModeDebug

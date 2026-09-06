@@ -24,7 +24,6 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/jws"
 )
 
-// JWTConfig holds options for generating a mock JWT VC credential.
 type JWTConfig struct {
 	Issuer        string
 	VCT           string
