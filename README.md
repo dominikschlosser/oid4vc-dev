@@ -270,8 +270,6 @@ Generate a DCQL (Digital Credentials Query Language) query from a credential's c
 eudi dcql credential.txt
 ```
 
-The wallet evaluates `credential_sets` constraints when processing DCQL queries, selecting the best matching option from each set.
-
 **Example output (SD-JWT):**
 
 ```json
