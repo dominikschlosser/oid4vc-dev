@@ -5,6 +5,12 @@ Notable changes by release.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **The demo issuer offers every credential template the wallet knows** beside its ticket, selectable on the issuer page and by `?credential=<id>` on `POST /api/offers`, so it can stand in as the PID provider of a wallet under test.
+
 ## [2.4.0] - 2026-09-06
 
 ### Added
