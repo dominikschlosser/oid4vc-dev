@@ -75,24 +75,16 @@ func CredentialIssuedAt(cred StoredCredential) time.Time {
 	switch cred.Format {
 	case "mso_mdoc":
 		doc, err := mdoc.Parse(cred.Raw)
-		if err != nil || doc.IssuerAuth == nil || doc.IssuerAuth.MSO == nil {
+		if err != nil {
 			return time.Time{}
 		}
-		validity := doc.IssuerAuth.MSO.ValidityInfo
-		if validity == nil || validity.Signed == nil {
-			return time.Time{}
-		}
-		return *validity.Signed
+		return mdocSignedAt(doc)
 	default:
 		token, err := sdjwt.ParseLenient(cred.Raw)
 		if err != nil || token == nil {
 			return time.Time{}
 		}
-		iat, ok := token.Payload["iat"].(float64)
-		if !ok || iat <= 0 {
-			return time.Time{}
-		}
-		return time.Unix(int64(iat), 0)
+		return jwtIssuedAt(token.Payload)
 	}
 }
 

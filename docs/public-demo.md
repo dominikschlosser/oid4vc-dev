@@ -196,7 +196,7 @@ Interpret the numbers with care. Your own testing counts too, and one page load 
 ## Deployment notes
 
 - Terminate TLS in a reverse proxy (the example uses Caddy with automatic Let's Encrypt) and forward to the wallet's HTTP port. The wallet derives all advertised URLs from `--base-url`.
-- Persist a volume at `/home/app/.eudi-dev` (the parent of `wallet/`). The shared CA is stored one level above the wallet directory, and issuer keys must persist across restarts, otherwise verifiers holding the old trust list fail.
+- Persist a volume at `/home/app/.eudi-dev` (the parent of `wallet/`) and set `EUDI_DEV_STORAGE=file` and `EUDI_DEV_SEED=` (the image's default is memory with a public seed). The shared CA is stored one level above the wallet directory, and issuer keys must persist across restarts, otherwise verifiers holding the old trust list fail.
 - Run exactly one replica. The wallet store is a single-writer file.
 - Leave `HTTP_PROXY` and `HTTPS_PROXY` unset in the container. A proxy would bypass the dial time network checks.
 - Self-fetches of the public origin (for example a pasted offer pointing at the demo itself) resolve through public DNS. On typical cloud hosts hairpin NAT makes this work. A compose network alias for the public hostname would resolve to a private address and be blocked.

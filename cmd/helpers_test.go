@@ -505,31 +505,37 @@ func TestWalletRegisterOptions_Defaults(t *testing.T) {
 	}
 }
 
+// The handler a register command installs starts the wallet with the
+// wallet flags the register command was given.
 func TestWalletRegisterInheritedServeArgs(t *testing.T) {
 	parent := &cobra.Command{Use: "wallet"}
 	parent.PersistentFlags().String("wallet-dir", "", "")
 	parent.PersistentFlags().String("mode", "debug", "")
-	cmd := &cobra.Command{Use: "register"}
-	parent.AddCommand(cmd)
-	if err := parent.PersistentFlags().Set("wallet-dir", "/tmp/isolated-wallet"); err != nil {
-		t.Fatalf("set wallet-dir: %v", err)
+	parent.PersistentFlags().String("storage", "", "")
+	var got []string
+	parent.AddCommand(&cobra.Command{Use: "register", Run: func(cmd *cobra.Command, _ []string) {
+		got = walletRegisterInheritedServeArgs(cmd)
+	}})
+	parent.SetArgs([]string{"register", "--wallet-dir", "/tmp/isolated-wallet", "--mode", "strict", "--storage", "memory"})
+	if err := parent.Execute(); err != nil {
+		t.Fatal(err)
 	}
-	if err := parent.PersistentFlags().Set("mode", "strict"); err != nil {
-		t.Fatalf("set mode: %v", err)
-	}
-
-	got := walletRegisterInheritedServeArgs(cmd)
-	if !argPairPresent(got, "--wallet-dir", "/tmp/isolated-wallet") {
-		t.Fatalf("walletRegisterInheritedServeArgs() missing wallet-dir: %#v", got)
-	}
-	if !argPairPresent(got, "--mode", "strict") {
-		t.Fatalf("walletRegisterInheritedServeArgs() missing mode: %#v", got)
+	for _, pair := range [][2]string{{"--wallet-dir", "/tmp/isolated-wallet"}, {"--mode", "strict"}, {"--storage", "memory"}} {
+		if !argPairPresent(got, pair[0], pair[1]) {
+			t.Fatalf("walletRegisterInheritedServeArgs() = %#v, missing %s", got, pair[0])
+		}
 	}
 }
 
+// The detached server gets every serve flag except the registration flags,
+// with the wallet flags of the parent command. The seed stays off its
+// command line.
 func TestSerializeWalletServeArgs(t *testing.T) {
 	parent := &cobra.Command{Use: "wallet"}
 	parent.PersistentFlags().String("wallet-dir", "", "")
+	parent.PersistentFlags().String("storage", "", "")
+	parent.PersistentFlags().String("templates-dir", "", "")
+	parent.PersistentFlags().String("seed", "", "")
 	cmd := &cobra.Command{Use: "serve"}
 	parent.AddCommand(cmd)
 	flags := cmd.Flags()
@@ -540,46 +546,34 @@ func TestSerializeWalletServeArgs(t *testing.T) {
 	flags.Bool("register", false, "")
 	flags.Bool("no-register", false, "")
 	flags.Bool("detached", false, "")
-	if err := flags.Set("port", "9123"); err != nil {
-		t.Fatalf("set port: %v", err)
+	var got []string
+	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		var err error
+		got, err = serializeWalletServeArgs(cmd)
+		return err
 	}
-	if err := flags.Set("detached", "true"); err != nil {
-		t.Fatalf("set detached: %v", err)
-	}
-	if err := flags.Set("auto-accept", "true"); err != nil {
-		t.Fatalf("set auto-accept: %v", err)
-	}
-	if err := flags.Set("base-url", "http://localhost:9123"); err != nil {
-		t.Fatalf("set base-url: %v", err)
-	}
-	if err := flags.Set("credential", "first.json"); err != nil {
-		t.Fatalf("set credential 1: %v", err)
-	}
-	if err := flags.Set("credential", "second.json"); err != nil {
-		t.Fatalf("set credential 2: %v", err)
-	}
-	if err := flags.Set("register", "true"); err != nil {
-		t.Fatalf("set register: %v", err)
-	}
-	if err := parent.PersistentFlags().Set("wallet-dir", "/tmp/isolated-wallet"); err != nil {
-		t.Fatalf("set wallet-dir: %v", err)
-	}
-
-	got, err := serializeWalletServeArgs(cmd)
-	if err != nil {
-		t.Fatalf("serializeWalletServeArgs() error = %v", err)
+	parent.SetArgs([]string{"serve", "--port", "9123", "--detached", "--auto-accept", "--base-url", "http://localhost:9123",
+		"--credential", "first.json", "--credential", "second.json", "--register",
+		"--wallet-dir", "/tmp/isolated-wallet", "--storage", "memory", "--templates-dir", "/custom/templates", "--seed", "secret"})
+	if err := parent.Execute(); err != nil {
+		t.Fatal(err)
 	}
 
 	want := []string{
-		"--wallet-dir", "/tmp/isolated-wallet",
 		"--auto-accept=true",
 		"--base-url", "http://localhost:9123",
 		"--credential", "first.json",
 		"--credential", "second.json",
 		"--port", "9123",
+		"--storage", "memory",
+		"--templates-dir", "/custom/templates",
+		"--wallet-dir", "/tmp/isolated-wallet",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("serializeWalletServeArgs() = %#v, want %#v", got, want)
+	}
+	if !slices.Contains(detachedChildEnv("secret"), wallet.SeedEnvVar+"=secret") {
+		t.Fatal("the detached server's environment lacks the seed")
 	}
 }
 
@@ -592,27 +586,6 @@ func TestPresentAliasForwardsAcceptFlags(t *testing.T) {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("present alias is missing forwarded accept flag --%s", name)
 		}
-	}
-}
-
-func TestSerializeWalletServeArgs_ForwardsTemplatesDir(t *testing.T) {
-	parent := &cobra.Command{Use: "wallet"}
-	parent.PersistentFlags().String("wallet-dir", "", "")
-	parent.PersistentFlags().String("templates-dir", "", "")
-	cmd := &cobra.Command{Use: "serve"}
-	parent.AddCommand(cmd)
-	cmd.Flags().Int("port", config.DefaultWalletPort, "")
-
-	if err := parent.PersistentFlags().Set("templates-dir", "/custom/templates"); err != nil {
-		t.Fatalf("set templates-dir: %v", err)
-	}
-
-	got, err := serializeWalletServeArgs(cmd)
-	if err != nil {
-		t.Fatalf("serializeWalletServeArgs() error = %v", err)
-	}
-	if !argPairPresent(got, "--templates-dir", "/custom/templates") {
-		t.Fatalf("serializeWalletServeArgs() = %#v, want it to forward --templates-dir", got)
 	}
 }
 

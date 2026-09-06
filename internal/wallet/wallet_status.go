@@ -133,10 +133,10 @@ func (w *Wallet) BuildStatusList() (int, []byte) {
 	return bits, bitstring
 }
 
-// nextStatusIndex reserves the next status list index: from the store's
+// NextStatusIndex reserves the next status list index: from the store's
 // shared counter on a backend that has one, from the wallet's own counter
 // otherwise.
-func (w *Wallet) nextStatusIndex() (int, error) {
+func (w *Wallet) NextStatusIndex() (int, error) {
 	w.mu.RLock()
 	allocate := w.allocateStatusIndex
 	w.mu.RUnlock()
@@ -148,11 +148,6 @@ func (w *Wallet) nextStatusIndex() (int, error) {
 	idx := w.StatusListCounter
 	w.StatusListCounter++
 	return idx, nil
-}
-
-// NextStatusIndex reserves and returns the next wallet-managed status list index.
-func (w *Wallet) NextStatusIndex() (int, error) {
-	return w.nextStatusIndex()
 }
 
 // registerStatusEntry records a status entry for a credential. A negative

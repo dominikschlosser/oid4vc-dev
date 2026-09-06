@@ -85,3 +85,4 @@ It includes:
 - a compose file with Postgres, two wallet servers and nginx
 - an nginx config with round robin for API clients and a sticky session for browsers
 - the endpoints to drive and how to add servers
+- `loadtest`, a Go load generator that drives issuance, presentation and listing concurrently and checks that nothing was lost

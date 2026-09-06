@@ -59,12 +59,7 @@ func spawnDetachedServe(cmd *cobra.Command, port int, register, noRegister bool)
 		flags = append(flags, "--storage", store.Backend().Kind())
 	}
 	args := append([]string{"wallet", "serve"}, flags...)
-	// The seed is a secret, so it reaches the child through the environment
-	// and never through its command line.
-	env := os.Environ()
-	if keySeed != "" {
-		env = append(env, wallet.SeedEnvVar+"="+keySeed)
-	}
+	env := detachedChildEnv(keySeed)
 
 	if err := os.MkdirAll(store.Dir, 0o700); err != nil {
 		return fmt.Errorf("creating wallet dir: %w", err)
@@ -120,4 +115,14 @@ func spawnDetachedServe(cmd *cobra.Command, port int, register, noRegister bool)
 			return nil
 		}
 	}
+}
+
+// detachedChildEnv is the environment of the detached server. The seed is a
+// secret, so it reaches the child here and never through its command line.
+func detachedChildEnv(seed string) []string {
+	env := os.Environ()
+	if seed != "" {
+		env = append(env, wallet.SeedEnvVar+"="+seed)
+	}
+	return env
 }

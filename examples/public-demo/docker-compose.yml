@@ -46,6 +46,10 @@ services:
     image: ghcr.io/dominikschlosser/eudi-dev:${WALLET_TAG:-latest}
     restart: unless-stopped
     logging: *logging
+    # The demo persists: files on the mounted volume and its own random keys.
+    environment:
+      EUDI_DEV_STORAGE: file
+      EUDI_DEV_SEED: ""
     # No published ports: only Caddy reaches the wallet.
     command:
       - wallet
@@ -83,6 +87,10 @@ services:
     image: ghcr.io/dominikschlosser/eudi-dev:${PREVIEW_TAG:-latest}
     restart: unless-stopped
     logging: *logging
+    # The demo persists: files on the mounted volume and its own random keys.
+    environment:
+      EUDI_DEV_STORAGE: file
+      EUDI_DEV_SEED: ""
     # Opt-in: a plain production up/push leaves it alone, and ./deploy.sh
     # preview names it explicitly to bring it up.
     profiles: ["preview"]
@@ -116,6 +124,10 @@ services:
     image: ghcr.io/dominikschlosser/eudi-dev:${STRICT_TAG:-latest}
     restart: unless-stopped
     logging: *logging
+    # The demo persists: files on the mounted volume and its own random keys.
+    environment:
+      EUDI_DEV_STORAGE: file
+      EUDI_DEV_SEED: ""
     # Opt-in: a plain production up/push leaves it alone, and ./deploy.sh
     # strict names it explicitly to bring it up.
     profiles: ["strict"]

@@ -34,6 +34,10 @@ services:
 
   wallet:
     build: ../..
+    # Files on the mounted volume, random keys.
+    environment:
+      EUDI_DEV_STORAGE: file
+      EUDI_DEV_SEED: ""
     network_mode: "service:keycloak"
     depends_on:
       - keycloak
@@ -56,6 +60,10 @@ services:
   wallet-init:
     profiles: ["setup"]
     build: ../..
+    # Files on the mounted volume, random keys.
+    environment:
+      EUDI_DEV_STORAGE: file
+      EUDI_DEV_SEED: ""
     network_mode: "none"
     volumes:
       - wallet-data:/home/app/.eudi-dev

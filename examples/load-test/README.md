@@ -21,7 +21,7 @@ curl -s localhost:8080/api/config | jq '{storage, credential_count}'
 docker compose logs ingress | grep upstream=
 ```
 
-The ingress log shows `upstream=` alternating between the two server addresses. `storage` is `postgres` and `credential_count` is the same on each. `WALLET_TAG=2.4.0 docker compose up -d` pins a release. `docker compose build` builds the working tree instead of the published image. `INGRESS_PORT=18080 docker compose up -d` moves the HTTP host port (the base URL follows it).
+The ingress log shows `upstream=` alternating between the two server addresses. `storage` is `postgres` and `credential_count` is the same on each. `WALLET_TAG=2.4.0 docker compose up -d` pins a release. `docker compose build` builds the image from the working tree. `INGRESS_PORT=18080 docker compose up -d` moves the HTTP host port (the base URL follows it).
 
 ## Drive it
 

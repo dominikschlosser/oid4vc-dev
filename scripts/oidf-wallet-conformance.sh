@@ -21,6 +21,12 @@ WALLET_MANAGED=1
 if [ -n "${OIDF_WALLET_URL:-}" ]; then
   WALLET_MANAGED=0
 fi
+# The managed wallet registers in its own home, so a `wallet kill --all` or
+# `wallet use` in the user's default home leaves the run alone.
+if [ "$WALLET_MANAGED" = "1" ]; then
+  EUDI_DEV_HOME=${EUDI_DEV_HOME:-"$RUN_DIR/home"}
+  export EUDI_DEV_HOME
+fi
 WALLET_URL=${OIDF_WALLET_URL:-"http://127.0.0.1:${PORT}"}
 # A hosted suite fetches the wallet's status list itself, so the wallet needs
 # a public https base URL (a tunnel terminating TLS in front of $PORT). An

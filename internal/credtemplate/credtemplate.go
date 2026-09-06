@@ -333,10 +333,8 @@ func Delete(loc Location, name string) error {
 	}
 	for _, ext := range templateExtensions {
 		key := loc.key(name + ext)
-		if _, err := loc.Store.Read(key); err == nil {
+		if _, ok := loc.Store.Stat(key); ok {
 			return loc.Store.Delete(key)
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("reading template: %w", err)
 		}
 	}
 	for _, t := range PredefinedTemplates() {
@@ -368,7 +366,6 @@ func IsBareName(s string) bool {
 		!hasTemplateExtension(s)
 }
 
-// loadFile reads a template file from the given path.
 func loadFile(file string) (*Template, error) {
 	data, err := os.ReadFile(file)
 	if err != nil {

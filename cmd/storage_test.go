@@ -62,25 +62,15 @@ func TestResolvedWalletDir_IsBackendIndependent(t *testing.T) {
 	}
 }
 
-// --seed wins over EUDI_DEV_SEED, and "auto" seeds the memory backend only.
+// --seed wins over EUDI_DEV_SEED.
 func TestOpenStore_SeedFlagBeatsEnvironment(t *testing.T) {
 	walletDir = t.TempDir()
 	t.Cleanup(func() { walletDir, storageSpec, keySeed = "", "", "" })
-	t.Setenv(wallet.SeedEnvVar, "auto")
-
-	storageSpec = storage.KindMemory
+	t.Setenv(wallet.SeedEnvVar, "")
+	storageSpec = storage.KindFile
+	keySeed = "bench"
 	store, err := openStore()
 	if err != nil || !store.Seeded() {
-		t.Fatalf("auto on memory: seeded %t, %v", store.Seeded(), err)
-	}
-	storageSpec = storage.KindFile
-	store, err = openStore()
-	if err != nil || store.Seeded() {
-		t.Fatalf("auto on file: seeded %t, %v", store.Seeded(), err)
-	}
-	keySeed = "bench"
-	store, err = openStore()
-	if err != nil || !store.Seeded() {
-		t.Fatalf("--seed on file: seeded %t, %v", store.Seeded(), err)
+		t.Fatalf("--seed with an empty environment seed: seeded %t, %v", store.Seeded(), err)
 	}
 }

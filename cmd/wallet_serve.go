@@ -34,6 +34,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/format"
 	"github.com/dominikschlosser/eudi-dev/internal/imprint"
 	"github.com/dominikschlosser/eudi-dev/internal/remote"
+	"github.com/dominikschlosser/eudi-dev/internal/storage"
 	"github.com/dominikschlosser/eudi-dev/internal/wallet"
 	"github.com/dominikschlosser/eudi-dev/internal/web"
 )
@@ -284,11 +285,14 @@ func runningInDocker() bool {
 func serializeWalletServeArgs(cmd *cobra.Command) ([]string, error) {
 	args := []string{}
 	var err error
+	// The flag set holds the persistent flags of the parents too. The seed
+	// is a secret and travels in the environment.
 	appendFlag := func(flags *pflag.FlagSet, flag *pflag.Flag) {
 		if err != nil {
 			return
 		}
-		if flag.Name == "register" || flag.Name == "no-register" || flag.Name == "detached" {
+		switch flag.Name {
+		case "register", "no-register", "detached", "seed":
 			return
 		}
 		switch flag.Value.Type() {
@@ -311,12 +315,6 @@ func serializeWalletServeArgs(cmd *cobra.Command) ([]string, error) {
 		}
 	}
 
-	visitChangedPersistentFlags(cmd, func(flag *pflag.Flag) {
-		switch flag.Name {
-		case "wallet-dir", "mode", "templates-dir", "storage":
-			args = append(args, "--"+flag.Name, flag.Value.String())
-		}
-	})
 	cmd.Flags().Visit(func(flag *pflag.Flag) {
 		appendFlag(cmd.Flags(), flag)
 	})
@@ -593,8 +591,8 @@ func runWalletServe(cmd *cobra.Command, opts *walletServeOptions) error {
 	if source := store.SeedSource(); source != "" {
 		fmt.Printf("  Keys:        derived from the %s\n", source)
 	}
-	if opts.Demo && store.SeedSource() == "built-in seed" {
-		fmt.Fprintln(os.Stderr, "warning: the keys derive from the public built-in seed, anyone can derive this wallet's CA. Set EUDI_DEV_SEED to a secret or persist the state.")
+	if store.SeedSource() == wallet.BuiltInSeedSource && (opts.Demo || store.Backend().Kind() != storage.KindMemory) {
+		fmt.Fprintln(os.Stderr, "warning: the keys derive from the public seed eudi-dev. Anyone can derive this wallet's CA. Set EUDI_DEV_SEED to a secret, or to an empty value for random keys.")
 	}
 	fmt.Printf("  Validation:  %s\n", w.ValidationMode)
 	if opts.Demo {

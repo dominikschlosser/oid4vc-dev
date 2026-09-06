@@ -132,7 +132,7 @@ func (s *fileStore) Stat(key string) (Stamp, bool) {
 	if err != nil || info.IsDir() {
 		return Stamp{}, false
 	}
-	return Stamp{Version: strconv.FormatInt(info.ModTime().UnixNano(), 10), Size: info.Size()}, true
+	return fileStamp(info), true
 }
 
 func (s *fileStore) List(prefix string) ([]string, error) {
@@ -159,42 +159,13 @@ func (s *fileStore) List(prefix string) ([]string, error) {
 }
 
 func (s *fileStore) ReadAll(prefix string) (map[string]Blob, error) {
-	prefix, err := cleanPrefix(prefix)
-	if err != nil {
-		return nil, err
-	}
 	blobs := make(map[string]Blob)
-	root, err := os.OpenRoot(s.root)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return blobs, nil
-		}
-		return nil, err
-	}
-	defer func() { _ = root.Close() }()
-	rootFS := root.FS()
-	if prefix == "" {
-		prefix = "."
-	}
-	err = fs.WalkDir(rootFS, prefix, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
-			return err
-		}
-		if d.IsDir() || strings.HasPrefix(d.Name(), tempPrefix) {
-			return nil
-		}
-		data, err := fs.ReadFile(rootFS, p)
+	err := s.walk(prefix, func(key string, info fs.FileInfo, root fs.FS) error {
+		data, err := fs.ReadFile(root, key)
 		if err != nil {
 			return err
 		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		blobs[p] = Blob{Data: data, Stamp: Stamp{Version: strconv.FormatInt(info.ModTime().UnixNano(), 10), Size: info.Size()}}
+		blobs[key] = Blob{Data: data, Stamp: fileStamp(info)}
 		return nil
 	})
 	if err != nil {
@@ -204,23 +175,37 @@ func (s *fileStore) ReadAll(prefix string) (map[string]Blob, error) {
 }
 
 func (s *fileStore) Stamps(prefix string) (map[string]Stamp, error) {
-	prefix, err := cleanPrefix(prefix)
+	stamps := make(map[string]Stamp)
+	err := s.walk(prefix, func(key string, info fs.FileInfo, _ fs.FS) error {
+		stamps[key] = fileStamp(info)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	stamps := make(map[string]Stamp)
+	return stamps, nil
+}
+
+// walk calls visit for every blob under prefix. A missing root or prefix
+// visits nothing.
+func (s *fileStore) walk(prefix string, visit func(key string, info fs.FileInfo, root fs.FS) error) error {
+	prefix, err := cleanPrefix(prefix)
+	if err != nil {
+		return err
+	}
 	root, err := os.OpenRoot(s.root)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return stamps, nil
+			return nil
 		}
-		return nil, err
+		return err
 	}
 	defer func() { _ = root.Close() }()
+	rootFS := root.FS()
 	if prefix == "" {
 		prefix = "."
 	}
-	err = fs.WalkDir(root.FS(), prefix, func(p string, d fs.DirEntry, err error) error {
+	return fs.WalkDir(rootFS, prefix, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				return nil
@@ -234,13 +219,12 @@ func (s *fileStore) Stamps(prefix string) (map[string]Stamp, error) {
 		if err != nil {
 			return err
 		}
-		stamps[p] = Stamp{Version: strconv.FormatInt(info.ModTime().UnixNano(), 10), Size: info.Size()}
-		return nil
+		return visit(p, info, rootFS)
 	})
-	if err != nil {
-		return nil, err
-	}
-	return stamps, nil
+}
+
+func fileStamp(info fs.FileInfo) Stamp {
+	return Stamp{Version: strconv.FormatInt(info.ModTime().UnixNano(), 10), Size: info.Size()}
 }
 
 // WriteIf checks the stamp and writes without a lock, so two writers can

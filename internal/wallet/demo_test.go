@@ -260,7 +260,7 @@ func TestProtectedCredentials(t *testing.T) {
 	// Requests reload the store, so mutations have to be persisted the way
 	// the serve command wires it up.
 	srv.onSave = func() {
-		if err := srv.store.Save(srv.wallet); err != nil {
+		if err := srv.store.Load().Save(srv.wallet); err != nil {
 			t.Errorf("saving wallet: %v", err)
 		}
 	}
@@ -269,7 +269,7 @@ func TestProtectedCredentials(t *testing.T) {
 		t.Fatalf("generating protected defaults: %v", err)
 	}
 	// Every request reloads the store, so the baseline has to be on disk.
-	if err := srv.store.Save(srv.wallet); err != nil {
+	if err := srv.store.Load().Save(srv.wallet); err != nil {
 		t.Fatalf("saving baseline: %v", err)
 	}
 	baseline := srv.wallet.GetCredentials()
@@ -342,7 +342,7 @@ func TestProtectedCredentials(t *testing.T) {
 	})
 
 	t.Run("protection survives a save and reload", func(t *testing.T) {
-		if err := srv.store.Save(srv.wallet); err != nil {
+		if err := srv.store.Load().Save(srv.wallet); err != nil {
 			t.Fatalf("save: %v", err)
 		}
 		if err := srv.reloadFromStore(); err != nil {

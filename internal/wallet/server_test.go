@@ -39,7 +39,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/validate"
 )
 
-func newTestServer(t *testing.T, autoAccept bool) *Server {
+func newTestServer(t testing.TB, autoAccept bool) *Server {
 	t.Helper()
 	w := generateTestWallet(t)
 	w.AutoAccept = autoAccept
@@ -56,7 +56,7 @@ func newStrictTestServer(t *testing.T, autoAccept bool) *Server {
 	return srv
 }
 
-func serverRequest(t *testing.T, srv *Server, method, path string, body string) *httptest.ResponseRecorder {
+func serverRequest(t testing.TB, srv *Server, method, path string, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	var r io.Reader
 	if body != "" {

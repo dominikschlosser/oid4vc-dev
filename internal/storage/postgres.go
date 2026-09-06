@@ -29,8 +29,11 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx database/sql driver
 )
 
-// postgresTable holds one row per key.
-const postgresTable = "eudi_dev_state"
+// postgresTable holds one row per key, postgresVersions numbers its writes.
+const (
+	postgresTable    = "eudi_dev_state"
+	postgresVersions = "eudi_dev_state_version"
+)
 
 // postgresStore keeps every key as a row.
 type postgresStore struct {
@@ -87,10 +90,11 @@ func (s *postgresStore) prepare() error {
 			updated_at TIMESTAMPTZ NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS ` + postgresTable + `_prefix ON ` + postgresTable + ` (key text_pattern_ops)`,
+		`CREATE SEQUENCE IF NOT EXISTS ` + postgresVersions,
 	} {
 		_, err := s.db.Exec(statement)
 		var pgErr *pgconn.PgError
-		if err != nil && !(errors.As(err, &pgErr) && (pgErr.Code == "23505" || pgErr.Code == "42P07")) {
+		if err != nil && !(errors.As(err, &pgErr) && (pgErr.Code == "23505" || pgErr.Code == "42P07" || pgErr.Code == "42710")) {
 			return fmt.Errorf("preparing postgres storage at %s: %w", s.label, err)
 		}
 	}
@@ -138,13 +142,13 @@ func (s *postgresStore) Write(key string, data []byte, _ fs.FileMode) (Stamp, er
 	}
 	var version int64
 	err = s.db.QueryRow(`INSERT INTO `+postgresTable+` (key, data, version, updated_at)
-		VALUES ($1, $2, 1, now())
-		ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data, version = `+postgresTable+`.version + 1, updated_at = now()
+		VALUES ($1, $2, nextval('`+postgresVersions+`'), now())
+		ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data, version = nextval('`+postgresVersions+`'), updated_at = now()
 		RETURNING version`, key, data).Scan(&version)
 	if err != nil {
 		return Stamp{}, fmt.Errorf("writing %s: %w", key, err)
 	}
-	return Stamp{Version: strconv.FormatInt(version, 10), Size: int64(len(data))}, nil
+	return postgresStamp(version, int64(len(data))), nil
 }
 
 func (s *postgresStore) Delete(key string) error {
@@ -174,7 +178,7 @@ func (s *postgresStore) Stat(key string) (Stamp, bool) {
 	if err != nil {
 		return Stamp{}, false
 	}
-	return Stamp{Version: strconv.FormatInt(version, 10), Size: size}, true
+	return postgresStamp(version, size), true
 }
 
 func (s *postgresStore) List(prefix string) ([]string, error) {
@@ -236,7 +240,7 @@ func (s *postgresStore) ReadAll(prefix string) (map[string]Blob, error) {
 		if err := rows.Scan(&key, &data, &version); err != nil {
 			return nil, err
 		}
-		blobs[key] = Blob{Data: data, Stamp: Stamp{Version: strconv.FormatInt(version, 10), Size: int64(len(data))}}
+		blobs[key] = Blob{Data: data, Stamp: postgresStamp(version, int64(len(data)))}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -267,7 +271,7 @@ func (s *postgresStore) Stamps(prefix string) (map[string]Stamp, error) {
 		if err := rows.Scan(&key, &version, &size); err != nil {
 			return nil, err
 		}
-		stamps[key] = Stamp{Version: strconv.FormatInt(version, 10), Size: size}
+		stamps[key] = postgresStamp(version, size)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -286,13 +290,13 @@ func (s *postgresStore) WriteIf(key string, data []byte, _ fs.FileMode, expected
 	var version int64
 	if expected == "" {
 		err = s.db.QueryRow(`INSERT INTO `+postgresTable+` (key, data, version, updated_at)
-			VALUES ($1, $2, 1, now()) ON CONFLICT (key) DO NOTHING RETURNING version`, key, data).Scan(&version)
+			VALUES ($1, $2, nextval('`+postgresVersions+`'), now()) ON CONFLICT (key) DO NOTHING RETURNING version`, key, data).Scan(&version)
 	} else {
 		previous, parseErr := strconv.ParseInt(expected, 10, 64)
 		if parseErr != nil {
 			return Stamp{}, ErrConflict
 		}
-		err = s.db.QueryRow(`UPDATE `+postgresTable+` SET data = $2, version = version + 1, updated_at = now()
+		err = s.db.QueryRow(`UPDATE `+postgresTable+` SET data = $2, version = nextval('`+postgresVersions+`'), updated_at = now()
 			WHERE key = $1 AND version = $3 RETURNING version`, key, data, previous).Scan(&version)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
@@ -301,7 +305,13 @@ func (s *postgresStore) WriteIf(key string, data []byte, _ fs.FileMode, expected
 	if err != nil {
 		return Stamp{}, fmt.Errorf("writing %s: %w", key, err)
 	}
-	return Stamp{Version: strconv.FormatInt(version, 10), Size: int64(len(data))}, nil
+	return postgresStamp(version, int64(len(data))), nil
+}
+
+// postgresStamp is the stamp of a row. Versions come from one sequence for
+// the whole table, so a row deleted and created again never repeats one.
+func postgresStamp(version, size int64) Stamp {
+	return Stamp{Version: strconv.FormatInt(version, 10), Size: size}
 }
 
 // likePrefix escapes a key prefix for a LIKE pattern.

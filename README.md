@@ -97,7 +97,7 @@ docker pull ghcr.io/dominikschlosser/eudi-dev:latest
 docker run -p 8085:8085 -p 8086:8086 ghcr.io/dominikschlosser/eudi-dev
 ```
 
-The default CMD starts the wallet server headless with pre-loaded PID credentials.
+The default CMD starts the wallet server headless with pre-loaded PID credentials. The container keeps its state in memory and needs no volume.
 
 → [Full Docker & verifier testing guide](docs/docker.md)
 → [OIDF conformance status](docs/conformance.md), [runbook](docs/conformance-run.md), and [results](docs/conformance-results.md)

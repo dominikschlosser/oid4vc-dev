@@ -34,6 +34,10 @@ type memoryBlob struct {
 	version uint64
 }
 
+func (b memoryBlob) stamp() Stamp {
+	return Stamp{Version: strconv.FormatUint(b.version, 10), Size: int64(len(b.data))}
+}
+
 // processMemory is the one memory store of the process, shared by every
 // opener.
 var processMemory = NewMemory()
@@ -71,8 +75,9 @@ func (s *memoryStore) Write(key string, data []byte, _ fs.FileMode) (Stamp, erro
 // put stores data under key and returns the new stamp. Caller holds mu.
 func (s *memoryStore) put(key string, data []byte) Stamp {
 	s.seq++
-	s.blobs[key] = memoryBlob{data: append([]byte(nil), data...), version: s.seq}
-	return Stamp{Version: strconv.FormatUint(s.seq, 10), Size: int64(len(data))}
+	blob := memoryBlob{data: append([]byte(nil), data...), version: s.seq}
+	s.blobs[key] = blob
+	return blob.stamp()
 }
 
 func (s *memoryStore) Delete(key string) error {
@@ -97,7 +102,7 @@ func (s *memoryStore) Stat(key string) (Stamp, bool) {
 	if !ok {
 		return Stamp{}, false
 	}
-	return Stamp{Version: strconv.FormatUint(blob.version, 10), Size: int64(len(blob.data))}, true
+	return blob.stamp(), true
 }
 
 func (s *memoryStore) List(prefix string) ([]string, error) {
@@ -135,7 +140,7 @@ func (s *memoryStore) ReadAll(prefix string) (map[string]Blob, error) {
 	blobs := make(map[string]Blob)
 	for key, blob := range s.blobs {
 		if strings.HasPrefix(key, prefix) {
-			blobs[key] = Blob{Data: append([]byte(nil), blob.data...), Stamp: Stamp{Version: strconv.FormatUint(blob.version, 10), Size: int64(len(blob.data))}}
+			blobs[key] = Blob{Data: append([]byte(nil), blob.data...), Stamp: blob.stamp()}
 		}
 	}
 	return blobs, nil
@@ -154,7 +159,7 @@ func (s *memoryStore) Stamps(prefix string) (map[string]Stamp, error) {
 	stamps := make(map[string]Stamp)
 	for key, blob := range s.blobs {
 		if strings.HasPrefix(key, prefix) {
-			stamps[key] = Stamp{Version: strconv.FormatUint(blob.version, 10), Size: int64(len(blob.data))}
+			stamps[key] = blob.stamp()
 		}
 	}
 	return stamps, nil
@@ -168,7 +173,7 @@ func (s *memoryStore) WriteIf(key string, data []byte, _ fs.FileMode, expected s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	blob, ok := s.blobs[key]
-	if (ok && strconv.FormatUint(blob.version, 10) != expected) || (!ok && expected != "") {
+	if (ok && blob.stamp().Version != expected) || (!ok && expected != "") {
 		return Stamp{}, ErrConflict
 	}
 	return s.put(key, data), nil

@@ -251,7 +251,7 @@ func (w *Wallet) importSDJWT(raw, group, bindingKeyPEM string) (*StoredCredentia
 		BatchGroup:    group,
 		BindingKeyPEM: bindingKeyPEM,
 	}
-	cred.issuedAt = issuedAtFromPayload(token.Payload)
+	cred.issuedAt = jwtIssuedAt(token.Payload)
 
 	if vct, ok := token.Payload["vct"].(string); ok {
 		cred.VCT = vct
@@ -276,7 +276,7 @@ func (w *Wallet) importPlainJWT(raw, group, bindingKeyPEM string) (*StoredCreden
 		BatchGroup:    group,
 		BindingKeyPEM: bindingKeyPEM,
 	}
-	cred.issuedAt = issuedAtFromPayload(payload)
+	cred.issuedAt = jwtIssuedAt(payload)
 
 	if vct, ok := payload["vct"].(string); ok && vct != "" {
 		cred.VCT = vct
@@ -379,16 +379,17 @@ func (c *StoredCredential) Rehydrate() error {
 		if c.Claims == nil {
 			c.Claims = token.ResolvedClaims
 		}
-		c.issuedAt = issuedAtFromPayload(token.Payload)
+		c.issuedAt = jwtIssuedAt(token.Payload)
 
 	case "jwt_vc_json":
+		_, payload, _, err := format.ParseJWTParts(c.Raw)
+		if err != nil {
+			return fmt.Errorf("parsing JWT: %w", err)
+		}
 		if c.Claims == nil {
-			_, payload, _, err := format.ParseJWTParts(c.Raw)
-			if err != nil {
-				return fmt.Errorf("parsing JWT: %w", err)
-			}
 			c.Claims = payload
 		}
+		c.issuedAt = jwtIssuedAt(payload)
 
 	case "mso_mdoc":
 		doc, err := mdoc.Parse(c.Raw)
@@ -439,8 +440,8 @@ func (w *Wallet) logCredentialImport(imported *StoredCredential, raw, issuer str
 	w.addProtocolLog("issuance", "credential_imported", fmt.Sprintf("Imported credential %s", imported.ID), true, details)
 }
 
-// issuedAtFromPayload reads a JWT payload's iat.
-func issuedAtFromPayload(payload map[string]any) time.Time {
+// jwtIssuedAt reads a JWT payload's iat.
+func jwtIssuedAt(payload map[string]any) time.Time {
 	if iat, ok := payload["iat"].(float64); ok && iat > 0 {
 		return time.Unix(int64(iat), 0)
 	}

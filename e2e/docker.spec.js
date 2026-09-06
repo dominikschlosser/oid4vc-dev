@@ -100,10 +100,12 @@ test.describe("Docker Image", () => {
     expect(formats).toContain("mso_mdoc");
   });
 
-  test("keeps its state in memory when no volume is mounted", async () => {
+  test("keeps its state in memory and derives its keys from the image seed", async () => {
     const res = await httpGet(`${WALLET_URL}/api/config`);
     expect(res.status).toBe(200);
-    expect(JSON.parse(res.body).storage).toBe("memory");
+    const config = JSON.parse(res.body);
+    expect(config.storage).toBe("memory");
+    expect(config.seeded_keys).toBe(true);
   });
 
   test("trust list endpoint is available", async () => {

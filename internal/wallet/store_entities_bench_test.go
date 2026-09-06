@@ -15,6 +15,8 @@
 package wallet
 
 import (
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -29,14 +31,14 @@ import (
 // BenchmarkEntitySaveWithManyCredentials times the save of one new log entry
 // and one new credential on a wallet that already holds many.
 func BenchmarkEntitySaveWithManyCredentials(b *testing.B) {
+	quietLogs(b)
 	store := NewWalletStoreOn(filepath.Join(b.TempDir(), "wallet"), storage.NewMemory())
 	w, err := store.LoadOrCreate()
 	if err != nil {
 		b.Fatal(err)
 	}
-	t := &testing.T{}
 	for i := 0; i < 500; i++ {
-		importTestCredential(t, w, "Held")
+		importTestCredential(b, w, "Held")
 	}
 	if err := store.Save(w); err != nil {
 		b.Fatal(err)
@@ -44,7 +46,7 @@ func BenchmarkEntitySaveWithManyCredentials(b *testing.B) {
 	// The credentials to add are built up front, so the loop times the save.
 	pool := New(w.HolderKey, w.IssuerKey, false)
 	for i := 0; i < b.N; i++ {
-		importTestCredential(t, pool, "New")
+		importTestCredential(b, pool, "New")
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -59,6 +61,7 @@ func BenchmarkEntitySaveWithManyCredentials(b *testing.B) {
 // BenchmarkEntityLoadOneAddedCredential times bringing a wallet of many
 // credentials up to date after another server added one.
 func BenchmarkEntityLoadOneAddedCredential(b *testing.B) {
+	quietLogs(b)
 	backend := storage.NewMemory()
 	dir := filepath.Join(b.TempDir(), "wallet")
 	store := NewWalletStoreOn(dir, backend)
@@ -66,9 +69,8 @@ func BenchmarkEntityLoadOneAddedCredential(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	t := &testing.T{}
 	for i := 0; i < 500; i++ {
-		importTestCredential(t, w, "Held")
+		importTestCredential(b, w, "Held")
 	}
 	if err := store.Save(w); err != nil {
 		b.Fatal(err)
@@ -81,16 +83,16 @@ func BenchmarkEntityLoadOneAddedCredential(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		importTestCredential(t, o, "New")
+		importTestCredential(b, o, "New")
 		if err := other.Save(o); err != nil {
 			b.Fatal(err)
 		}
 		b.StartTimer()
-		changed, err := store.ChangedSections(w, false)
+		changed, err := store.changedSections(w, false)
 		if err != nil {
 			b.Fatal(err)
 		}
-		if err := store.LoadSections(w, changed); err != nil {
+		if err := store.loadSections(w, changed); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -99,20 +101,20 @@ func BenchmarkEntityLoadOneAddedCredential(b *testing.B) {
 // BenchmarkServerIssueWithManyCredentials times POST /api/issue on a server
 // whose wallet already holds many credentials.
 func BenchmarkServerIssueWithManyCredentials(b *testing.B) {
-	t := &testing.T{}
-	srv := newTestServer(t, false)
+	quietLogs(b)
+	srv := newTestServer(b, false)
 	store := NewWalletStoreOn(filepath.Join(b.TempDir(), "wallet"), storage.NewMemory())
 	srv.SetStore(store)
 	srv.wallet.IssuerURL = "https://wallet.example:8086"
 	for i := 0; i < 500; i++ {
-		importTestCredential(t, srv.wallet, "Held")
+		importTestCredential(b, srv.wallet, "Held")
 	}
 	if err := store.Save(srv.wallet); err != nil {
 		b.Fatal(err)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		resp := serverRequest(t, srv, "POST", "/api/issue", `{"format":"sdjwt","template":"pid-sdjwt"}`)
+		resp := serverRequest(b, srv, "POST", "/api/issue", `{"format":"sdjwt","template":"pid-sdjwt"}`)
 		if resp.Code != 201 {
 			b.Fatalf("issue: %d %s", resp.Code, resp.Body.String())
 		}
@@ -123,8 +125,8 @@ func BenchmarkServerIssueWithManyCredentials(b *testing.B) {
 // presentation to a local verifier on a server whose wallet already holds
 // many credentials of the requested type.
 func BenchmarkServerPresentWithManyCredentials(b *testing.B) {
-	t := &testing.T{}
-	srv := newTestServer(t, true)
+	quietLogs(b)
+	srv := newTestServer(b, true)
 	store := NewWalletStoreOn(filepath.Join(b.TempDir(), "wallet"), storage.NewMemory())
 	srv.SetStore(store)
 	srv.wallet.IssuerURL = "https://wallet.example:8086"
@@ -162,10 +164,17 @@ func BenchmarkServerPresentWithManyCredentials(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		resp := serverRequest(t, srv, "GET", "/authorize?"+query.Encode(), "")
+		resp := serverRequest(b, srv, "GET", "/authorize?"+query.Encode(), "")
 		if resp.Code >= 400 {
 			b.Fatalf("authorize: %d %s", resp.Code, resp.Body.String())
 		}
 		<-received
 	}
+}
+
+// quietLogs keeps the server's log lines out of the benchmark output.
+func quietLogs(b *testing.B) {
+	previous := log.Writer()
+	log.SetOutput(io.Discard)
+	b.Cleanup(func() { log.SetOutput(previous) })
 }

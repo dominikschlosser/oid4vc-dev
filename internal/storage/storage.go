@@ -59,8 +59,7 @@ type Store interface {
 	// ReadAll returns every blob under prefix, at any depth, by key.
 	ReadAll(prefix string) (map[string]Blob, error)
 	// Stamps returns the stamp of every blob under prefix, at any depth, by
-	// key. A reader compares them with what it holds and reads only the
-	// blobs that changed.
+	// key.
 	Stamps(prefix string) (map[string]Stamp, error)
 	// WriteIf replaces the blob at key only while its stamp version is still
 	// expected ("" for a blob that must not exist yet) and returns
@@ -138,7 +137,7 @@ func Open(spec string, opts Options) (Store, error) {
 func rootHoldsState(root string) bool {
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return false
+		return !errors.Is(err, fs.ErrNotExist)
 	}
 	if len(entries) == 0 {
 		return true
@@ -206,7 +205,7 @@ func cleanPrefix(prefix string) (string, error) {
 }
 
 // notExist builds the error every backend returns for a missing key, so
-// callers can test it with errors.Is and os.IsNotExist alike.
+// callers can test it with errors.Is(err, fs.ErrNotExist).
 func notExist(op, key string) error {
 	return &fs.PathError{Op: op, Path: key, Err: fs.ErrNotExist}
 }

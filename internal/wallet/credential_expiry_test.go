@@ -81,8 +81,7 @@ func TestCredentialWithoutAStatedLifetimeNeverExpires(t *testing.T) {
 // pages ten at a time, and stable, so the same list does not reorder itself
 // between two reads.
 func TestSortCredentialsNewestFirst(t *testing.T) {
-	// Signed directly rather than through mock.GenerateSDJWT, which always
-	// stamps iat with the current time and offers no way to choose it.
+	// at signs a bare token whose only dated claim is iat.
 	at := func(unix int64) StoredCredential {
 		key, err := mock.GenerateKey()
 		if err != nil {
@@ -116,6 +115,38 @@ func TestSortCredentialsNewestFirst(t *testing.T) {
 	SortCredentialsNewestFirst(creds)
 	if creds[0].ID != "c3000" || creds[2].ID != "c1000" {
 		t.Error("a second sort reordered an already sorted list")
+	}
+}
+
+// A credential imported in this process reports the iat it carries, and the
+// newest-first order follows it.
+func TestCredentialIssuedAt_ImportedCredentials(t *testing.T) {
+	w := generateTestWallet(t)
+	key, err := mock.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	older := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
+	newer := older.Add(time.Hour)
+	var ids []string
+	for _, at := range []time.Time{older, newer} {
+		raw, err := mock.GenerateSDJWT(mock.SDJWTConfig{Issuer: "https://test.example", VCT: "urn:example:dated", ExpiresIn: 24 * time.Hour, IssuedAt: &at, Claims: map[string]any{"a": 1}, Key: key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cred, err := w.ImportCredential(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, cred.ID)
+	}
+	creds := w.GetCredentials()
+	if !CredentialIssuedAt(creds[0]).Equal(older) || !CredentialIssuedAt(creds[1]).Equal(newer) {
+		t.Fatalf("issued at = %v and %v, want %v and %v", CredentialIssuedAt(creds[0]), CredentialIssuedAt(creds[1]), older, newer)
+	}
+	SortCredentialsNewestFirst(creds)
+	if creds[0].ID != ids[1] {
+		t.Fatalf("newest first put %s first, want %s", creds[0].ID, ids[1])
 	}
 }
 

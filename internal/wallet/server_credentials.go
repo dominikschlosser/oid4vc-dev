@@ -33,10 +33,11 @@ import (
 // (as an unsaved, freshly issued credential carries) is decoded in place.
 func (s *Server) resolveDisplayImage(uri string) (contentType string, data []byte, ok bool) {
 	if strings.HasPrefix(uri, "asset:") {
-		if s.store == nil {
+		store := s.store.Load()
+		if store == nil {
 			return "", nil, false
 		}
-		return s.store.ReadDisplayAsset(uri)
+		return store.ReadDisplayAsset(uri)
 	}
 	return dataURIImage(uri)
 }

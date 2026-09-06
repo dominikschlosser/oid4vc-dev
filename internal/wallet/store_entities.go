@@ -16,7 +16,6 @@ package wallet
 
 import (
 	"bytes"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -24,19 +23,19 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"os"
 	"reflect"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
 // On the memory and database backends the wallet is stored as one blob per
-// entity under <prefix>/state/. A save writes the entities that changed
-// since the wallet was loaded and deletes the ones that went away, so several
+// entity under <prefix>/state/. A save writes the entities that differ from
+// its snapshot and deletes the ones that went away, so several
 // wallet servers on one database only clash when they change the same
 // entity. The activity log, the hot path under load, is append-only rows.
 //
@@ -45,23 +44,20 @@ import (
 //	credentials/<id>         {"seq": n, "value": StoredCredential}, seq keeps the order
 //	log/<time>-<hash>        one LogEntry
 //	status/<credential id>   one StatusEntry with its credential id
-//	status-counter           the next status list index, moved with WriteIf
+//	status-counter/value     the next status list index, moved with WriteIf
 //	deferred/<id>            {"seq": n, "value": DeferredIssuance}
 //	attestations/<hash>      one IssuedAttestationSpec
-//	settings                 base and issuer URL
+//	settings/value           base and issuer URL
 //	revision/<section>       rewritten whenever the section changes
 //
 // Every key is derived from the entity's identity alone, so a server whose
 // view is behind rewrites the same row and never adds a second one.
 //
-// A server reloads at every request boundary. It compares the revision rows
-// with the ones its wallet was loaded from, and for a section that changed
-// it compares the stamps of the section's rows with the ones it holds and
-// reads only the rows that are new or changed. The revision of a section a
-// server changed itself is written with WriteIf, and when that succeeds
-// nobody else changed the section since it was loaded, so the server records
-// the new stamp and skips its own change. The log is loaded on demand by the
-// log views, so a presentation on one server costs the others nothing.
+// A server reloads per request: it compares the revision rows with its
+// loaded revisions and refreshes only the sections, and within them the
+// rows, whose stamps changed. It writes the revision of a section it changed
+// with WriteIf, so it can tell its own change from another server's. The log
+// is loaded on demand by the log views.
 const (
 	stateSection        = "state"
 	credentialsSection  = "credentials"
@@ -86,14 +82,18 @@ var (
 // log to maxLogEntries.
 const logTrimEvery = 64
 
-// readAllAbove is the number of changed rows of a section from which the
-// section is read in one query rather than row by row.
-const readAllAbove = 16
+// bulkReadAbove is the number of changed rows above which a section is read
+// in one query.
+const bulkReadAbove = 16
 
-// stateSnapshot is what the wallet knows to be stored: entity key to the
-// blob as loaded or written. A save compares the wallet against it and a
-// reload compares the store's stamps against it. It is never changed in
-// place, so a save can read it without holding the wallet lock.
+// revisionMark is the content of a revision row. Only the row's stamp is
+// compared.
+var revisionMark = []byte("1")
+
+// stateSnapshot is the wallet's snapshot: entity key to the blob as loaded
+// or written. A save compares the wallet against it and a reload compares
+// the store's stamps against it. It is never changed in place, so a save can
+// read it without holding the wallet lock.
 type stateSnapshot map[string]storage.Blob
 
 // walletSettings is the settings entity.
@@ -124,9 +124,13 @@ func (s *WalletStore) stateKey(parts ...string) string {
 	return s.key(append([]string{stateSection}, parts...)...)
 }
 
-func (s *WalletStore) sectionPrefix(section string) string {
-	return s.stateKey(section) + "/"
+func (s *WalletStore) credentialKey(id string) string {
+	return s.stateKey(credentialsSection, entityName(id))
 }
+
+func (s *WalletStore) counterKey() string { return s.stateKey(statusCounterEntity, "value") }
+
+func (s *WalletStore) settingsKey() string { return s.stateKey(settingsSection, "value") }
 
 func (s *WalletStore) revisionKey(section string) string {
 	return s.stateKey(revisionSection, section)
@@ -142,30 +146,11 @@ func (s *WalletStore) sectionOf(key string) string {
 	return section
 }
 
-// Loaded reports whether w was loaded from an entity store.
-func (s *WalletStore) Loaded(w *Wallet) bool {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.persisted != nil
-}
-
-// hasEntities reports whether the store holds a wallet: one that was saved
-// at least once has revision rows.
-func (s *WalletStore) hasEntities() bool {
-	revisions, err := s.backend.ReadAll(s.stateKey(revisionSection))
-	return err == nil && len(revisions) > 0
-}
-
-// loadEntities fills a fresh wallet from the store.
-func (s *WalletStore) loadEntities(w *Wallet) error {
-	return s.LoadSections(w, allSections)
-}
-
-// ChangedSections returns the sections a running server refreshes whose
-// stored revision differs from the one w was loaded from. The log is
-// included only when asked.
-func (s *WalletStore) ChangedSections(w *Wallet, includeLog bool) ([]string, error) {
-	revisions, err := s.backend.ReadAll(s.stateKey(revisionSection))
+// changedSections returns the sections a running server refreshes whose
+// stored revision differs from the loaded one. The log is included only
+// when asked.
+func (s *WalletStore) changedSections(w *Wallet, includeLog bool) ([]string, error) {
+	revisions, err := s.backend.Stamps(s.stateKey(revisionSection))
 	if err != nil {
 		return nil, fmt.Errorf("reading wallet revisions: %w", err)
 	}
@@ -176,29 +161,28 @@ func (s *WalletStore) ChangedSections(w *Wallet, includeLog bool) ([]string, err
 		if section == logSection && !includeLog {
 			continue
 		}
-		if revisions[s.revisionKey(section)].Stamp != w.revisions[section] {
+		if revisions[s.revisionKey(section)] != w.revisions[section] {
 			changed = append(changed, section)
 		}
 	}
 	return changed, nil
 }
 
-// LoadSections brings the given sections of w up to date with the store. It
-// reads the rows whose stamps differ from the ones w holds, drops the rows
-// that are gone and keeps the parsed form of everything unchanged. The
-// revisions are read first, so a change that lands while a section is read
-// is loaded again on the next check.
-func (s *WalletStore) LoadSections(w *Wallet, sections []string) error {
-	revisions, err := s.backend.ReadAll(s.stateKey(revisionSection))
+// loadSections refreshes sections of w from the store. The revisions are
+// read first, so a change that lands during the read is loaded again on the
+// next check. A credential whose row is unchanged keeps its in-memory form,
+// and its stored form stays what it was, so a change made in memory is still
+// saved.
+func (s *WalletStore) loadSections(w *Wallet, sections []string) error {
+	revisions, err := s.backend.Stamps(s.stateKey(revisionSection))
 	if err != nil {
 		return fmt.Errorf("reading wallet revisions: %w", err)
 	}
 	w.mu.RLock()
-	known := w.persisted
-	knownSeqs := w.entitySeqs
-	parsed := make(map[string]StoredCredential, len(w.Credentials))
+	known, knownSeqs, wasSaved := w.persisted, w.entitySeqs, w.savedCredentials
+	held := make(map[string]StoredCredential, len(w.Credentials))
 	for _, cred := range w.Credentials {
-		parsed[s.stateKey(credentialsSection, entityName(cred.ID))] = cred
+		held[s.credentialKey(cred.ID)] = cred
 	}
 	w.mu.RUnlock()
 
@@ -211,7 +195,7 @@ func (s *WalletStore) LoadSections(w *Wallet, sections []string) error {
 			return err
 		}
 	}
-	loaded, seqs, err := s.parseSections(updated, sections, known, knownSeqs, parsed)
+	loaded, seqs, err := s.parseSections(updated, sections, known, knownSeqs, held)
 	if err != nil {
 		return err
 	}
@@ -242,23 +226,25 @@ func (s *WalletStore) LoadSections(w *Wallet, sections []string) error {
 	if slices.Contains(sections, credentialsSection) {
 		w.savedCredentials = make(map[string]StoredCredential, len(loaded.credentials))
 		for _, cred := range loaded.credentials {
-			w.savedCredentials[cred.ID] = cred
+			key := s.credentialKey(cred.ID)
+			if before, ok := wasSaved[key]; ok && known[key].Stamp == updated[key].Stamp {
+				cred = before
+			}
+			w.savedCredentials[key] = cred
 		}
 	}
 	if w.revisions == nil {
 		w.revisions = make(map[string]storage.Stamp)
 	}
 	for _, section := range sections {
-		w.revisions[section] = revisions[s.revisionKey(section)].Stamp
+		w.revisions[section] = revisions[s.revisionKey(section)]
 	}
 	w.allocateStatusIndex = s.allocateStatusIndex
 	return nil
 }
 
-// refreshSection puts the store's current rows of a section into updated:
-// rows whose stamp differs from known are read, rows that are gone are
-// dropped. A section with many changed rows (a first load, a long absence
-// from the log) is read in one query.
+// refreshSection reads the rows of section whose stamp differs from known
+// into updated and drops the rows that are gone.
 func (s *WalletStore) refreshSection(section string, known, updated stateSnapshot) error {
 	stamps, err := s.sectionStamps(section)
 	if err != nil {
@@ -275,17 +261,13 @@ func (s *WalletStore) refreshSection(section string, known, updated stateSnapsho
 			changed = append(changed, key)
 		}
 	}
-	if len(changed) > readAllAbove {
+	if len(changed) > bulkReadAbove {
 		blobs, err := s.backend.ReadAll(s.stateKey(section))
 		if err != nil {
 			return fmt.Errorf("reading wallet state: %w", err)
 		}
 		maps.Copy(updated, blobs)
-		if section == statusSection || section == settingsSection {
-			changed = slices.DeleteFunc(changed, func(key string) bool { _, ok := blobs[key]; return ok })
-		} else {
-			changed = nil
-		}
+		changed = slices.DeleteFunc(changed, func(key string) bool { _, ok := blobs[key]; return ok })
 	}
 	for _, key := range changed {
 		data, err := s.backend.Read(key)
@@ -302,24 +284,18 @@ func (s *WalletStore) refreshSection(section string, known, updated stateSnapsho
 }
 
 // sectionStamps returns the stamps of a section's rows. The status counter
-// and the settings are single rows outside a section prefix.
+// belongs to the status section under its own prefix.
 func (s *WalletStore) sectionStamps(section string) (map[string]storage.Stamp, error) {
-	var stamps map[string]storage.Stamp
-	var err error
-	switch section {
-	case settingsSection:
-		stamps = make(map[string]storage.Stamp)
-	default:
-		stamps, err = s.backend.Stamps(s.stateKey(section))
+	stamps, err := s.backend.Stamps(s.stateKey(section))
+	if err != nil {
+		return nil, fmt.Errorf("reading wallet state: %w", err)
+	}
+	if section == statusSection {
+		counter, err := s.backend.Stamps(s.stateKey(statusCounterEntity))
 		if err != nil {
 			return nil, fmt.Errorf("reading wallet state: %w", err)
 		}
-	}
-	single := map[string]string{statusSection: s.stateKey(statusCounterEntity), settingsSection: s.stateKey(settingsSection)}
-	if key, ok := single[section]; ok {
-		if stamp, ok := s.backend.Stat(key); ok {
-			stamps[key] = stamp
-		}
+		maps.Copy(stamps, counter)
 	}
 	return stamps, nil
 }
@@ -336,20 +312,14 @@ type loadedSections struct {
 }
 
 // parseSections parses the rows of the given sections and returns them with
-// the positions of the ordered rows by key. A credential whose row is the one
-// already parsed keeps its parsed form and its position, so a reload parses
-// only what changed.
-func (s *WalletStore) parseSections(blobs stateSnapshot, sections []string, known stateSnapshot, knownSeqs map[string]int, parsed map[string]StoredCredential) (loadedSections, map[string]int, error) {
+// the positions of the ordered rows by key. A credential in held whose row
+// is unchanged is kept as it is.
+func (s *WalletStore) parseSections(blobs stateSnapshot, sections []string, known stateSnapshot, knownSeqs map[string]int, held map[string]StoredCredential) (loadedSections, map[string]int, error) {
 	var loaded loadedSections
 	seqs := maps.Clone(knownSeqs)
 	if seqs == nil {
 		seqs = make(map[string]int)
 	}
-	type orderedCredential struct {
-		seq  int
-		cred StoredCredential
-	}
-	var credentials []orderedCredential
 	var deferred []orderedEntity
 	for _, key := range slices.Sorted(maps.Keys(blobs)) {
 		section := s.sectionOf(key)
@@ -360,22 +330,23 @@ func (s *WalletStore) parseSections(blobs stateSnapshot, sections []string, know
 		var err error
 		switch section {
 		case credentialsSection:
-			if before, ok := parsed[key]; ok && known[key].Stamp == blobs[key].Stamp {
-				if seq, ok := seqs[key]; ok {
-					credentials = append(credentials, orderedCredential{seq: seq, cred: before})
+			if before, ok := held[key]; ok && known[key].Stamp == blobs[key].Stamp {
+				if _, ok := seqs[key]; ok {
+					loaded.credentials = append(loaded.credentials, before)
 					break
 				}
 			}
 			var entity orderedEntity
 			var cred StoredCredential
 			if err = json.Unmarshal(data, &entity); err == nil {
-				if err = json.Unmarshal(entity.Value, &cred); err == nil {
-					err = cred.Rehydrate()
-				}
+				err = json.Unmarshal(entity.Value, &cred)
 			}
 			if err == nil {
+				if err := cred.Rehydrate(); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: rehydrating credential %s: %v\n", cred.ID, err)
+				}
 				seqs[key] = entity.Seq
-				credentials = append(credentials, orderedCredential{seq: entity.Seq, cred: cred})
+				loaded.credentials = append(loaded.credentials, cred)
 			}
 		case deferredSection:
 			var entity orderedEntity
@@ -389,7 +360,7 @@ func (s *WalletStore) parseSections(blobs stateSnapshot, sections []string, know
 				loaded.log = append(loaded.log, entry)
 			}
 		case statusSection:
-			if key == s.stateKey(statusCounterEntity) {
+			if key == s.counterKey() {
 				loaded.statusListCounter, err = strconv.Atoi(string(data))
 				break
 			}
@@ -412,10 +383,9 @@ func (s *WalletStore) parseSections(blobs stateSnapshot, sections []string, know
 			return loaded, nil, fmt.Errorf("parsing wallet state %s: %w", key, err)
 		}
 	}
-	sort.SliceStable(credentials, func(i, j int) bool { return credentials[i].seq < credentials[j].seq })
-	for _, c := range credentials {
-		loaded.credentials = append(loaded.credentials, c.cred)
-	}
+	sort.SliceStable(loaded.credentials, func(i, j int) bool {
+		return seqs[s.credentialKey(loaded.credentials[i].ID)] < seqs[s.credentialKey(loaded.credentials[j].ID)]
+	})
 	sort.SliceStable(deferred, func(i, j int) bool { return deferred[i].Seq < deferred[j].Seq })
 	for _, entity := range deferred {
 		var d DeferredIssuance
@@ -468,17 +438,16 @@ func (s *WalletStore) saveEntities(w *Wallet) error {
 		touched[s.sectionOf(key)] = true
 	}
 
-	// A revision written with the stamp the wallet was loaded from proves
-	// that nobody else changed the section in between, so the new stamp is
-	// recorded and the server skips its own change on the next check. A
-	// conflict means someone did, and the plain write leaves the old stamp
-	// in place so the next check loads the section.
+	// WriteIf with the loaded version succeeds only when nobody else changed
+	// the section, so the new stamp is the server's own and skipped on the
+	// next check. On a conflict the plain write leaves the loaded stamp
+	// behind and the next check loads the section.
 	own := make(map[string]storage.Stamp)
 	for section := range touched {
 		key := s.revisionKey(section)
-		stamp, err := s.backend.WriteIf(key, revisionNonce(), 0o600, revisions[section].Version)
+		stamp, err := s.backend.WriteIf(key, revisionMark, 0o600, revisions[section].Version)
 		if errors.Is(err, storage.ErrConflict) {
-			_, err = s.backend.Write(key, revisionNonce(), 0o600)
+			_, err = s.backend.Write(key, revisionMark, 0o600)
 		} else if err == nil {
 			own[section] = stamp
 		}
@@ -486,11 +455,8 @@ func (s *WalletStore) saveEntities(w *Wallet) error {
 			return fmt.Errorf("writing wallet revision: %w", err)
 		}
 	}
-	s.saves++
-	if s.saves%logTrimEvery == 0 {
-		if err := s.trimLogRows(); err != nil {
-			return err
-		}
+	if err := s.trimLogPeriodically(); err != nil {
+		return err
 	}
 
 	// A reload during the save replaced the snapshot and the state together.
@@ -510,10 +476,9 @@ func (s *WalletStore) saveEntities(w *Wallet) error {
 	return nil
 }
 
-// AppendLogEntry stores one activity log entry the wallet appended, without
-// comparing the rest of the wallet. The log is the hot path under load, so a
-// presentation costs one row and one revision write.
-func (s *WalletStore) AppendLogEntry(w *Wallet, entry LogEntry) error {
+// appendLogEntry stores one activity log entry the wallet appended, without
+// comparing the rest of the wallet.
+func (s *WalletStore) appendLogEntry(w *Wallet, entry LogEntry) error {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
 	if s.loadLogCleanMarker().After(entry.Time) {
@@ -531,19 +496,16 @@ func (s *WalletStore) AppendLogEntry(w *Wallet, entry LogEntry) error {
 	w.mu.RLock()
 	expected := w.revisions[logSection].Version
 	w.mu.RUnlock()
-	revision, err := s.backend.WriteIf(s.revisionKey(logSection), revisionNonce(), 0o600, expected)
+	revision, err := s.backend.WriteIf(s.revisionKey(logSection), revisionMark, 0o600, expected)
 	own := err == nil
 	if errors.Is(err, storage.ErrConflict) {
-		_, err = s.backend.Write(s.revisionKey(logSection), revisionNonce(), 0o600)
+		_, err = s.backend.Write(s.revisionKey(logSection), revisionMark, 0o600)
 	}
 	if err != nil {
 		return fmt.Errorf("writing wallet revision: %w", err)
 	}
-	s.saves++
-	if s.saves%logTrimEvery == 0 {
-		if err := s.trimLogRows(); err != nil {
-			return err
-		}
+	if err := s.trimLogPeriodically(); err != nil {
+		return err
 	}
 	w.mu.Lock()
 	w.persisted = w.persisted.with(key, storage.Blob{Data: data, Stamp: stamp})
@@ -557,14 +519,17 @@ func (s *WalletStore) AppendLogEntry(w *Wallet, entry LogEntry) error {
 	return nil
 }
 
-func revisionNonce() []byte {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	return []byte(hex.EncodeToString(b[:]))
+// trimLogPeriodically trims the stored log every logTrimEvery saves.
+func (s *WalletStore) trimLogPeriodically() error {
+	s.saves++
+	if s.saves%logTrimEvery != 0 {
+		return nil
+	}
+	return s.trimLogRows()
 }
 
-// trimLogRows deletes the oldest stored log rows beyond maxLogEntries. A
-// server that only appends never loads the log, so the store bounds it.
+// trimLogRows deletes the oldest stored log rows beyond maxLogEntries and
+// marks the log changed.
 func (s *WalletStore) trimLogRows() error {
 	names, err := s.backend.List(s.stateKey(logSection))
 	if err != nil {
@@ -578,14 +543,14 @@ func (s *WalletStore) trimLogRows() error {
 			return fmt.Errorf("trimming the wallet log: %w", err)
 		}
 	}
-	_, err = s.backend.Write(s.revisionKey(logSection), revisionNonce(), 0o600)
+	_, err = s.backend.Write(s.revisionKey(logSection), revisionMark, 0o600)
 	return err
 }
 
-// currentEntities marshals the wallet into entities. A credential equal to
-// its stored form keeps its stored bytes, so a save marshals only what
-// changed. It returns the entities, the credentials as they are now stored
-// by id and the positions of the ordered rows by key. Caller holds w.mu.
+// currentEntities marshals the wallet into entities, reusing the stored
+// bytes of every credential equal to its stored form. It returns the
+// entities, the credentials as now stored by row key and the positions of
+// the ordered rows by key. Caller holds w.mu.
 func (s *WalletStore) currentEntities(w *Wallet, snapshot stateSnapshot) (map[string][]byte, map[string]StoredCredential, map[string]int, error) {
 	current := make(map[string][]byte)
 	put := func(key string, v any) error {
@@ -607,12 +572,12 @@ func (s *WalletStore) currentEntities(w *Wallet, snapshot stateSnapshot) (map[st
 	seqs := make(map[string]int)
 	creds := s.withStoredAssets(append([]StoredCredential(nil), w.Credentials...))
 	saved := make(map[string]StoredCredential, len(creds))
-	credentialSeqs := s.orderedSeqs(credentialsSection, snapshot, w.entitySeqs, len(creds), func(i int) string { return creds[i].ID })
+	credentialSeqs := s.orderedSeqs(credentialsSection, w.entitySeqs, len(creds), func(i int) string { return creds[i].ID })
 	for i, cred := range creds {
-		key := s.stateKey(credentialsSection, entityName(cred.ID))
+		key := s.credentialKey(cred.ID)
 		seqs[key] = credentialSeqs[i]
-		saved[cred.ID] = cred
-		if before, ok := w.savedCredentials[cred.ID]; ok && credentialUnchanged(before, cred) {
+		saved[key] = cred
+		if before, ok := w.savedCredentials[key]; ok && reflect.DeepEqual(before, cred) {
 			if blob, stored := snapshot[key]; stored && w.entitySeqs[key] == credentialSeqs[i] {
 				current[key] = blob.Data
 				continue
@@ -623,7 +588,7 @@ func (s *WalletStore) currentEntities(w *Wallet, snapshot stateSnapshot) (map[st
 		}
 	}
 	deferred := w.DeferredIssuances
-	deferredSeqs := s.orderedSeqs(deferredSection, snapshot, w.entitySeqs, len(deferred), func(i int) string { return deferred[i].ID })
+	deferredSeqs := s.orderedSeqs(deferredSection, w.entitySeqs, len(deferred), func(i int) string { return deferred[i].ID })
 	for i, d := range deferred {
 		key := s.stateKey(deferredSection, entityName(d.ID))
 		seqs[key] = deferredSeqs[i]
@@ -653,13 +618,13 @@ func (s *WalletStore) currentEntities(w *Wallet, snapshot stateSnapshot) (map[st
 			return nil, nil, nil, err
 		}
 	}
-	if err := put(s.stateKey(settingsSection), walletSettings{BaseURL: w.BaseURL, IssuerURL: w.IssuerURL}); err != nil {
+	if err := put(s.settingsKey(), walletSettings{BaseURL: w.BaseURL, IssuerURL: w.IssuerURL}); err != nil {
 		return nil, nil, nil, err
 	}
 	// The counter is created and moved by the allocator alone, so a save
 	// with a counter behind the store's never sets it back. A reset to zero
 	// of a stored counter is written.
-	counterKey := s.stateKey(statusCounterEntity)
+	counterKey := s.counterKey()
 	if stored, ok := snapshot[counterKey]; ok {
 		current[counterKey] = stored.Data
 		if w.StatusListCounter == 0 {
@@ -669,46 +634,20 @@ func (s *WalletStore) currentEntities(w *Wallet, snapshot stateSnapshot) (map[st
 	return current, saved, seqs, nil
 }
 
-// credentialUnchanged reports whether a credential is the one stored. The
-// claims map is compared by identity first: a credential keeps its map for
-// its whole life unless it was parsed again.
-func credentialUnchanged(stored, cred StoredCredential) bool {
-	if reflect.ValueOf(stored.Claims).Pointer() == reflect.ValueOf(cred.Claims).Pointer() {
-		stored.Claims, cred.Claims = nil, nil
-	}
-	stored.issuedAt, cred.issuedAt = time.Time{}, time.Time{}
-	return reflect.DeepEqual(stored, cred)
-}
-
 // orderedSeqs returns the position of each item of an ordered section. An
 // item keeps the position it was stored under, a new one gets the next, so
-// a load returns the items in the order they were added. known holds the
-// positions by key, and a row missing from it is read from the snapshot.
-func (s *WalletStore) orderedSeqs(section string, snapshot stateSnapshot, known map[string]int, n int, idAt func(int) string) []int {
-	prefix := s.sectionPrefix(section)
-	existing := make(map[string]int)
+// a load returns the items in the order they were added.
+func (s *WalletStore) orderedSeqs(section string, known map[string]int, n int, idAt func(int) string) []int {
+	prefix := s.stateKey(section) + "/"
 	next := 0
-	for key, blob := range snapshot {
-		name, ok := strings.CutPrefix(key, prefix)
-		if !ok {
-			continue
-		}
-		seq, ok := known[key]
-		if !ok {
-			var entity orderedEntity
-			if json.Unmarshal(blob.Data, &entity) != nil {
-				continue
-			}
-			seq = entity.Seq
-		}
-		existing[name] = seq
-		if seq >= next {
+	for key, seq := range known {
+		if strings.HasPrefix(key, prefix) && seq >= next {
 			next = seq + 1
 		}
 	}
 	seqs := make([]int, n)
 	for i := range seqs {
-		if seq, ok := existing[entityName(idAt(i))]; ok {
+		if seq, ok := known[s.stateKey(section, entityName(idAt(i)))]; ok {
 			seqs[i] = seq
 			continue
 		}
@@ -742,7 +681,7 @@ func shortHash(s string) string {
 // the same status list index. The status revision moves with it, so the
 // other servers pick up the counter their status list is sized by.
 func (s *WalletStore) allocateStatusIndex(w *Wallet) (int, error) {
-	key := s.stateKey(statusCounterEntity)
+	key := s.counterKey()
 	for attempt := 0; attempt < 100; attempt++ {
 		// The stamp is taken before the value. A value newer than the stamp
 		// fails the write below, and the loop reads again.
@@ -768,7 +707,7 @@ func (s *WalletStore) allocateStatusIndex(w *Wallet) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		if _, err := s.backend.Write(s.revisionKey(statusSection), revisionNonce(), 0o600); err != nil {
+		if _, err := s.backend.Write(s.revisionKey(statusSection), revisionMark, 0o600); err != nil {
 			return 0, fmt.Errorf("writing wallet revision: %w", err)
 		}
 		w.mu.Lock()

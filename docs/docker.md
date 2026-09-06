@@ -9,7 +9,7 @@ docker pull ghcr.io/dominikschlosser/eudi-dev:latest
 docker run -p 8085:8085 -p 8086:8086 ghcr.io/dominikschlosser/eudi-dev
 ```
 
-The default CMD starts the wallet server headless with pre-loaded PID credentials.
+The default CMD starts the wallet server headless with pre-loaded PID credentials. The container keeps its state in memory and derives its keys from a fixed seed, so it needs no volume and serves the same keys and CA on every start (see [Storage](#storage)). Stopping the container discards the credentials issued or imported meanwhile.
 
 Override the command to use any CLI feature:
 
@@ -24,32 +24,37 @@ The container also runs the demo profile of the public instance at [eudi-test.de
 
 ```bash
 docker run -d --name eudi-demo -p 8085:8085 -p 8086:8086 \
+  -v wallet-data:/home/app/.eudi-dev -e EUDI_DEV_STORAGE=file -e EUDI_DEV_SEED= \
   ghcr.io/dominikschlosser/eudi-dev:latest \
   wallet serve --demo --port 8085 --base-url http://localhost:8085
 ```
 
-`--demo` seeds the four-PID baseline, runs HAIP in debug mode at OpenID4VCI feature level 1.1, disables the process and filesystem endpoints, and resets the wallet hourly (`--demo-reset` changes the schedule). The wallet UI is at `http://localhost:8085`, the demo issuer at `/issuer/`, the demo verifier at `/verifier/` and the decoder at `/decoder/`. The HTTPS issuer endpoints answer on port 8086 with a self-signed certificate.
+The demo persists its state in files on the volume and generates its own keys, so its CA stays private and stable across restarts.
 
-Without a volume the state lives in memory (see [Storage](#storage)). Stopping the container discards every credential. The keys and the CA derive from the image's built-in seed and come back the same on the next start (see [Stateless container](#stateless-container)). The full deployment (TLS termination, rate limiting, usage statistics, persistence) is the compose example in [examples/public-demo](../examples/public-demo/), described in [public demo hosting](public-demo.md).
+`--demo` starts with the four-PID baseline, runs HAIP in debug mode at OpenID4VCI feature level 1.1, disables the process and filesystem endpoints, and resets the wallet hourly (`--demo-reset` changes the schedule). The wallet UI is at `http://localhost:8085`, the demo issuer at `/issuer/`, the demo verifier at `/verifier/` and the decoder at `/decoder/`. The HTTPS issuer endpoints answer on port 8086 with a self-signed certificate.
+
+The full deployment (TLS termination, rate limiting, usage statistics, persistence) is the compose example in [examples/public-demo](../examples/public-demo/), described in [public demo hosting](public-demo.md).
 
 ## Storage
 
-The image sets `EUDI_DEV_STORAGE=auto`. The wallet then keeps its state in memory unless a state directory is mounted or named (a volume at `/home/app/.eudi-dev`, `EUDI_DEV_HOME`, or `--wallet-dir`). A container without a volume needs no writable filesystem, so it runs with `--read-only` (the start prints a warning that the instance registry could not be written). A container with a volume keeps its state in files.
+The image sets `EUDI_DEV_STORAGE=memory` and `EUDI_DEV_SEED=eudi-dev`. The state lives in memory and the keys derive from that seed, so a container needs no volume, no database and no writable filesystem. It runs with `--read-only` (the start warns that it could not register the wallet instance). A volume mounted at `/home/app/.eudi-dev` is used once `EUDI_DEV_STORAGE=file` is set (see the table).
 
-Pass `-e EUDI_DEV_STORAGE=...` (or `--storage` on the command) to choose explicitly:
+Pass `-e EUDI_DEV_STORAGE=...` (or `--storage` on the command) to keep the state elsewhere:
 
 | Value | State lives in |
 |-------|----------------|
-| `file` | The wallet directory, as on the CLI |
-| `memory` | The process. Gone when the container stops |
-| `auto` | Files when a state directory is mounted or named, memory otherwise (the image default) |
+| `memory` | The process. Gone when the container stops (the image default) |
+| `file` | The wallet directory, on a volume mounted at `/home/app/.eudi-dev`. Set `EUDI_DEV_SEED=` as well, so a private CA persists |
+| `auto` | Files when a state directory is mounted or named, memory otherwise |
 | `postgres://user:pass@host:5432/db` | One table (`eudi_dev_state`) in that database, created on first use |
+
+`eudi wallet use http://localhost:8085` drives the container from the CLI over its HTTP API on every backend (see [remote control](wallet/http-api.md#remote-control)).
 
 ### Stateless container
 
-A container without a volume regenerates its keys on every start. With `EUDI_DEV_SEED` set, the holder key, the issuer key, the CA key and the TLS key derive from that string, so every start (and every container started with the same seed) serves the same keys and the same CA. Verifiers keep trusting the trust list they fetched before a restart, and no volume, backup or database is needed. The certificates themselves are signed anew on each start with fresh serials, so their bytes differ while their keys and subjects stay the same.
+With `EUDI_DEV_SEED` set, the holder key, the issuer key, the CA key and the TLS key derive from that string, so every start (and every container started with the same seed) serves the same keys and the same CA. Verifiers keep trusting the trust list they fetched before a restart, and no volume, backup or database is needed. The CA and TLS certificates are signed anew on each start with random serials, so their bytes differ while their keys and subjects stay the same.
 
-The image sets `EUDI_DEV_SEED=auto`: the built-in seed applies when the state lives in memory and random keys are generated whenever a volume or a database holds the state. The built-in seed is public, so anyone can derive those keys, and `wallet serve` says so in its startup summary (see [SECURITY.md](../SECURITY.md)). Set your own value with `-e EUDI_DEV_SEED=<seed>` (or `--seed`) for a test bench, or an empty value for random keys.
+The image's seed `eudi-dev` is public, so anyone can derive those keys (see [SECURITY.md](../SECURITY.md)). The startup summary shows `Keys: derived from the built-in seed`, and `wallet serve` warns when that seed meets `--demo` or a persisting backend (`file` or Postgres). Set your own value with `-e EUDI_DEV_SEED=<seed>` (or `--seed`) for a test bench, or an empty value for random keys. `auto` seeds the memory backend only and leaves every other backend with random keys.
 
 ```bash
 docker run --read-only -p 8085:8085 -p 8086:8086 -e EUDI_DEV_SEED=my-bench ghcr.io/dominikschlosser/eudi-dev
@@ -176,13 +181,13 @@ docker run -p 8085:8085 -v ./my-templates:/templates ghcr.io/dominikschlosser/eu
   wallet serve --auto-accept --pid --port 8085 --templates-dir /templates
 ```
 
-Or generate customized PIDs into a mounted data directory first. Mount the parent of `wallet/`, so the shared CA persists alongside the credentials:
+Or generate customized PIDs into a mounted data directory first. Mount the parent of `wallet/`, so the shared CA persists alongside the credentials. Select the file backend and an empty seed, so the persisted CA is a private one:
 
 ```bash
-docker run --rm -v wallet-data:/home/app/.eudi-dev ghcr.io/dominikschlosser/eudi-dev \
+docker run --rm -v wallet-data:/home/app/.eudi-dev -e EUDI_DEV_STORAGE=file -e EUDI_DEV_SEED= ghcr.io/dominikschlosser/eudi-dev \
   issue sdjwt --wallet --template german-pid-sdjwt --claims '{"given_name":"MAX","family_name":"POWER"}'
 
-docker run -p 8085:8085 -v wallet-data:/home/app/.eudi-dev ghcr.io/dominikschlosser/eudi-dev \
+docker run -p 8085:8085 -v wallet-data:/home/app/.eudi-dev -e EUDI_DEV_STORAGE=file -e EUDI_DEV_SEED= ghcr.io/dominikschlosser/eudi-dev \
   wallet serve --auto-accept --port 8085
 ```
 
@@ -236,7 +241,7 @@ For verifier tests that need to trust that HTTPS endpoint, export the persisted 
 eudi wallet tls-cert --docker --out wallet-tls-cert.pem
 ```
 
-To trust all spawned wallets from one root instead of pinning one leaf certificate, export the shared wallet CA:
+To trust every spawned wallet from one root, export the shared wallet CA:
 
 ```bash
 eudi wallet ca-cert --out wallet-ca-cert.pem

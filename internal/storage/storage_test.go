@@ -57,8 +57,8 @@ func TestStore_ReadWriteDeleteRoundTrip(t *testing.T) {
 			key := scope(t) + "/wallet/wallet.json"
 			defer store.Delete(key)
 
-			if _, err := store.Read(key); !errors.Is(err, fs.ErrNotExist) || !os.IsNotExist(err) {
-				t.Fatalf("missing key: got %v, want ErrNotExist for both errors.Is and os.IsNotExist", err)
+			if _, err := store.Read(key); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("missing key: got %v, want fs.ErrNotExist", err)
 			}
 			if _, ok := store.Stat(key); ok {
 				t.Fatal("Stat reports a missing key")
@@ -258,6 +258,73 @@ func TestStore_WriteIfSerialisesConcurrentIncrements(t *testing.T) {
 	}
 }
 
+// A reader that sees a revision written after a row also sees that row. The
+// wallet's per-request reload relies on it: it checks the revision first and
+// reads the state after.
+func TestStore_ARowWrittenBeforeARevisionIsVisibleWithIt(t *testing.T) {
+	for kind, store := range backends(t) {
+		t.Run(kind, func(t *testing.T) {
+			root := scope(t)
+			revision := root + "/revision"
+			defer store.Delete(revision)
+			defer func() {
+				rows, _ := store.ReadAll(root + "/rows")
+				for key := range rows {
+					_ = store.Delete(key)
+				}
+			}()
+			var wg sync.WaitGroup
+			done := make(chan struct{})
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer close(done)
+				for n := 0; n < 300; n++ {
+					key := root + "/rows/" + strconv.Itoa(n)
+					if _, err := store.Write(key, []byte("x"), 0o600); err != nil {
+						t.Error(err)
+						return
+					}
+					if _, err := store.Write(revision, []byte(strconv.Itoa(n)), 0o600); err != nil {
+						t.Error(err)
+						return
+					}
+				}
+			}()
+			for i := 0; i < 4; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for {
+						select {
+						case <-done:
+							return
+						default:
+						}
+						data, err := store.Read(revision)
+						if err != nil {
+							continue
+						}
+						n, _ := strconv.Atoi(string(data))
+						rows, err := store.ReadAll(root + "/rows")
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						for k := 0; k <= n; k++ {
+							if _, ok := rows[root+"/rows/"+strconv.Itoa(k)]; !ok {
+								t.Errorf("revision of row %d seen, row %d not", n, k)
+								return
+							}
+						}
+					}
+				}()
+			}
+			wg.Wait()
+		})
+	}
+}
+
 func TestStore_RejectsEscapingKeys(t *testing.T) {
 	for kind, store := range backends(t) {
 		t.Run(kind, func(t *testing.T) {
@@ -344,6 +411,28 @@ func TestFile_ListHidesInFlightWrites(t *testing.T) {
 	names, err := store.List("wallet/assets")
 	if err != nil || !reflect.DeepEqual(names, []string{"a.png"}) {
 		t.Fatalf("List = %v, %v", names, err)
+	}
+}
+
+// The Postgres backend keeps the index its prefix listings run on.
+func TestPostgres_PrefixIndexExists(t *testing.T) {
+	pg, ok := backends(t)[KindPostgres].(*postgresStore)
+	if !ok {
+		t.Skip("runs when the suite runs on the postgres backend")
+	}
+	if _, err := pg.db.Exec(`DROP INDEX IF EXISTS ` + postgresTable + `_prefix`); err != nil {
+		t.Fatal(err)
+	}
+	pg.prepared = false
+	if _, err := pg.Write(scope(t)+"/row", []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := pg.db.QueryRow(`SELECT count(*) FROM pg_indexes WHERE indexname = $1`, postgresTable+"_prefix").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("prefix indexes = %d, want 1", n)
 	}
 }
 

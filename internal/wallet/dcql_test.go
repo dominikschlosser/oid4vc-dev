@@ -1311,6 +1311,31 @@ func TestEvaluateDCQL_NewestWinsEvenWhenStoredFirst(t *testing.T) {
 	}
 }
 
+// Up to dcqlDetailLimit held credentials the evaluation logs a line per
+// credential. Above it a presentation logs one summary line per query.
+func TestEvaluateDCQL_SummarisesAboveTheDetailLimit(t *testing.T) {
+	w := generateTestWallet(t)
+	for i := 0; i < dcqlDetailLimit; i++ {
+		addSDJWTPID(t, w, fmt.Sprintf("pid-%d", i), int64(1000+i))
+	}
+	logs := captureTestLogs(t)
+	w.EvaluateDCQL(pidQuery())
+	if !strings.Contains(logs.String(), "matched, selected claims") {
+		t.Fatalf("at the limit no line per credential was logged:\n%s", logs)
+	}
+
+	addSDJWTPID(t, w, "pid-one-more", 5000)
+	logs.Reset()
+	w.EvaluateDCQL(pidQuery())
+	out := logs.String()
+	if strings.Contains(out, "matched, selected claims") || strings.Contains(out, "not presented: the query asks for one credential and a better candidate") {
+		t.Fatalf("above the limit a line per credential was logged:\n%s", out)
+	}
+	if !strings.Contains(out, fmt.Sprintf("%d credentials matched", dcqlDetailLimit+1)) || !strings.Contains(out, fmt.Sprintf("%d other candidates not presented", dcqlDetailLimit)) {
+		t.Fatalf("above the limit the summary is missing:\n%s", out)
+	}
+}
+
 // Reducing to one is per query id, not overall: a verifier asking for two
 // different credentials still gets both.
 func TestEvaluateDCQL_DistinctQueriesEachKeepAMatch(t *testing.T) {

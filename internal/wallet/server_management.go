@@ -408,9 +408,7 @@ func writeCertificateExport(w http.ResponseWriter, r *http.Request, certPEM []by
 }
 
 func (s *Server) currentStore() *WalletStore {
-	s.storeSyncMu.Lock()
-	defer s.storeSyncMu.Unlock()
-	return s.store
+	return s.store.Load()
 }
 
 // parseTimeOrDuration parses a value as an RFC3339 timestamp or a relative

@@ -161,7 +161,7 @@ func run(opts options) error {
 	}
 	start := time.Now()
 
-	for i := 0; i < opts.issuers; i++ {
+	for i := range opts.issuers {
 		wg.Add(1)
 		go func(worker int) {
 			defer wg.Done()
@@ -179,7 +179,7 @@ func run(opts options) error {
 			}
 		}(i)
 	}
-	for i := 0; i < opts.presenters; i++ {
+	for range opts.presenters {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -202,7 +202,7 @@ func run(opts options) error {
 	// in that listing, whichever server answers it.
 	stopReaders := make(chan struct{})
 	var readersWG sync.WaitGroup
-	for i := 0; i < opts.readers; i++ {
+	for range opts.readers {
 		readersWG.Add(1)
 		go func() {
 			defer readersWG.Done()

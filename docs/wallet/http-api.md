@@ -381,7 +381,7 @@ curl -X POST http://localhost:8085/api/presentations \
 
 ## Remote control
 
-In remote mode the CLI manages a running wallet server through its REST API instead of the local store. This works for `wallet list`, `show`, `import`, `remove`, `generate-pid`, `refresh`, `deferred`, `logs` (except `--follow`, which is local-only), `accept`, `trust-list`, `ca-cert`, `tls-cert`, `info`, for `issue ... --wallet`, and for all `templates` commands. Commands that need the local machine (`serve`, `scan`, `register`) stay local.
+In remote mode the CLI manages a running wallet server through its REST API, with the local store untouched. This works for `wallet list`, `show`, `import`, `remove`, `generate-pid`, `refresh`, `deferred`, `logs` (except `--follow`, which is local-only), `accept`, `trust-list`, `ca-cert`, `tls-cert`, `info`, for `issue ... --wallet`, and for all `templates` commands. Commands that need the local machine (`serve`, `scan`, `register`) stay local.
 
 ```bash
 # Switch management to a running instance (persisted until switched back)

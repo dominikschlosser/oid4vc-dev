@@ -27,6 +27,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dominikschlosser/eudi-dev/internal/remote"
+	"github.com/dominikschlosser/eudi-dev/internal/storage"
 )
 
 // remoteFlag is the one-off remote override (--remote <url>, or --remote
@@ -492,8 +493,11 @@ func warnServingConfigDivergence(cfg map[string]any) {
 	if instanceDir == "" {
 		return
 	}
+	if backend, _ := cfg["storage"].(string); backend != "" && backend != storage.KindFile {
+		return
+	}
 	store, err := openStore()
-	if err != nil || !remote.SamePath(instanceDir, store.Dir) {
+	if err != nil || !remote.SamePath(instanceDir, store.Dir) || store.Backend().Kind() != storage.KindFile || !store.Exists() {
 		return
 	}
 	w, err := store.LoadOrCreate()

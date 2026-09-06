@@ -89,6 +89,11 @@ jobs:
       - name: Test with the race detector
         run: go test -race ./...
 
+      # The benchmarks run once, so a broken setup fails in CI before anyone measures.
+      - name: Run the benchmarks once
+        if: matrix.storage.name == 'file'
+        run: go test ./internal/wallet -run '^$' -bench . -benchtime 1x
+
       - name: Coverage summary
         if: matrix.storage.name == 'file'
         run: |

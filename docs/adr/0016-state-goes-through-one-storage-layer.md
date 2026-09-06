@@ -4,7 +4,7 @@ Everything the tool keeps between runs (the wallet document, the holder and issu
 
 Three backends implement the store. `file` is the default and writes the wallet directory tree, so an existing wallet directory is a file store and the `--wallet-dir` contract holds. `memory` keeps the blobs in one store per process. Every opener in the process shares it. `postgres` keeps one row per key in one table, so several wallet servers pointed at the same database serve one wallet state.
 
-The backend is chosen by `--storage` or `EUDI_DEV_STORAGE`, and every opener that takes no explicit spec follows the variable. That includes the test suites, so one variable moves a whole test run onto a backend. The container image sets `auto`: files when a state directory was named or holds state (a mounted volume, empty or not), memory otherwise. A container that mounts a volume keeps its state in files. One that mounts nothing holds its state in memory and runs on a read-only filesystem. The instance registry a memory-backed server writes does not count as state, so the next start of that container picks memory again.
+The backend is chosen by `--storage` or `EUDI_DEV_STORAGE`, and every opener that takes no explicit spec follows the variable. That includes the test suites, so one variable moves a whole test run onto a backend. The container image sets `memory`. A container needs no volume and runs on a read-only filesystem. A deployment that persists sets `file` with a volume, or a database URL. `auto` picks files when a state directory was named or holds state (a mounted volume, empty or not) and memory otherwise. The instance registry a memory-backed server writes does not count as state, so `auto` picks memory again on the next start.
 
 ## What stays outside the layer
 
@@ -23,4 +23,3 @@ The file and memory backends serve one wallet server. The CLI can work beside a 
 The keys, the CA and every credential are stored in the clear on every backend (ADR-0003). A shared database holding the CA key is a trust anchor.
 
 Postgres is the only external backend. Another engine is another `Store` implementation behind the same keys.
-

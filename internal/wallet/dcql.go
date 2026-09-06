@@ -31,6 +31,11 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/validate"
 )
 
+// dcqlDetailLimit is the number of held credentials up to which the
+// evaluation logs a line per credential. Above it a presentation logs one
+// summary line per query.
+const dcqlDetailLimit = 20
+
 // EvaluateDCQL matches stored credentials against a DCQL query (OID4VP 1.0 Section 6).
 // It returns matched credentials grouped by query credential ID.
 func (w *Wallet) EvaluateDCQL(query map[string]any) []CredentialMatch {
@@ -43,18 +48,17 @@ func (w *Wallet) EvaluateDCQL(query map[string]any) []CredentialMatch {
 // credential set the options the wallet can satisfy. The returned matches
 // are the first candidate of each query the first option of each set needs,
 // so approving without edits presents them unchanged.
-// dcqlDetailLimit is the number of held credentials up to which the
-// evaluation logs a line per credential. Above it a presentation logs one
-// summary line per query, so the log grows with the query and not with the
-// wallet.
-const dcqlDetailLimit = 20
-
 func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatch, *ConsentCredentialOptions) {
 	credentials := w.GetCredentials()
 	credQueries, _ := query["credentials"].([]any)
 
 	log.Printf("[DCQL] Evaluating query: %d credential queries against %d stored credentials", len(credQueries), len(credentials))
 	detail := len(credentials) <= dcqlDetailLimit
+	detailf := func(format string, args ...any) {
+		if detail {
+			log.Printf(format, args...)
+		}
+	}
 
 	if findings := DCQLQueryFindings(query); len(findings) > 0 {
 		for _, finding := range findings {
@@ -86,16 +90,12 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 
 			if !matchesFormat(cred, queryFormat) {
 				skipped++
-				if detail {
-					log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: format mismatch (want %s, have %s)", queryID, typeLabel, cred.Format, queryFormat, cred.Format)
-				}
+				detailf("[DCQL]   query=%s: credential %s (%s) skipped: format mismatch (want %s, have %s)", queryID, typeLabel, cred.Format, queryFormat, cred.Format)
 				continue
 			}
 			if !matchesMeta(cred, cqMap, detail) {
 				skipped++
-				if detail {
-					log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: meta mismatch", queryID, typeLabel, cred.Format)
-				}
+				detailf("[DCQL]   query=%s: credential %s (%s) skipped: meta mismatch", queryID, typeLabel, cred.Format)
 				continue
 			}
 
@@ -106,18 +106,14 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 						queryID, typeLabel, cred.Format, selection.missingRequired, selection.selectedKeys)
 				} else {
 					skipped++
-					if detail {
-						log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: required claims not found: %v",
-							queryID, typeLabel, cred.Format, selection.missingRequired)
-					}
+					detailf("[DCQL]   query=%s: credential %s (%s) skipped: required claims not found: %v",
+						queryID, typeLabel, cred.Format, selection.missingRequired)
 					continue
 				}
 			}
 			if !selection.match {
 				skipped++
-				if detail {
-					log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: no requested claims matched", queryID, typeLabel, cred.Format)
-				}
+				detailf("[DCQL]   query=%s: credential %s (%s) skipped: no requested claims matched", queryID, typeLabel, cred.Format)
 				continue
 			}
 
@@ -126,9 +122,7 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 				if !checkTrustedAuthorities(cred, taList) {
 					if w.ValidationMode != ValidationModeDebug {
 						skipped++
-						if detail {
-							log.Printf("[DCQL]   query=%s: credential %s (%s) skipped: not trusted by any trusted_authority", queryID, typeLabel, cred.Format)
-						}
+						detailf("[DCQL]   query=%s: credential %s (%s) skipped: not trusted by any trusted_authority", queryID, typeLabel, cred.Format)
 						continue
 					}
 					// Debug mode offers the credential anyway, flagged for the
@@ -140,9 +134,7 @@ func (w *Wallet) EvaluateDCQLWithOptions(query map[string]any) ([]CredentialMatc
 			}
 
 			matched++
-			if detail {
-				log.Printf("[DCQL]   query=%s: credential %s (%s) matched, selected claims: %v", queryID, typeLabel, cred.Format, selection.selectedKeys)
-			}
+			detailf("[DCQL]   query=%s: credential %s (%s) matched, selected claims: %v", queryID, typeLabel, cred.Format, selection.selectedKeys)
 			matches = append(matches, CredentialMatch{
 				QueryID:            queryID,
 				CredentialID:       cred.ID,

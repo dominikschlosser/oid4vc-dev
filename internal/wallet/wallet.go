@@ -117,14 +117,14 @@ type Wallet struct {
 	Templates credtemplate.Location `json:"-"`
 	Log       []LogEntry
 	mu        sync.RWMutex
-	// persisted is what the store last loaded or saved, on a backend that
-	// keeps the wallet as entities, and revisions the section revisions it
-	// was loaded from. Nil on the file backend.
+	// persisted is the snapshot of what the store last loaded or saved, on a
+	// backend that keeps the wallet as entities, and revisions the loaded
+	// section revisions. Nil on the file backend.
 	persisted stateSnapshot
 	revisions map[string]storage.Stamp
-	// savedCredentials are the credentials as last stored, by id, and
-	// entitySeqs the positions of the ordered rows, by key. A save marshals
-	// a credential only when it differs from its stored form.
+	// savedCredentials are the credentials as last stored and entitySeqs the
+	// positions of the ordered rows, both by row key. A save marshals a
+	// credential only when it differs from its stored form.
 	savedCredentials map[string]StoredCredential
 	entitySeqs       map[string]int
 	// allocateStatusIndex hands out status list indices from the shared
@@ -710,7 +710,7 @@ func (w *Wallet) generateDefaultCredentials(claimOverrides map[string]any, vct s
 	statusListURL := w.StatusListURL()
 	var sdStatusIdx, mdocStatusIdx int
 	if statusListURL != "" {
-		if sdStatusIdx, err = w.nextStatusIndex(); err != nil {
+		if sdStatusIdx, err = w.NextStatusIndex(); err != nil {
 			return err
 		}
 		sdConfig.StatusListURI = statusListURL
@@ -746,7 +746,7 @@ func (w *Wallet) generateDefaultCredentials(claimOverrides map[string]any, vct s
 	}
 
 	if statusListURL != "" {
-		if mdocStatusIdx, err = w.nextStatusIndex(); err != nil {
+		if mdocStatusIdx, err = w.NextStatusIndex(); err != nil {
 			return err
 		}
 		mdocConfig.StatusListURI = statusListURL

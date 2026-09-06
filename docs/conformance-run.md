@@ -139,7 +139,8 @@ When updating [Current conformance results](./conformance-results.md), include t
 - `OIDF_SUITE_DIR`: use an existing conformance-suite checkout for runner/templates instead of downloading the latest release archive
 - `OIDF_SUITE_TAG`: expected conformance-suite tag when `OIDF_SUITE_DIR` or `OIDF_SUITE_URL` is used
 - `OIDF_WALLET_DIR`: reuse a specific wallet store
-- `EUDI_DEV_STORAGE`: the storage backend the wallet under test keeps its state on (`memory`, or a `postgres://` URL). The wrapper passes the environment through to `wallet serve`. Run the matrix once per backend before a release
+- `EUDI_DEV_HOME`: the home of the wallet the wrapper starts (default `<run dir>/home`, so the wallet stays out of the instance registry of your own home)
+- `EUDI_DEV_STORAGE`: the storage backend the wallet under test keeps its state on (`file`, the default, `memory`, or a `postgres://` URL). The wrapper passes the environment through to `wallet serve`. Run the matrix once per backend before a release
 - `OIDF_WALLET_URL`: an externally managed wallet to test (for example the strict conformance host). The wrapper then starts no wallet of its own, drives that one over its API, and fetches its CA from `/api/certificates/ca`
 - `OIDF_WALLET_BASE_URL`: public https base URL for the wallet (a tunnel terminating TLS in front of the wallet port). Required for tunnel-based hosted runs because the hosted suite fetches the wallet status list itself
 - `OIDF_WALLET_ISSUER_URL`: override the wallet HTTPS issuer URL if needed. Defaults to `OIDF_WALLET_BASE_URL` when that is set

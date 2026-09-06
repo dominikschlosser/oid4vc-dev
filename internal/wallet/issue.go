@@ -389,7 +389,7 @@ func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 	// counter. The fully automatic case (no status URI and no index) already
 	// drew a unique counter index.
 	if opts.BatchSize >= 2 && registerStatus && (opts.StatusListIdx != nil || opts.StatusListURI != nil) {
-		if statusIdx, err = w.nextStatusIndex(); err != nil {
+		if statusIdx, err = w.NextStatusIndex(); err != nil {
 			return nil, err
 		}
 	}
@@ -421,7 +421,7 @@ func (w *Wallet) IssueCredential(opts IssueOptions) (*IssueResult, error) {
 			}
 			copyIdx := statusIdx
 			if registerStatus {
-				if copyIdx, err = w.nextStatusIndex(); err != nil {
+				if copyIdx, err = w.NextStatusIndex(); err != nil {
 					return nil, err
 				}
 			}

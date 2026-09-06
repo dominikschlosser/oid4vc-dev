@@ -18,8 +18,10 @@ services:
     # docker compose build builds the image from the working tree.
     build:
       context: ../..
+    # The state persists in the database, so the wallet generates its own random keys.
     environment:
       EUDI_DEV_STORAGE: postgres://postgres:wallet@db:5432/wallet?sslmode=disable
+      EUDI_DEV_SEED: ""
     # The load generator's verifier callback runs on this machine.
     extra_hosts:
       - "host.docker.internal:host-gateway"

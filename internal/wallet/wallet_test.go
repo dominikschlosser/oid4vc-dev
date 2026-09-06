@@ -27,7 +27,7 @@ import (
 	"github.com/dominikschlosser/eudi-dev/internal/sdjwt"
 )
 
-func generateTestWallet(t *testing.T) *Wallet {
+func generateTestWallet(t testing.TB) *Wallet {
 	t.Helper()
 	holderKey, err := mock.GenerateKey()
 	if err != nil {
@@ -38,7 +38,8 @@ func generateTestWallet(t *testing.T) *Wallet {
 		t.Fatalf("generating issuer key: %v", err)
 	}
 	w := New(holderKey, issuerKey, false)
-	// Isolate tests from templates in the developer's real wallet directory.
+	// A store of its own keeps the developer's templates out of the tests and
+	// puts the templates on the backend the suite runs on.
 	w.Templates = NewWalletStore(t.TempDir()).Templates()
 	return w
 }

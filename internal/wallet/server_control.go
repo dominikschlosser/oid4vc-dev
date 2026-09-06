@@ -107,8 +107,14 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, log)
 }
 
-// handleClearLog removes all activity log entries.
+// handleClearLog removes all activity log entries. On an entity backend the
+// clean marker also drops the entries other servers appended.
 func (s *Server) handleClearLog(w http.ResponseWriter, r *http.Request) {
+	if store := s.store.Load(); store != nil && store.entityMode() {
+		if err := store.writeLogCleanMarker(time.Now()); err != nil {
+			s.log("  ERROR: clearing the stored log: %v", err)
+		}
+	}
 	s.wallet.ClearLog()
 	s.triggerSave()
 	w.WriteHeader(http.StatusNoContent)

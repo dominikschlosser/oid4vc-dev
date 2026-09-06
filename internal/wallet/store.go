@@ -57,10 +57,6 @@ type WalletStore struct {
 
 	// seed derives the keys this store generates. Empty generates at random.
 	seed mock.Seed
-	// seedSource says where the seed came from, for the startup summary: ""
-	// for none, "seed" for a caller's, "built-in seed" for the one "auto"
-	// applies on the memory backend.
-	seedSource string
 
 	// saveMu orders the writers of wallet.json. Save snapshots the wallet and
 	// then writes the blob, and without the mutex a save that snapshotted
@@ -162,23 +158,20 @@ func NewWalletStoreOn(dir string, backend storage.Store) *WalletStore {
 // built-in seed on the memory backend and random keys elsewhere.
 const SeedEnvVar = "EUDI_DEV_SEED"
 
-// defaultSeed is the seed "auto" uses. It is public, so it only serves a
-// wallet whose state is lost on exit.
+// defaultSeed is the image's seed, and the one "auto" applies on the memory
+// backend. It is public.
 const defaultSeed = "eudi-dev"
 
 // SetSeed derives the keys this store generates from seed (see SeedEnvVar).
 // An empty seed generates at random.
 func (s *WalletStore) SetSeed(seed string) {
-	s.seed, s.seedSource = mock.Seed(seed), "seed"
 	if seed == "auto" {
-		s.seed, s.seedSource = nil, ""
+		seed = ""
 		if s.backend.Kind() == storage.KindMemory {
-			s.seed, s.seedSource = mock.Seed(defaultSeed), "built-in seed"
+			seed = defaultSeed
 		}
 	}
-	if len(s.seed) == 0 {
-		s.seedSource = ""
-	}
+	s.seed = mock.Seed(seed)
 }
 
 // Seeded reports whether generated keys derive from a seed.
@@ -186,10 +179,21 @@ func (s *WalletStore) Seeded() bool {
 	return len(s.seed) > 0
 }
 
-// SeedSource is "" without a seed, "seed" for a caller's seed and "built-in
-// seed" for the public one "auto" applies on the memory backend.
+// BuiltInSeedSource is what SeedSource returns for the image's public seed.
+const BuiltInSeedSource = "built-in seed"
+
+// SeedSource says where the seed came from, for the startup summary: ""
+// without a seed, "seed" for a caller's and BuiltInSeedSource for the
+// image's.
 func (s *WalletStore) SeedSource() string {
-	return s.seedSource
+	switch string(s.seed) {
+	case "":
+		return ""
+	case defaultSeed:
+		return BuiltInSeedSource
+	default:
+		return "seed"
+	}
 }
 
 // walletKeyPrefix is the key prefix of a wallet in a backend without
@@ -227,7 +231,8 @@ func (s *WalletStore) Templates() credtemplate.Location {
 // Exists reports whether the wallet has been saved at least once.
 func (s *WalletStore) Exists() bool {
 	if s.entityMode() {
-		return s.hasEntities()
+		names, err := s.backend.List(s.stateKey(revisionSection))
+		return err == nil && len(names) > 0
 	}
 	_, ok := s.WalletStamp()
 	return ok
@@ -246,8 +251,7 @@ func (s *WalletStore) key(parts ...string) string {
 func (s *WalletStore) walletKey() string { return s.key("wallet.json") }
 
 // WalletStamp returns wallet.json's change stamp, or ok=false when the wallet
-// has not been saved. The entity backends compare revisions per section
-// instead (see ChangedSections).
+// has not been saved.
 func (s *WalletStore) WalletStamp() (storage.Stamp, bool) {
 	return s.backend.Stat(s.walletKey())
 }
@@ -349,7 +353,10 @@ func (s *WalletStore) storedCredentials() ([]StoredCredential, error) {
 	if err != nil {
 		return nil, err
 	}
-	return wj.Credentials, json.Unmarshal(data, &wj)
+	if err := json.Unmarshal(data, &wj); err != nil {
+		return nil, err
+	}
+	return wj.Credentials, nil
 }
 
 // assetExtension maps an image content type to a file extension.
@@ -426,7 +433,7 @@ func (s *WalletStore) LoadOrCreate() (*Wallet, error) {
 	}
 
 	if s.entityMode() {
-		if err := s.loadEntities(w); err != nil {
+		if err := s.loadSections(w, allSections); err != nil {
 			return nil, err
 		}
 		rehydrate(w)
@@ -594,26 +601,68 @@ func (s *WalletStore) LoadOrCreateKeys() (*ecdsa.PrivateKey, *ecdsa.PrivateKey, 
 	return holderKey, issuerKey, nil
 }
 
-// LoadOrCreateSharedCA loads the shared wallet CA or creates it.
+// LoadOrCreateSharedCA loads the shared wallet CA or creates it. Two servers
+// starting on one empty backend create the key with WriteIf, so one of them
+// wins and the other waits for the winner's certificate.
 func (s *WalletStore) LoadOrCreateSharedCA() (*ecdsa.PrivateKey, *x509.Certificate, error) {
-	keyData, keyErr := s.backend.Read(s.sharedCAKeyPEM())
-	certData, certErr := s.backend.Read(s.sharedCACertPEM())
-	if keyErr == nil && certErr == nil {
-		key, err := parsePEMKey(keyData, "wallet CA")
-		if err == nil {
-			cert, err := parsePEMCertificate(certData, "wallet CA")
-			if err == nil && cert.IsCA && cert.CheckSignatureFrom(cert) == nil {
-				return key, cert, nil
+	for attempt := 0; ; attempt++ {
+		keyData, keyErr := s.backend.Read(s.sharedCAKeyPEM())
+		certData, certErr := s.backend.Read(s.sharedCACertPEM())
+		if keyErr == nil && certErr == nil {
+			key, err := parsePEMKey(keyData, "wallet CA")
+			if err == nil {
+				cert, err := parsePEMCertificate(certData, "wallet CA")
+				if err == nil && cert.IsCA && cert.CheckSignatureFrom(cert) == nil {
+					return key, cert, nil
+				}
 			}
+			break
 		}
-	}
-	if keyErr != nil && !errors.Is(keyErr, fs.ErrNotExist) {
-		return nil, nil, fmt.Errorf("reading wallet CA key: %w", keyErr)
-	}
-	if certErr != nil && !errors.Is(certErr, fs.ErrNotExist) {
-		return nil, nil, fmt.Errorf("reading wallet CA certificate: %w", certErr)
+		if keyErr != nil && !errors.Is(keyErr, fs.ErrNotExist) {
+			return nil, nil, fmt.Errorf("reading wallet CA key: %w", keyErr)
+		}
+		if certErr != nil && !errors.Is(certErr, fs.ErrNotExist) {
+			return nil, nil, fmt.Errorf("reading wallet CA certificate: %w", certErr)
+		}
+		if attempt == 50 {
+			break
+		}
+		if keyErr == nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		caKey, caCert, err := s.generateCA()
+		if err != nil {
+			return nil, nil, err
+		}
+		_, err = s.backend.WriteIf(s.sharedCAKeyPEM(), keyPEM(caKey), 0o600, "")
+		if errors.Is(err, storage.ErrConflict) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("saving wallet CA key: %w", err)
+		}
+		if err := s.saveCertPEM(s.sharedCACertPEM(), caCert); err != nil {
+			return nil, nil, fmt.Errorf("saving wallet CA certificate: %w", err)
+		}
+		return caKey, caCert, nil
 	}
 
+	// What is stored is not a usable CA. It is replaced.
+	caKey, caCert, err := s.generateCA()
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.saveKeyPEM(s.sharedCAKeyPEM(), caKey); err != nil {
+		return nil, nil, fmt.Errorf("saving wallet CA key: %w", err)
+	}
+	if err := s.saveCertPEM(s.sharedCACertPEM(), caCert); err != nil {
+		return nil, nil, fmt.Errorf("saving wallet CA certificate: %w", err)
+	}
+	return caKey, caCert, nil
+}
+
+func (s *WalletStore) generateCA() (*ecdsa.PrivateKey, *x509.Certificate, error) {
 	caKey, err := s.seed.Key("ca")
 	if err != nil {
 		return nil, nil, fmt.Errorf("generating wallet CA key: %w", err)
@@ -621,12 +670,6 @@ func (s *WalletStore) LoadOrCreateSharedCA() (*ecdsa.PrivateKey, *x509.Certifica
 	caCert, err := mock.GenerateCACert(caKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generating wallet CA certificate: %w", err)
-	}
-	if err := s.saveKeyPEM(s.sharedCAKeyPEM(), caKey); err != nil {
-		return nil, nil, fmt.Errorf("saving wallet CA key: %w", err)
-	}
-	if err := s.saveCertPEM(s.sharedCACertPEM(), caCert); err != nil {
-		return nil, nil, fmt.Errorf("saving wallet CA certificate: %w", err)
 	}
 	return caKey, caCert, nil
 }
@@ -736,10 +779,35 @@ func (s *WalletStore) loadIssuerTLSCertificatePEM(serverName string) ([]byte, []
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := s.saveIssuerTLSPEM(certPEM, keyPEM); err != nil {
-		return nil, nil, err
+	if !errors.Is(keyErr, fs.ErrNotExist) {
+		// The stored pair does not fit serverName and is replaced.
+		if err := s.saveIssuerTLSPEM(certPEM, keyPEM); err != nil {
+			return nil, nil, err
+		}
+		return certPEM, keyPEM, nil
 	}
-
+	// Two servers creating the pair at once: WriteIf makes one of them win
+	// the key, and the other reads the winner's pair back.
+	_, err = s.backend.WriteIf(s.tlsKeyPEM(), keyPEM, 0o600, "")
+	if errors.Is(err, storage.ErrConflict) {
+		for attempt := 0; attempt < 50; attempt++ {
+			storedCert, certErr := s.backend.Read(s.tlsCertPEM())
+			storedKey, keyErr := s.backend.Read(s.tlsKeyPEM())
+			if certErr == nil && keyErr == nil {
+				if cert, err := tls.X509KeyPair(storedCert, storedKey); err == nil && issuerTLSCertificateMatches(cert, serverName, caCert) {
+					return storedCert, storedKey, nil
+				}
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		return nil, nil, errors.New("the wallet TLS key was created elsewhere without a matching certificate")
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("saving wallet TLS key: %w", err)
+	}
+	if _, err := s.backend.Write(s.tlsCertPEM(), certPEM, 0o644); err != nil {
+		return nil, nil, fmt.Errorf("saving wallet TLS certificate: %w", err)
+	}
 	return certPEM, keyPEM, nil
 }
 
@@ -798,8 +866,17 @@ func (s *WalletStore) loadOrGenerateKey(at, label string) (*ecdsa.PrivateKey, er
 	if err != nil {
 		return nil, fmt.Errorf("generating %s key: %w", label, err)
 	}
-
-	if err := s.saveKeyPEM(at, key); err != nil {
+	// Another server generating the same key at the same time wins, and
+	// its key is the one used.
+	_, err = s.backend.WriteIf(at, keyPEM(key), 0o600, "")
+	if errors.Is(err, storage.ErrConflict) {
+		data, err := s.backend.Read(at)
+		if err != nil {
+			return nil, fmt.Errorf("reading %s key: %w", label, err)
+		}
+		return parsePEMKey(data, label)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("saving %s key: %w", label, err)
 	}
 
@@ -845,18 +922,17 @@ func parsePEMCertificate(data []byte, label string) (*x509.Certificate, error) {
 
 // saveKeyPEM stores an EC private key as PEM.
 func (s *WalletStore) saveKeyPEM(at string, key *ecdsa.PrivateKey) error {
+	_, err := s.backend.Write(at, keyPEM(key), 0o600)
+	return err
+}
+
+// keyPEM encodes an EC private key as PEM.
+func keyPEM(key *ecdsa.PrivateKey) []byte {
 	der, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
-		return fmt.Errorf("marshaling key: %w", err)
+		panic(err)
 	}
-
-	block := &pem.Block{
-		Type:  "EC PRIVATE KEY",
-		Bytes: der,
-	}
-
-	_, err = s.backend.Write(at, pem.EncodeToMemory(block), 0o600)
-	return err
+	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
 }
 
 func (s *WalletStore) saveCertPEM(at string, cert *x509.Certificate) error {

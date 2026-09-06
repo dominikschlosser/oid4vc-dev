@@ -47,11 +47,10 @@ type Server struct {
 	issuerTLSCert    *tls.Certificate
 	issuerPort       int
 	parseOpts        oid4vc.ParseOptions
-	store            *WalletStore
-	storeSyncMu      sync.Mutex
-	// storeRef is store for the log sink, which runs inside mutations that
-	// hold storeSyncMu.
-	storeRef atomic.Pointer[WalletStore]
+	// store is read without storeSyncMu: the log sink runs inside mutations
+	// that hold it.
+	store       atomic.Pointer[WalletStore]
+	storeSyncMu sync.Mutex
 	// lastWalletStamp lets a per-request reload skip reparsing a wallet.json
 	// that has not changed since the last load. lastReloadAt bounds how long
 	// that skip may hide a change a coarse-resolution filesystem reports with
@@ -108,8 +107,8 @@ func NewServer(w *Wallet, port int, onSave func()) *Server {
 		defaultKeyAttestationLevel:     w.KeyAttestationLevelSetting(),
 	}
 	w.SetLogSink(func(entry LogEntry) {
-		if store := s.storeRef.Load(); store != nil && store.entityMode() {
-			if err := store.AppendLogEntry(w, entry); err != nil {
+		if store := s.store.Load(); store != nil && store.entityMode() {
+			if err := store.appendLogEntry(w, entry); err != nil {
 				s.log("  ERROR: saving log entry: %v", err)
 			}
 			w.NotifyStateChanged()
@@ -306,8 +305,7 @@ func (s *Server) SetLogger(fn func(format string, args ...any)) {
 func (s *Server) SetStore(store *WalletStore) {
 	s.storeSyncMu.Lock()
 	defer s.storeSyncMu.Unlock()
-	s.store = store
-	s.storeRef.Store(store)
+	s.store.Store(store)
 }
 
 func (s *Server) log(format string, args ...any) {
@@ -323,9 +321,23 @@ func (s *Server) triggerUIRequest(requestID string) {
 	s.onUIRequest(requestID)
 }
 
+// withFreshStore reloads the wallet from the store before the handler runs.
 func (s *Server) withFreshStore(handler http.HandlerFunc) http.HandlerFunc {
+	return s.reloading(false, handler)
+}
+
+// withFreshLog also loads the activity log, which an entity backend loads
+// on demand.
+func (s *Server) withFreshLog(handler http.HandlerFunc) http.HandlerFunc {
+	return s.reloading(true, handler)
+}
+
+func (s *Server) reloading(withLog bool, handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if err := s.reloadFromStore(); err != nil {
+		s.storeSyncMu.Lock()
+		err := s.reloadLocked(withLog)
+		s.storeSyncMu.Unlock()
+		if err != nil {
 			s.log("  ERROR: reloading wallet store: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reloading wallet store: " + err.Error()})
 			return
@@ -349,26 +361,30 @@ func (s *Server) reloadFromStore() error {
 // storeSyncMu. On an entity backend only the sections that changed are
 // loaded, and the activity log only when withLog asks for it.
 func (s *Server) reloadLocked(withLog bool) error {
-	if s.store == nil {
+	store := s.store.Load()
+	if store == nil {
 		return nil
 	}
-	if s.store.entityMode() {
-		if !s.store.Loaded(s.wallet) {
-			reloaded, err := s.store.LoadOrCreate()
+	if store.entityMode() {
+		s.wallet.mu.RLock()
+		loaded := s.wallet.persisted != nil
+		s.wallet.mu.RUnlock()
+		if !loaded {
+			reloaded, err := store.LoadOrCreate()
 			if err != nil {
 				return err
 			}
 			s.applyPersistedWalletState(reloaded)
 			return nil
 		}
-		changed, err := s.store.ChangedSections(s.wallet, withLog)
+		changed, err := store.changedSections(s.wallet, withLog)
 		if err != nil {
 			return err
 		}
 		if len(changed) == 0 {
 			return nil
 		}
-		return s.store.LoadSections(s.wallet, changed)
+		return store.loadSections(s.wallet, changed)
 	}
 
 	// The store is reloaded per request so several visitors of a shared demo
@@ -376,12 +392,12 @@ func (s *Server) reloadLocked(withLog bool) error {
 	// has not changed since the last load, and repeated at least every
 	// reloadMaxStale so a change a coarse-mtime filesystem hides (same mtime
 	// and size) still surfaces.
-	stamp, ok := s.store.WalletStamp()
+	stamp, ok := store.WalletStamp()
 	if ok && stamp == s.lastWalletStamp && time.Since(s.lastReloadAt) < reloadMaxStale {
 		return nil
 	}
 
-	reloaded, err := s.store.LoadOrCreate()
+	reloaded, err := store.LoadOrCreate()
 	if err != nil {
 		return err
 	}
@@ -415,12 +431,12 @@ func (s *Server) applyPersistedWalletState(reloaded *Wallet) {
 	s.wallet.StatusListCounter = reloaded.StatusListCounter
 	s.wallet.Log = append([]LogEntry(nil), reloaded.Log...)
 	// The snapshot moves with the state it describes. The deferred rows are
-	// left out of it, so a save neither deletes nor tracks what the in-memory
-	// deferred issuances kept above do not know.
-	if reloaded.persisted != nil && s.store != nil {
+	// left out, because the server keeps its own deferred issuances (kept
+	// above) and a save only writes and deletes rows for state it holds.
+	if store := s.store.Load(); reloaded.persisted != nil && store != nil {
 		s.wallet.persisted = make(stateSnapshot, len(reloaded.persisted))
 		for key, blob := range reloaded.persisted {
-			if s.store.sectionOf(key) != deferredSection {
+			if store.sectionOf(key) != deferredSection {
 				s.wallet.persisted[key] = blob
 			}
 		}
@@ -429,22 +445,6 @@ func (s *Server) applyPersistedWalletState(reloaded *Wallet) {
 		s.wallet.entitySeqs = maps.Clone(reloaded.entitySeqs)
 	}
 	s.wallet.allocateStatusIndex = reloaded.allocateStatusIndex
-}
-
-// withFreshLog is withFreshStore for the routes that show the activity log,
-// which an entity backend loads on demand.
-func (s *Server) withFreshLog(handler http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s.storeSyncMu.Lock()
-		err := s.reloadLocked(true)
-		s.storeSyncMu.Unlock()
-		if err != nil {
-			s.log("  ERROR: reloading wallet store: %v", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reloading wallet store: " + err.Error()})
-			return
-		}
-		handler(w, r)
-	}
 }
 
 // Shutdown gracefully shuts down the server.
