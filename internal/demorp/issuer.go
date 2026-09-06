@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -113,6 +114,9 @@ type offerState struct {
 	// authorizationPresentation or authorizationBrowser.
 	authorization string
 	accessToken   string
+	// configIDs are the credential configurations the offer names; nil
+	// means the ticket.
+	configIDs []string
 	// jkt is the DPoP key thumbprint the access token is bound to. Empty
 	// for a bearer token.
 	jkt string
@@ -222,7 +226,7 @@ func (d *DemoRP) handleIssuerMetadata(w http.ResponseWriter, r *http.Request) {
 				"logo":   map[string]any{"uri": issuer + "/logo.svg", "alt_text": "eudi-dev logo"},
 			},
 		},
-		"credential_configurations_supported": map[string]any{
+		"credential_configurations_supported": d.credentialConfigurations(map[string]any{
 			ticketConfigurationID: map[string]any{
 				"format": "dc+sd-jwt",
 				"vct":    TicketVCT,
@@ -256,14 +260,16 @@ func (d *DemoRP) handleIssuerMetadata(w http.ResponseWriter, r *http.Request) {
 					},
 				},
 			},
-		},
+		}),
 	})
 }
 
 // handleCreateOffer creates a credential offer. ?grant=authorization_code
 // makes one redeemed through the authorization code flow. Anything else makes a
 // pre-authorized code offer. ?status=true issues the ticket with a status list
-// reference so it can be revoked.
+// reference so it can be revoked. ?credential=<configuration id> (repeatable)
+// names the credential configurations the offer covers: the ticket by default,
+// or any template the issuer metadata lists.
 //
 // ?authorization decides what the authorization code flow asks of the user:
 // "presentation" requires a PID at the Authorization Challenge Endpoint
@@ -279,6 +285,12 @@ func (d *DemoRP) handleCreateOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	configIDs, err := d.offerConfigurationIDs(r.URL.Query()["credential"])
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
 	d.mu.Lock()
 	d.pruneLocked()
 	if len(d.offers) >= maxEntries {
@@ -288,6 +300,7 @@ func (d *DemoRP) handleCreateOffer(w http.ResponseWriter, r *http.Request) {
 	}
 	offer := &offerState{
 		id:            randToken(),
+		configIDs:     configIDs,
 		withStatus:    withStatus,
 		deferred:      r.URL.Query().Get("deferred") == "true",
 		batchSize:     parseBatchSize(r.URL.Query().Get("batch")),
@@ -334,7 +347,7 @@ func (d *DemoRP) handleOfferByReference(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"credential_issuer":            d.issuerID(),
-		"credential_configuration_ids": []string{ticketConfigurationID},
+		"credential_configuration_ids": offer.configurationIDs(),
 		"grants":                       grants,
 	})
 }
@@ -442,6 +455,7 @@ func (d *DemoRP) handleCredential(w http.ResponseWriter, r *http.Request) {
 	var granted ticketGrant
 	if known {
 		granted = ticketGrant{
+			configIDs:    offer.configurationIDs(),
 			subject:      offer.subject,
 			holderClaims: offer.holderClaims,
 			jkt:          offer.jkt,
@@ -475,10 +489,11 @@ func (d *DemoRP) handleCredential(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, oauthError("invalid_credential_request", err.Error()))
 		return
 	}
-	if status, errResp := d.checkRequestedCredential(req); errResp != nil {
+	if status, errResp := d.checkRequestedCredential(req, granted.configIDs); errResp != nil {
 		writeJSON(w, status, errResp)
 		return
 	}
+	granted.configID = req.CredentialConfigurationID
 	if len(req.Proofs.JWT) == 0 {
 		writeJSON(w, http.StatusBadRequest, oauthError("invalid_proof", "proofs.jwt is required"))
 		return
@@ -529,7 +544,7 @@ func (d *DemoRP) signBatch(holderKeys []*ecdsa.PublicKey, granted ticketGrant) (
 	}
 	credentials := make([]map[string]any, 0, len(holderKeys))
 	for _, key := range holderKeys {
-		credential, err := d.signTicket(key, granted)
+		credential, err := d.signGranted(key, granted)
 		if err != nil {
 			return nil, err
 		}
@@ -546,7 +561,10 @@ func (d *DemoRP) signBatch(holderKeys []*ecdsa.PublicKey, granted ticketGrant) (
 // This issuer returns no authorization_details and knows one configuration, so
 // the configuration id is the only way to ask it for anything. The error codes
 // are those of §8.3.1.2.
-func (d *DemoRP) checkRequestedCredential(req credentialRequest) (int, map[string]string) {
+func (d *DemoRP) checkRequestedCredential(req credentialRequest, offered []string) (int, map[string]string) {
+	if len(offered) == 0 {
+		offered = []string{ticketConfigurationID}
+	}
 	switch {
 	case req.CredentialIdentifier != "" && req.CredentialConfigurationID != "":
 		return http.StatusBadRequest, oauthError("invalid_credential_request",
@@ -557,9 +575,9 @@ func (d *DemoRP) checkRequestedCredential(req credentialRequest) (int, map[strin
 	case req.CredentialConfigurationID == "":
 		return http.StatusBadRequest, oauthError("invalid_credential_request",
 			"credential_configuration_id is required")
-	case req.CredentialConfigurationID != ticketConfigurationID:
+	case !slices.Contains(offered, req.CredentialConfigurationID):
 		return http.StatusBadRequest, oauthError("unknown_credential_configuration",
-			fmt.Sprintf("this issuer only offers the %s configuration", ticketConfigurationID))
+			fmt.Sprintf("this offer covers the %s configuration(s), not %s", strings.Join(offered, ", "), req.CredentialConfigurationID))
 	}
 	return 0, nil
 }
@@ -755,7 +773,11 @@ func (d *DemoRP) statusListURI() string {
 }
 
 type ticketGrant struct {
-	subject string
+	// configIDs are the configurations the offer covers and configID the one
+	// the credential request named (the ticket when empty).
+	configIDs []string
+	configID  string
+	subject   string
 	// holderClaims are the claims of a credential presented to authorize this
 	// issuance, empty for a flow that authorized an account instead.
 	holderClaims map[string]any
@@ -766,6 +788,24 @@ type ticketGrant struct {
 	deferred   bool
 	batchSize  int
 	clientAuth *clientAuthentication
+}
+
+// signGranted issues the configuration the grant names: a template when one
+// has that name, the ticket otherwise.
+func (d *DemoRP) signGranted(holderKey *ecdsa.PublicKey, granted ticketGrant) (string, error) {
+	if cfg, ok := d.templateConfiguration(granted.configID); ok {
+		return d.signTemplate(cfg, holderKey, granted)
+	}
+	return d.signTicket(holderKey, granted)
+}
+
+// configurationIDs are the configurations the offer names, the ticket when
+// it names none.
+func (o *offerState) configurationIDs() []string {
+	if len(o.configIDs) == 0 {
+		return []string{ticketConfigurationID}
+	}
+	return append([]string(nil), o.configIDs...)
 }
 
 // Sign with a leaf certificate for the ticket's trust profile. The wallet trust list

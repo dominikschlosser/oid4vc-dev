@@ -1,4 +1,4 @@
-async function createOffer(grant, status, authorization, deferred, batch) {
+async function createOffer(grant, status, authorization, deferred, batch, credential) {
   const errEl = document.getElementById("error");
   errEl.hidden = true;
   try {
@@ -7,6 +7,7 @@ async function createOffer(grant, status, authorization, deferred, batch) {
     if (status) params.set("status", status);
     if (deferred) params.set("deferred", "true");
     if (batch) params.set("batch", batch);
+    if (credential) params.set("credential", credential);
     if (grant && authorization) params.set("authorization", authorization);
     const query = params.toString() ? "?" + params.toString() : "";
     const resp = await fetch("api/offers" + query, { method: "POST" });
@@ -79,6 +80,7 @@ let status = "";
 let authorization = "browser";
 let deferred = "";
 let batch = "";
+let credential = "";
 
 function bindToggle(id, key, hintID, hints, onChange) {
   const group = document.getElementById(id);
@@ -118,7 +120,31 @@ bindToggle("batch-toggle", "batch", "batch-hint", BATCH_HINTS, (value) => {
 });
 
 document.getElementById("create-btn")
-  .addEventListener("click", () => createOffer(grant, status, authorization, deferred, batch));
+  .addEventListener("click", () => createOffer(grant, status, authorization, deferred, batch, credential));
+
+const credentialSelect = document.getElementById("credential-select");
+credentialSelect.addEventListener("change", () => {
+  credential = credentialSelect.value;
+  document.getElementById("result").style.display = "none";
+});
+
+// The configurations on offer are what the issuer metadata lists: the
+// ticket and one per template. The page names them the way a wallet would.
+fetch(".well-known/openid-credential-issuer")
+  .then((resp) => resp.json())
+  .then((metadata) => {
+    const configurations = metadata.credential_configurations_supported || {};
+    for (const id of Object.keys(configurations).sort()) {
+      if (id === "demo-ticket") continue;
+      const entry = configurations[id];
+      const display = ((entry.credential_metadata || {}).display || [])[0] || {};
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = (display.name || id) + " (" + id + ", " + entry.format + ")";
+      credentialSelect.appendChild(option);
+    }
+  })
+  .catch(() => {});
 
 fetch("../api/config")
   .then((resp) => resp.json())

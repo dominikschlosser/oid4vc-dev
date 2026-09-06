@@ -1,0 +1,256 @@
+// Copyright 2026 Dominik Schlosser
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package demorp
+
+import (
+	"crypto/ecdsa"
+	"fmt"
+	"slices"
+	"sort"
+	"time"
+
+	"github.com/dominikschlosser/eudi-dev/internal/credtemplate"
+	"github.com/dominikschlosser/eudi-dev/internal/mock"
+	"github.com/dominikschlosser/eudi-dev/internal/wallet"
+)
+
+// Beside its ticket, the demo issuer offers every known credential template
+// (the built-in ones and the user's) as a credential configuration named
+// after the template. An offer names the configurations it covers, and the
+// credential is issued from the template's claim set, signed under the trust
+// profile the type belongs to (PID types under the PID signer). A wallet
+// that must be configured with a PID provider can therefore name the demo
+// issuer, and a user of the issuer page picks the template to issue.
+
+// templateConfiguration is one credential configuration issued from a
+// template.
+type templateConfiguration struct {
+	id       string
+	format   string
+	vct      string
+	docType  string
+	template credtemplate.Template
+}
+
+// templateConfigurations lists the templates the demo issuer can issue, by
+// name. Templates without a usable format (SD-JWT or mdoc) are left out.
+func (d *DemoRP) templateConfigurations() []templateConfiguration {
+	templates, err := credtemplate.List(d.wallet.Templates)
+	if err != nil {
+		return nil
+	}
+	configs := make([]templateConfiguration, 0, len(templates))
+	for _, tpl := range templates {
+		if tpl.Name == "" || tpl.Name == ticketConfigurationID {
+			continue
+		}
+		format, err := credtemplate.NormalizeFormat(tpl.Format)
+		if err != nil {
+			continue
+		}
+		cfg := templateConfiguration{id: tpl.Name, template: tpl}
+		switch format {
+		case "sdjwt":
+			if tpl.VCT == "" {
+				continue
+			}
+			cfg.format, cfg.vct = "dc+sd-jwt", tpl.VCT
+		case "mdoc":
+			if tpl.DocType == "" {
+				continue
+			}
+			cfg.format, cfg.docType = "mso_mdoc", tpl.DocType
+		default:
+			continue
+		}
+		configs = append(configs, cfg)
+	}
+	sort.Slice(configs, func(i, j int) bool { return configs[i].id < configs[j].id })
+	return configs
+}
+
+func (d *DemoRP) templateConfiguration(id string) (templateConfiguration, bool) {
+	for _, cfg := range d.templateConfigurations() {
+		if cfg.id == id {
+			return cfg, true
+		}
+	}
+	return templateConfiguration{}, false
+}
+
+// offeredConfigurationIDs are the configurations a new offer may name: the
+// ticket and every template.
+func (d *DemoRP) offeredConfigurationIDs() []string {
+	ids := []string{ticketConfigurationID}
+	for _, cfg := range d.templateConfigurations() {
+		ids = append(ids, cfg.id)
+	}
+	return ids
+}
+
+// credentialConfigurations adds the template configurations to the metadata
+// entries (OpenID4VCI 1.0 §11.2.3), the ticket's among them.
+func (d *DemoRP) credentialConfigurations(base map[string]any) map[string]any {
+	for _, cfg := range d.templateConfigurations() {
+		entry := map[string]any{
+			"format": cfg.format,
+			"scope":  cfg.id,
+			"proof_types_supported": map[string]any{
+				"jwt": map[string]any{"proof_signing_alg_values_supported": []string{"ES256"}},
+			},
+			"credential_signing_alg_values_supported": []string{"ES256"},
+		}
+		switch cfg.format {
+		case "dc+sd-jwt":
+			entry["vct"] = cfg.vct
+			entry["cryptographic_binding_methods_supported"] = []string{"jwk"}
+		case "mso_mdoc":
+			entry["doctype"] = cfg.docType
+			entry["cryptographic_binding_methods_supported"] = []string{"cose_key"}
+		}
+		display := map[string]any{"name": cfg.id, "locale": "en-US"}
+		if tpl := cfg.template.Display; tpl != nil {
+			if tpl.Name != "" {
+				display["name"] = tpl.Name
+			}
+			if tpl.Description != "" {
+				display["description"] = tpl.Description
+			}
+			if tpl.BackgroundColor != "" {
+				display["background_color"] = tpl.BackgroundColor
+			}
+			if tpl.TextColor != "" {
+				display["text_color"] = tpl.TextColor
+			}
+		}
+		entry["credential_metadata"] = map[string]any{
+			"display": []map[string]any{display},
+			"claims":  templateClaimPaths(cfg),
+		}
+		base[cfg.id] = entry
+	}
+	return base
+}
+
+// templateClaimPaths lists the template's top-level claims as claim
+// descriptions, under the namespace for an mdoc.
+func templateClaimPaths(cfg templateConfiguration) []map[string]any {
+	names := make([]string, 0, len(cfg.template.Claims))
+	for name := range cfg.template.Claims {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	paths := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		path := []string{name}
+		if cfg.format == "mso_mdoc" {
+			namespace := cfg.template.Namespace
+			if namespace == "" {
+				namespace = cfg.docType
+			}
+			path = []string{namespace, name}
+		}
+		paths = append(paths, map[string]any{"path": path})
+	}
+	return paths
+}
+
+// signTemplate issues one credential of the configuration for the holder
+// key of a proof, from the template's claims (the offer's holder claims
+// override them), signed under the trust profile the type belongs to.
+func (d *DemoRP) signTemplate(cfg templateConfiguration, holderKey *ecdsa.PublicKey, granted ticketGrant) (string, error) {
+	tpl := cfg.template
+	expiresIn := 30 * 24 * time.Hour
+	if tpl.Exp != "" {
+		if parsed, err := time.ParseDuration(tpl.Exp); err == nil && parsed > 0 {
+			expiresIn = parsed
+		}
+	}
+	claims := credtemplate.MergeClaims(tpl.Claims, granted.holderClaims)
+	spec, err := wallet.NormalizeIssuedAttestationSpec(wallet.IssuedAttestationSpec{Format: cfg.format, VCT: cfg.vct, DocType: cfg.docType}, "auto")
+	if err != nil {
+		return "", fmt.Errorf("building attestation spec for %s: %w", cfg.id, err)
+	}
+	_ = d.wallet.RegisterIssuedAttestation(spec)
+	signingKey, chain, err := d.wallet.SigningMaterialForIssuedAttestation(spec)
+	if err != nil {
+		return "", fmt.Errorf("building signing certificate chain for %s: %w", cfg.id, err)
+	}
+	statusURI, statusIdx := "", 0
+	if granted.withStatus {
+		statusURI = d.statusListURI()
+		if statusURI == "" {
+			return "", fmt.Errorf("this wallet has no status list URL")
+		}
+		statusIdx, err = d.wallet.NextStatusIndex()
+		if err != nil {
+			return "", err
+		}
+		d.saveWallet()
+	}
+	switch cfg.format {
+	case "dc+sd-jwt":
+		issuedAt := time.Now().Truncate(time.Hour)
+		return mock.GenerateSDJWT(mock.SDJWTConfig{
+			Issuer:          d.issuerID(),
+			VCT:             cfg.vct,
+			ExpiresIn:       expiresIn,
+			IssuedAt:        &issuedAt,
+			Claims:          claims,
+			Key:             signingKey,
+			HolderKey:       holderKey,
+			CertChain:       chain,
+			AlwaysDisclosed: tpl.AlwaysDisclosed,
+			StatusListURI:   statusURI,
+			StatusListIdx:   statusIdx,
+		})
+	case "mso_mdoc":
+		namespace := tpl.Namespace
+		if namespace == "" {
+			namespace = cfg.docType
+		}
+		return mock.GenerateMDOC(mock.MDOCConfig{
+			DocType:       cfg.docType,
+			Namespace:     namespace,
+			Claims:        claims,
+			Key:           signingKey,
+			HolderKey:     holderKey,
+			ExpiresIn:     expiresIn,
+			CertChain:     chain,
+			StatusListURI: statusURI,
+			StatusListIdx: statusIdx,
+		})
+	}
+	return "", fmt.Errorf("configuration %s has an unknown format %s", cfg.id, cfg.format)
+}
+
+// offerConfigurationIDs validates the configurations an offer names. An
+// empty request means the ticket.
+func (d *DemoRP) offerConfigurationIDs(requested []string) ([]string, error) {
+	if len(requested) == 0 {
+		return []string{ticketConfigurationID}, nil
+	}
+	offered := d.offeredConfigurationIDs()
+	ids := make([]string, 0, len(requested))
+	for _, id := range requested {
+		if !slices.Contains(offered, id) {
+			return nil, fmt.Errorf("this issuer offers %v, not %q", offered, id)
+		}
+		if !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}

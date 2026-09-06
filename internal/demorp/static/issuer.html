@@ -65,8 +65,20 @@
     </div>
     <p>
       This issuer hands out a signed <strong>Demo Event Ticket</strong> (SD-JWT VC)
-      over OpenID4VCI. Create an offer and open it in the wallet on this host, or
-      copy the offer URI into any wallet that can reach this server.
+      over OpenID4VCI, and any credential template this wallet knows. Create an
+      offer and open it in the wallet on this host, or copy the offer URI into any
+      wallet that can reach this server.
+    </p>
+    <div class="grant-row" id="credential-row">
+      <label class="grant-label" for="credential-select">Credential</label>
+      <select id="credential-select" aria-label="Credential configuration to offer">
+        <option value="" selected>Demo Event Ticket</option>
+      </select>
+    </div>
+    <p class="grant-hint" id="credential-hint">
+      The demo ticket, or a credential issued from one of this wallet's templates
+      (the built-in EUDI and German PID among them), signed under the trust profile
+      its type belongs to.
     </p>
     <div class="grant-row">
       <span class="grant-label">Grant</span>
